@@ -108,22 +108,34 @@ fn split_ext(path: &str) -> (&str, &str) {
     path.split_at(path.len() - ext_len)
 }
 
-/// Moves a file, also across drives (where a rename can't), creating folders.
-pub fn move_file(from: &Path, to: &Path) -> io::Result<()> {
-    if let Some(dir) = to.parent() {
-        std::fs::create_dir_all(dir)?;
+/// Creates the target's folders; refuses a target that exists, so a book is
+/// never overwritten.
+fn prepare_target(to: &Path) -> io::Result<()> {
+    if to.exists() {
+        return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} already exists", to.display())));
     }
+    match to.parent() {
+        Some(dir) => std::fs::create_dir_all(dir),
+        None => Ok(()),
+    }
+}
+
+/// Moves a file, also across drives (where a rename can't). If the original
+/// can't be removed after copying, the copy is removed again, so the book
+/// never ends up in both places.
+pub fn move_file(from: &Path, to: &Path) -> io::Result<()> {
+    prepare_target(to)?;
     if std::fs::rename(from, to).is_ok() {
         return Ok(());
     }
     std::fs::copy(from, to)?;
-    std::fs::remove_file(from)
+    std::fs::remove_file(from).inspect_err(|_| {
+        let _ = std::fs::remove_file(to);
+    })
 }
 
 pub fn copy_file(from: &Path, to: &Path) -> io::Result<()> {
-    if let Some(dir) = to.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
+    prepare_target(to)?;
     std::fs::copy(from, to).map(|_| ())
 }
 
@@ -209,5 +221,17 @@ mod tests {
         remove_empty_dirs(root, root.join("old/deep"));
         assert!(!root.join("old").exists());
         assert!(root.exists());
+    }
+
+    #[test]
+    fn an_existing_target_is_never_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a.epub"), dir.path().join("b.epub"));
+        fs::write(&a, "a").unwrap();
+        fs::write(&b, "b").unwrap();
+        assert!(move_file(&a, &b).is_err());
+        assert!(copy_file(&a, &b).is_err());
+        assert_eq!(fs::read_to_string(&b).unwrap(), "b");
+        assert!(a.is_file());
     }
 }

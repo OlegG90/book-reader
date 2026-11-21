@@ -11,7 +11,7 @@ mod store;
 mod version;
 
 use cli::{Command, Launch};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -96,8 +96,10 @@ fn focus_showing(app: &AppHandle, path: &Path, except: Option<&str>) -> bool {
 /// window already shows that book; then that window comes forward instead.
 /// The library window stays the library: the book gets a window of its own.
 fn show_book(window: &Window, path: PathBuf) {
-    if window.state::<ReaderWindows>().get(window.label()).file.is_none() {
-        let _ = open_or_focus(window.app_handle(), Launch { file: Some(path), no_save: false });
+    let current = window.state::<ReaderWindows>().get(window.label());
+    if current.file.is_none() {
+        // A `--no-save` library window passes that on to the books it opens.
+        let _ = open_or_focus(window.app_handle(), Launch { file: Some(path), no_save: current.no_save });
         return;
     }
     if focus_showing(window.app_handle(), &path, Some(window.label())) {
@@ -114,9 +116,17 @@ struct BookInfo {
     fingerprint: String,
     position: Option<Position>,
     no_save: bool,
-    /// The book lies outside the library folder and may be offered for it
-    /// (unless the reader said never for this file).
-    offer_library: bool,
+    offer: Option<Offer>,
+}
+
+/// What the bar under a book offers.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum Offer {
+    /// The book lies outside the library: copy or move it in.
+    Add,
+    /// No library folder has been chosen yet (the app was first started on a book).
+    Setup,
 }
 
 #[tauri::command(async)]
@@ -126,11 +136,16 @@ fn current_book(window: Window, windows: State<ReaderWindows>, store: State<Stor
     };
     let file_name = paths::file_name(&path);
     let fingerprint = fingerprint::fingerprint(&path).map_err(|e| format!("{file_name}: {e}"))?;
-    let (position, offer_library) = store.read(|s| {
-        let outside = s.library.as_deref().is_some_and(|root| !paths::is_inside(root, &path));
-        (s.positions.get(&fingerprint).cloned(), outside && !no_save && !s.declined.contains(&fingerprint))
+    let (position, offer) = store.read(|s| {
+        let offer = match s.library.as_deref() {
+            _ if no_save => None,
+            None => Some(Offer::Setup),
+            Some(root) if !paths::is_inside(root, &path) && !s.declined.contains(&fingerprint) => Some(Offer::Add),
+            Some(_) => None,
+        };
+        (s.positions.get(&fingerprint).cloned(), offer)
     });
-    Ok(Some(BookInfo { file_name, fingerprint, position, no_save, offer_library }))
+    Ok(Some(BookInfo { file_name, fingerprint, position, no_save, offer }))
 }
 
 #[tauri::command(async)]
@@ -342,7 +357,7 @@ fn library_info(store: State<Store>) -> LibraryInfo {
 /// Sets the library folder: the suggested one, or one the reader picks.
 /// Returns the folder, or `None` when the picker was cancelled.
 #[tauri::command(async)]
-fn set_library(window: Window, store: State<Store>, pick: bool) -> Result<Option<String>, String> {
+fn set_library(window: Window, store: State<Store>, books: State<LibraryBooks>, pick: bool) -> Result<Option<String>, String> {
     let folder = if pick {
         match window.dialog().file().set_parent(&window).blocking_pick_folder() {
             Some(folder) => folder.into_path().map_err(|e| e.to_string())?,
@@ -354,6 +369,8 @@ fn set_library(window: Window, store: State<Store>, pick: bool) -> Result<Option
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     let folder = std::path::absolute(&folder).unwrap_or(folder);
     store.update(|s| s.library = Some(folder.clone())).map_err(|e| e.to_string())?;
+    // The last scan's keys belong to the old folder.
+    books.0.lock().unwrap().clear();
     let _ = window.emit("library-changed", ());
     Ok(Some(folder.display().to_string()))
 }
@@ -372,7 +389,7 @@ struct LibraryBook {
     format: &'static str,
     /// Share read, if a position is saved.
     fraction: Option<f64>,
-    /// When the file was last changed (ms), for "recently added".
+    /// When the book came into the library (ms), for "recently added".
     added: u64,
     has_cover: bool,
 }
@@ -392,12 +409,9 @@ fn scan_library(store: State<Store>, books: State<LibraryBooks>) -> Result<Vec<L
                 author_sort: e.authors.first().map(metadata::Author::sort_name).unwrap_or_default(),
                 series: e.series.clone(),
                 series_index: e.series_index.clone(),
-                format: match metadata::Format::of(Path::new(&e.path)) {
-                    Some(metadata::Format::Epub) => "EPUB",
-                    _ => "FB2",
-                },
+                format: metadata::Format::of(Path::new(&e.path)).map_or("", metadata::Format::label),
                 fraction: s.positions.get(&e.fingerprint).map(|p| p.fraction),
-                added: e.modified,
+                added: e.added,
                 has_cover: e.cover.is_some(),
             })
             .collect()
@@ -414,14 +428,18 @@ fn library_cover(store: State<Store>, books: State<LibraryBooks>, key: String) -
 
 /// Opens a library book in a window of its own.
 #[tauri::command(async)]
-fn open_library_book(app: AppHandle, store: State<Store>, books: State<LibraryBooks>, key: String) -> Result<(), String> {
+fn open_library_book(
+    window: Window,
+    windows: State<ReaderWindows>,
+    store: State<Store>,
+    books: State<LibraryBooks>,
+    key: String,
+) -> Result<(), String> {
     let path = books.path_of(&store, &key)?;
-    open_or_focus(&app, Launch { file: Some(path), no_save: false }).map_err(|e| e.to_string())
+    let no_save = windows.get(window.label()).no_save;
+    open_or_focus(window.app_handle(), Launch { file: Some(path), no_save }).map_err(|e| e.to_string())
 }
 
-/// Copies or moves the window's book into the library under the naming
-/// template; the window then shows the library copy. If the library already
-/// holds the same book, nothing is copied and the window switches to it.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Added {
@@ -431,9 +449,29 @@ struct Added {
     existed: bool,
 }
 
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+enum AddMode {
+    Move,
+    Copy,
+}
+
+/// Fails for a `--no-save` window, which keeps nothing.
+fn saving_window(windows: &ReaderWindows, window: &Window) -> Result<PathBuf, String> {
+    let launch = windows.get(window.label());
+    if launch.no_save {
+        return Err("This window keeps nothing (--no-save)".into());
+    }
+    launch.file.ok_or_else(|| "No book is open".into())
+}
+
+/// Copies or moves the window's book into the library under the naming
+/// template; the window then shows the library copy. If the library already
+/// holds the same book (under any name), nothing is copied or moved and the
+/// window switches to that copy.
 #[tauri::command(async)]
-fn add_to_library(window: Window, windows: State<ReaderWindows>, store: State<Store>, mode: String) -> Result<Added, String> {
-    let source = windows.path_of(window.label())?;
+fn add_to_library(window: Window, windows: State<ReaderWindows>, store: State<Store>, mode: AddMode) -> Result<Added, String> {
+    let source = saving_window(&windows, &window)?;
     let root = library_root(&store)?;
     let err = |e: std::io::Error| format!("{}: {e}", paths::file_name(&source));
     let format = metadata::Format::of(&source).ok_or("Not a book file")?;
@@ -447,12 +485,22 @@ fn add_to_library(window: Window, windows: State<ReaderWindows>, store: State<St
         format,
     });
     let fingerprint = fingerprint::fingerprint(&source).map_err(err)?;
-    let (rel, existed) = match naming::place(&root, &wanted, &fingerprint, &Default::default()).map_err(err)? {
+    // The same book may already be in the library under another name.
+    let known = library_cache(&store)
+        .load(&root)
+        .into_iter()
+        .find(|e| e.fingerprint == fingerprint && e.absolute(&root).is_file())
+        .map(|e| naming::Placement::Exists(e.path));
+    let placement = match known {
+        Some(found) => found,
+        None => naming::place(&root, &wanted, &fingerprint, &Default::default()).map_err(err)?,
+    };
+    let (rel, existed) = match placement {
         naming::Placement::Free(rel) => {
             let target = library::join(&root, &rel);
-            match mode.as_str() {
-                "move" => naming::move_file(&source, &target),
-                _ => naming::copy_file(&source, &target),
+            match mode {
+                AddMode::Move => naming::move_file(&source, &target),
+                AddMode::Copy => naming::copy_file(&source, &target),
             }
             .map_err(err)?;
             (rel, false)
@@ -480,7 +528,14 @@ fn get_bookmarks(store: State<Store>, fingerprint: String) -> Value {
 
 /// Replaces a book's bookmarks (an empty list forgets the book).
 #[tauri::command(async)]
-fn set_bookmarks(store: State<Store>, fingerprint: String, bookmarks: Value) -> Result<(), String> {
+fn set_bookmarks(
+    window: Window,
+    windows: State<ReaderWindows>,
+    store: State<Store>,
+    fingerprint: String,
+    bookmarks: Value,
+) -> Result<(), String> {
+    saving_window(&windows, &window)?;
     store
         .update(|s| match bookmarks.as_array() {
             Some(list) if !list.is_empty() => {

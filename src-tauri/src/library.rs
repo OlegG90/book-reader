@@ -27,6 +27,10 @@ pub struct Entry {
     pub series_index: Option<String>,
     /// The cached cover's file name in the covers folder.
     pub cover: Option<String>,
+    /// When the book came into the library (ms since the Unix epoch). Copies
+    /// keep the original's modification time, so that can't tell.
+    #[serde(default)]
+    pub added: u64,
 }
 
 impl Entry {
@@ -113,7 +117,13 @@ impl Cache {
 /// Lists the books under `root`, reusing cached metadata for files whose size
 /// and modification time are unchanged, and saves the result to the cache.
 pub fn scan(root: &Path, cache: &Cache) -> io::Result<Vec<Entry>> {
-    let previous: HashMap<String, Entry> = cache.load(root).into_iter().map(|e| (e.path.clone(), e)).collect();
+    let cached = cache.load(root);
+    // A book seen before (even under another name, after Organize) keeps its
+    // date; on the very first scan the files' own dates are all there is.
+    let first_scan = cached.is_empty();
+    let added_before: HashMap<String, u64> = cached.iter().map(|e| (e.fingerprint.clone(), e.added)).collect();
+    let previous: HashMap<String, Entry> = cached.into_iter().map(|e| (e.path.clone(), e)).collect();
+    let now = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
     let mut files = Vec::new();
     find_books(root, &mut files)?;
 
@@ -125,7 +135,15 @@ pub fn scan(root: &Path, cache: &Cache) -> io::Result<Vec<Entry>> {
             let modified = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_millis() as u64;
             match previous.get(&rel) {
                 Some(e) if e.size == meta.len() && e.modified == modified => Some(e.clone()),
-                _ => read_entry(&path, rel, meta.len(), modified, cache).ok(),
+                _ => {
+                    let mut entry = read_entry(&path, rel, meta.len(), modified, cache).ok()?;
+                    entry.added = match added_before.get(&entry.fingerprint) {
+                        Some(&added) => added,
+                        None if first_scan => modified,
+                        None => now,
+                    };
+                    Some(entry)
+                }
             }
         })
         .collect();
@@ -182,6 +200,7 @@ fn read_entry(path: &Path, rel: String, size: u64, modified: u64, cache: &Cache)
         series: meta.series,
         series_index: meta.series_index,
         cover,
+        added: modified,
     })
 }
 
@@ -302,6 +321,22 @@ mod tests {
         let books = scan(&root, &cache).unwrap();
         let plan = organize_plan(&root, &books).unwrap();
         assert!(plan.iter().all(|(b, _)| !b.path.ends_with("Alice.epub")));
+    }
+
+    #[test]
+    fn added_dates_survive_renames_and_new_books_get_today() {
+        let (dir, root) = library_with_samples();
+        let cache = Cache::new(dir.path().join("cache"));
+        let first = scan(&root, &cache).unwrap();
+        assert!(first.iter().all(|b| b.added == b.modified), "the first scan uses file dates");
+
+        let alice = &first[0];
+        fs::rename(alice.absolute(&root), root.join("renamed.epub")).unwrap();
+        fs::copy(samples().join("pride-and-prejudice.epub"), root.join("new.epub")).unwrap();
+        let second = scan(&root, &cache).unwrap();
+        let find = |path: &str| second.iter().find(|b| b.path == path).unwrap();
+        assert_eq!(find("renamed.epub").added, alice.added);
+        assert!(find("new.epub").added > find("new.epub").modified, "a copy keeps its old file date");
     }
 
     #[test]

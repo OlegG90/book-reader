@@ -34,7 +34,7 @@ Inherited from Simple Reader unless noted:
 - **Modes:** paginated (default) and scrolled.
 - **Appearance:** theme (light / dark / sepia, follows the system by default), font, font size, line height, margins. Settings are per device and not synced.
 - **Navigation:** table of contents, progress bar, footnotes in a pop-up, images.
-- **Bookmarks:** new. Local to each device.
+- **Bookmarks:** new. Local to each device. `B` (or the topbar button) bookmarks the page or removes the bookmark on it; the list sits under the contents (`T`). A bookmark is a point in the text, so it stays found when the font or window size changes the pages. `--no-save` windows keep none.
 - **Reading position:** saved automatically, synced between devices through the server (see [Progress sync](#progress-sync)).
 
 ### Android interaction
@@ -58,7 +58,9 @@ Inherited from Simple Reader unless noted:
 
 ### Library screen
 
-- Grid or list of books with covers; search; sort; filter by reading status (not started / reading / finished).
+- Grid of books with covers; search (title, author, series); sort by author (series in reading order), title or recently added; filter by reading status: not started, reading, finished (98% or more, since books often end in notes).
+- "Recently added" is when the book came into the library (remembered by the scan cache), not the file date, which a copy keeps.
+- The settings show the library folder with **Change…** (pick another) and **Organize…**.
 - A "Catalogs" tab for the servers (see [Servers](#servers)).
 - Grouping by series comes later.
 - Desktop: the library is one window; each book opens in its own window (as in Simple Reader).
@@ -75,8 +77,8 @@ Unknown Author/{original file name}            # no metadata
 
 - First author only, name as `Last First`.
 - Cyrillic and other Unicode characters are kept as is (no transliteration).
-- Characters not allowed in file names (`\/:*?"<>|`) are replaced with `_`; names are truncated to a reasonable length.
-- **Collision:** if a file with the same name but different content exists, ` (2)`, ` (3)`… is appended. If the content is identical (same fingerprint), nothing is copied and the existing book is offered instead.
+- A subtitle colon (`: `) becomes ` - `; other characters not allowed in file names (`\/:*?"<>|`) are replaced with `_`; names are truncated to 120 characters, trailing dots and spaces dropped, and Windows device names (`CON`, `COM1`…) prefixed with `_`.
+- **Collision:** if a file with the same name but different content exists, ` (2)`, ` (3)`… is appended. If the library already holds the same book (same fingerprint, under any name), nothing is copied or moved and the window switches to the library copy. A file is never overwritten; a move that can't remove the original undoes its copy.
 - **Existing files** in the chosen folder are never renamed automatically. A manual "Organize library" command shows a preview of all renames and applies them only after confirmation.
 
 ### Files outside the library (desktop)
@@ -87,6 +89,7 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 - A global setting turns the offer off.
 - After a move the window keeps showing the book from its new path.
 - The reading position survives copying and moving: book identity is a content fingerprint, not a path (as in Simple Reader).
+- If no library folder has been chosen yet (the app was first started on a book), the bar offers **Choose library folder** instead, which opens the library's first-run choice.
 
 ## Servers
 

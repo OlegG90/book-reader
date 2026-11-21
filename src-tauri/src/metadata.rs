@@ -97,6 +97,14 @@ impl Format {
             Format::Fb2Zip => "fb2.zip",
         }
     }
+
+    /// The format's name, for showing.
+    pub fn label(self) -> &'static str {
+        match self {
+            Format::Epub => "EPUB",
+            Format::Fb2 | Format::Fb2Zip => "FB2",
+        }
+    }
 }
 
 pub fn read(path: &Path) -> io::Result<Metadata> {

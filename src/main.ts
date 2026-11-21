@@ -42,9 +42,11 @@ interface BookInfo {
   fingerprint: string
   position: Position | null
   noSave: boolean
-  /** The book is outside the library folder and may be offered for it. */
-  offerLibrary: boolean
+  /** What the bar under the book offers: adding it to the library, or choosing a library first. */
+  offer: Offer | null
 }
+
+type Offer = 'add' | 'setup'
 
 type AddMode = 'move' | 'copy'
 
@@ -180,7 +182,7 @@ async function openCurrentBook() {
   highlightToc(book.view.lastLocation?.tocItem?.href)
   $('progress').hidden = false
   updateTopbarButtons()
-  if (info.offerLibrary && settings.offerLibrary) showOffer()
+  if (info.offer && settings.offerLibrary) showOffer(info.offer)
   bookmarks = await invoke<Bookmark[]>('get_bookmarks', { fingerprint }).catch((e): Bookmark[] => {
     console.error(e)
     return []
@@ -241,10 +243,16 @@ function updateBookmarkButton() {
 
 // ---- Adding a book to the library ------------------------------------------
 
-/** Shows the bar, with the last used of Move / Copy first. */
-function showOffer() {
-  $('offer-text').textContent = 'This book is not in your library.'
+/**
+ * Shows the bar: Move / Copy (the last used first) for a book outside the
+ * library, or the way to the first-run folder choice when there is no library yet.
+ */
+function showOffer(offer: Offer) {
+  $('offer-text').textContent =
+    offer === 'add' ? 'This book is not in your library.' : 'Book Reader has no library folder yet.'
   $('offer-buttons').hidden = false
+  $('offer-setup').hidden = offer !== 'setup'
+  $('offer-buttons').querySelectorAll<HTMLElement>('.add').forEach(button => (button.hidden = offer !== 'add'))
   $('offer-move').classList.toggle('primary', settings.libraryAddMode === 'move')
   $('offer-copy').classList.toggle('primary', settings.libraryAddMode === 'copy')
   $('offer').hidden = false
@@ -815,6 +823,10 @@ appWindow.listen('library-updated', () => {
 $('offer-move').addEventListener('click', () => void addToLibrary('move'))
 $('offer-copy').addEventListener('click', () => void addToLibrary('copy'))
 $('offer-later').addEventListener('click', hideOffer)
+$('offer-setup').addEventListener('click', () => {
+  hideOffer()
+  void runCommand('library')
+})
 $('offer-never').addEventListener('click', () => {
   hideOffer()
   void invoke('decline_library', { fingerprint }).catch(console.error)

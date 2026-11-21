@@ -20,6 +20,8 @@ Full-text search in a book and grouping by series fit after stage 4.
 
 ## Open questions
 
+- **Organize and chains of renames:** a book whose template path is occupied by another book that the same run moves away gets ` (2)`; running Organize again fixes it. Ordering the moves would avoid the extra step.
+
 - **Bookmark sync:** KOSync carries only the position; syncing bookmarks needs another mechanism.
 - **Phase "e" details:** which fields, which server, how fragile the CWA web endpoints are.
 - **Shared core with Simple Reader:** package boundary and how both repositories consume it (`file:` dependency, git submodule).
