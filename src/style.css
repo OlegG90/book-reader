@@ -12,6 +12,10 @@
   --active: rgba(0, 0, 0, 0.07);
   --accent: #6b6b6b;
   --shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  /* On Android the page is drawn edge to edge, under the status and navigation
+     bars; these keep controls clear of them (zero on the desktop). */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
   font-family: 'Segoe UI', system-ui, sans-serif;
   font-size: 14px;
 }
@@ -68,6 +72,11 @@ body {
   inset: 0;
 }
 
+#stage {
+  top: var(--safe-top);
+  bottom: var(--safe-bottom);
+}
+
 /* Page numbers in the bottom margin (paginated mode) */
 #stage foliate-view::part(foot) {
   color: var(--muted);
@@ -80,7 +89,7 @@ body {
   position: absolute;
   inset: 0;
   overflow-y: auto;
-  padding: 56px 24px 24px; /* below the topbar, which stays shown here */
+  padding: calc(56px + var(--safe-top)) 24px calc(24px + var(--safe-bottom)); /* below the topbar, which stays shown here */
 }
 
 #error {
@@ -270,7 +279,7 @@ body.library-mode #fullscreen-button {
 #offer {
   position: fixed;
   left: 50%;
-  bottom: 16px;
+  bottom: calc(16px + var(--safe-bottom));
   z-index: 15;
   transform: translateX(-50%);
   display: flex;
@@ -431,7 +440,7 @@ button.link:hover {
   top: 0;
   display: flex;
   gap: 4px;
-  padding: 6px 8px;
+  padding: calc(6px + var(--safe-top)) 8px 6px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
@@ -721,7 +730,7 @@ button:hover {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
+  bottom: var(--safe-bottom);
   z-index: 10;
   height: 3px;
   cursor: pointer;

@@ -1,8 +1,8 @@
 # Builds the Android app into an APK for the phone (arm64 only). The Android
 # SDK and NDK have no Windows-on-ARM64 builds, so the APK is made here, never
-# on the PC, and installed with `adb install`. Until the Gradle project is
-# kept in the repo (src-tauri/gen/android), each run makes it with
-# `tauri android init` and uploads it as an artifact.
+# on the PC, and installed with `adb install`. The Gradle project in
+# src-tauri/gen/android was made by `tauri android init` and is kept in the
+# repo, changed by hand from there (StoragePlugin.kt, the manifest).
 name: Android
 
 on:
@@ -32,8 +32,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-          # No Gradle cache until the Gradle project is in the repo: the cache
-          # needs its files to exist before the run makes them.
+          cache: gradle
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -49,10 +48,6 @@ jobs:
 
       - run: npm ci
 
-      - name: The Gradle project and the app icons
-        run: |
-          if [ ! -d src-tauri/gen/android ]; then npx tauri android init --ci; fi
-          npx tauri icon src-tauri/icons/app-icon.svg
 
       # A debug build, signed with the runner's throwaway debug key: reinstalling
       # needs `adb uninstall com.olegg90.bookreader` first. A release key comes
@@ -64,12 +59,3 @@ jobs:
           name: book-reader-apk
           path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: android-project
-          path: |
-            src-tauri/gen/android
-            !src-tauri/gen/android/**/build
-            !src-tauri/gen/android/.gradle
-            !src-tauri/gen/android/app/src/main/jniLibs

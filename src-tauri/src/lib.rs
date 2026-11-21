@@ -12,6 +12,8 @@ mod naming;
 mod paths;
 #[cfg_attr(not(windows), path = "register_other.rs")]
 mod register;
+#[cfg(mobile)]
+mod storage;
 mod store;
 mod version;
 
@@ -376,19 +378,22 @@ struct LibraryInfo {
 fn library_info(app: AppHandle, store: State<Store>) -> LibraryInfo {
     LibraryInfo {
         folder: store.read(|s| s.library.as_ref().map(|p| p.display().to_string())),
-        suggested: default_library(&app).display().to_string(),
+        suggested: default_library(&app).map(|p| p.display().to_string()).unwrap_or_default(),
     }
 }
 
-/// The library folder the first-run screen offers. On Android, for now, the
-/// app's private storage (choosing a shared folder is the spike's next step).
-fn default_library(app: &AppHandle) -> PathBuf {
+/// The library folder the first-run screen offers: `lib` next to the exe (or
+/// `Documents\Book Reader`) on Windows, `Documents/Books` in shared storage on Android.
+fn default_library(app: &AppHandle) -> Result<PathBuf, String> {
     #[cfg(desktop)]
-    let _ = app;
-    #[cfg(desktop)]
-    return data_dir::resolve_default_library();
+    {
+        let _ = app;
+        Ok(data_dir::resolve_default_library())
+    }
     #[cfg(mobile)]
-    return app.path().app_data_dir().unwrap_or_default().join("lib");
+    {
+        app.state::<storage::Storage<tauri::Wry>>().default_library()
+    }
 }
 
 /// Asks for a folder; `None` when cancelled.
@@ -397,11 +402,11 @@ fn pick_folder(window: &Window) -> Result<Option<PathBuf>, String> {
     file_dialog(window).blocking_pick_folder().map(|f| f.into_path().map_err(|e| e.to_string())).transpose()
 }
 
-/// The dialog plugin can't pick folders on Android: that takes the Storage
-/// Access Framework (the Android spike's next step).
+/// On Android the library is `Documents/Books` for now: the dialog plugin
+/// can't pick folders there, and a folder browser of our own comes later.
 #[cfg(mobile)]
 fn pick_folder(_window: &Window) -> Result<Option<PathBuf>, String> {
-    Err("Choosing a folder is not available on Android yet".into())
+    Err("Choosing another folder is not available on Android yet".into())
 }
 
 /// Sets the library folder: the suggested one, or one the reader picks.
@@ -414,7 +419,10 @@ fn set_library(window: Window, store: State<Store>, books: State<LibraryBooks>, 
             None => return Ok(None),
         }
     } else {
-        default_library(window.app_handle())
+        // A folder in shared storage needs All files access on Android.
+        #[cfg(mobile)]
+        window.state::<storage::Storage<tauri::Wry>>().require_access()?;
+        default_library(window.app_handle())?
     };
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     let folder = std::path::absolute(&folder).unwrap_or(folder);
@@ -777,6 +785,8 @@ pub fn run() {
             let _ = open_or_focus(app, launch);
         }
     }));
+    #[cfg(mobile)]
+    let builder = builder.plugin(storage::init());
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
