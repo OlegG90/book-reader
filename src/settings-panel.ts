@@ -12,6 +12,8 @@ export interface PanelActions {
   clearHistory(): void
   /** Registers or unregisters the app for its book file types. */
   toggleFileTypes(): void
+  /** Picks another library folder. */
+  changeLibrary(): void
 }
 
 const THEME_LABELS: Record<Theme, string> = { system: 'System', light: 'Light', dark: 'Dark', sepia: 'Sepia' }
@@ -28,7 +30,8 @@ function range({ min, max, step }: Range) {
 /**
  * Builds the settings controls into `host`. Every change is reported through
  * `onChange` with just the changed values; button presses go to `actions`;
- * `show` refreshes the controls, `setFileTypesRegistered` the file-type row.
+ * `show` refreshes the controls, `setFileTypesRegistered` the file-type row,
+ * `setLibraryFolder` the library row.
  */
 export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onChange: (changes: Partial<PanelValues>) => void, actions: PanelActions) {
   let current = initial
@@ -59,6 +62,8 @@ export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onC
     textContent: 'Clear history',
     onclick: actions.clearHistory,
   })
+  const libraryFolder = el('output', { className: 'path' })
+  const changeLibrary = el('button', { type: 'button', textContent: 'Change…', onclick: actions.changeLibrary })
   const fileTypesStatus = el('output')
   const fileTypesButton = el('button', {
     type: 'button',
@@ -73,6 +78,7 @@ export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onC
     field('Line spacing', lineHeight, lineHeightValue),
     field('Line length', lineLength, lineLengthValue),
     el('label', { className: 'check' }, savePositions, 'Remember reading position'),
+    field('Library folder', libraryFolder, changeLibrary),
     field('History', clearHistory),
     field('File types', fileTypesStatus, fileTypesButton),
   )
@@ -94,7 +100,13 @@ export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onC
     fileTypesButton.textContent = registered ? 'Unregister' : 'Register'
   }
 
+  function setLibraryFolder(folder: string | null) {
+    libraryFolder.textContent = folder ?? 'Not chosen yet'
+    libraryFolder.title = folder ?? ''
+  }
+
   show(initial)
   setFileTypesRegistered(false)
-  return { show, setFileTypesRegistered }
+  setLibraryFolder(null)
+  return { show, setFileTypesRegistered, setLibraryFolder }
 }

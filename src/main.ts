@@ -14,6 +14,19 @@ import {
 import { el, suppressContextMenu } from './dom'
 import { commandFor, type Command } from './keys'
 import type { Flow } from './layout'
+import {
+  SORTS,
+  SORT_LABELS,
+  STATUSES,
+  STATUS_LABELS,
+  filterBooks,
+  seriesLabel,
+  sortBooks,
+  statusOf,
+  type LibraryBook,
+  type Sort,
+  type Status,
+} from './library'
 import { BookView, type BookStyle, type Relocation } from './reader'
 import { createSettingsPanel, type PanelValues } from './settings-panel'
 import { createTOCView } from './vendor/foliate-js/ui/tree.js'
@@ -37,6 +50,8 @@ interface PendingSave {
 
 interface Settings extends PanelValues {
   flow: Flow
+  librarySort: Sort
+  libraryStatus: Status
 }
 
 const FLOWS: readonly Flow[] = ['paginated', 'scrolled']
@@ -45,6 +60,8 @@ function readSettings(stored: Record<string, unknown>): Settings {
   return {
     ...readAppearance(stored),
     flow: oneOf(stored.flow, FLOWS, 'paginated'),
+    librarySort: oneOf(stored.librarySort, SORTS, 'author'),
+    libraryStatus: oneOf(stored.libraryStatus, STATUSES, 'all'),
     savePositions: stored.savePositions !== false,
   }
 }
@@ -68,6 +85,7 @@ const settingsReady = invoke<Record<string, unknown>>('get_settings')
     settings = readSettings(stored)
     applyTheme()
     settingsPanel.show(settings)
+    showLibraryControls()
   })
 let currentTocHref: string | undefined
 let book: BookView | null = null
@@ -111,7 +129,7 @@ async function openCurrentBook() {
   let info: BookInfo | null = null
   try {
     info = await invoke<BookInfo | null>('current_book')
-    if (!info) return await showStartScreen()
+    if (!info) return await showLibraryScreen()
     fingerprint = info.fingerprint
     noSave = info.noSave
     const source = await loadBook(info)
@@ -133,8 +151,8 @@ async function openCurrentBook() {
     })
   } catch (e) {
     showError(info?.fileName, e)
-    // The drop hint, Ctrl+O and the recent books stay one step away.
-    return showStartScreen()
+    // The library, Ctrl+O and the recent books stay one step away.
+    return showLibraryScreen()
   }
   const title = book.title || info.fileName
   void appWindow.setTitle(title).catch(console.error)
@@ -160,6 +178,7 @@ function closeBook() {
   updateTopbarButtons()
   $('toc-tree').replaceChildren()
   $('start').hidden = true
+  document.body.classList.remove('library-mode')
   $('error').hidden = true
   $('progress').hidden = true
   topbar.classList.remove('shown')
@@ -182,15 +201,140 @@ interface RecentBook {
   exists: boolean
 }
 
-/** The window without a book: a drop hint, Ctrl+O and the recent books. */
-async function showStartScreen() {
+interface LibraryInfo {
+  folder: string | null
+  suggested: string
+}
+
+/** The window without a book: the library, or the first-run folder choice. */
+async function showLibraryScreen() {
   void appWindow.setTitle('Book Reader').catch(console.error)
+  document.body.classList.add('library-mode')
+  $('start').hidden = false
+  const info = await invoke<LibraryInfo>('library_info').catch((e): LibraryInfo => {
+    console.error(e)
+    return { folder: null, suggested: '' }
+  })
+  libraryFolder = info.folder
+  settingsPanel.setLibraryFolder(info.folder)
+  $('setup').hidden = !!info.folder
+  $('library').hidden = !info.folder
+  if (!info.folder) {
+    $('setup-suggested').textContent = info.suggested
+    $('setup-default').focus()
+    return
+  }
+  await Promise.all([refreshRecent(), refreshLibrary()])
+}
+
+async function refreshRecent() {
   const books = await invoke<RecentBook[]>('recent_books').catch((e): RecentBook[] => {
     console.error(e)
     return []
   })
   $('recent').replaceChildren(...books.map(recentItem))
-  $('start').hidden = false
+  $('recent-title').hidden = !books.length
+}
+
+/** Uses the suggested library folder, or asks for another one. */
+async function chooseLibrary(pick: boolean) {
+  const folder = await invoke<string | null>('set_library', { pick }).catch(e => {
+    showError(undefined, e)
+    return null
+  })
+  if (folder && !book) await showLibraryScreen()
+}
+
+// ---- Library ----------------------------------------------------------------
+
+let libraryFolder: string | null = null
+let libraryBooks: LibraryBook[] = []
+let scanning: Promise<void> | null = null
+const libraryVisible = () => !book && !$('library').hidden
+
+/** Rescans the folder (cheap: unchanged files come from the cache) and redraws. */
+function refreshLibrary(): Promise<void> {
+  scanning ??= (async () => {
+    if (!libraryBooks.length) showLibraryMessage('Looking for books…')
+    try {
+      libraryBooks = await invoke<LibraryBook[]>('scan_library')
+      renderLibrary()
+    } catch (e) {
+      showLibraryMessage(`Can't read the library folder: ${e}`)
+    } finally {
+      scanning = null
+    }
+  })()
+  return scanning
+}
+
+function showLibraryMessage(text: string) {
+  $('library-message').textContent = text
+  $('library-message').hidden = !text
+}
+
+function showLibraryControls() {
+  $<HTMLSelectElement>('library-status').value = settings.libraryStatus
+  $<HTMLSelectElement>('library-sort').value = settings.librarySort
+}
+
+function renderLibrary() {
+  const query = $<HTMLInputElement>('library-search').value
+  const shown = sortBooks(filterBooks(libraryBooks, query, settings.libraryStatus), settings.librarySort)
+  if (!libraryBooks.length) {
+    showLibraryMessage(`The library is empty. Open a book (Ctrl+O) or put EPUB and FB2 files into ${libraryFolder}.`)
+  } else {
+    showLibraryMessage(shown.length ? '' : 'No books match.')
+  }
+  $('library-books').replaceChildren(...shown.map(bookCard))
+}
+
+function bookCard(book: LibraryBook) {
+  const status = statusOf(book)
+  const progress =
+    status === 'finished' ? 'Finished' : status === 'reading' ? `${Math.round((book.fraction ?? 0) * 100)}%` : ''
+  const cover = el('div', { className: 'cover' }, el('span', { textContent: book.title }))
+  if (book.hasCover) loadCover(cover, book.key)
+  const button = el(
+    'button',
+    {
+      title: [book.title, book.authors.join(', '), seriesLabel(book)].filter(Boolean).join('\n'),
+      onclick: () => void invoke('open_library_book', { key: book.key }).catch(e => showError(book.title, e)),
+    },
+    cover,
+    el('span', { className: 'title', textContent: book.title }),
+    el('span', { className: 'author', textContent: book.authors.join(', ') }),
+    el('span', { className: 'series', textContent: seriesLabel(book) }),
+    el('span', { className: 'meta', textContent: [book.format, progress].filter(Boolean).join(' · ') }),
+  )
+  return el('li', {}, button)
+}
+
+/** Cover images by book key, kept for the window's life so redraws don't reload them. */
+const coverUrls = new Map<string, Promise<string>>()
+
+/** Loads covers as their cards come near the visible part of the library. */
+const coverObserver = new IntersectionObserver(
+  entries => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue
+      const host = entry.target as HTMLElement
+      coverObserver.unobserve(host)
+      const key = host.dataset.key ?? ''
+      let url = coverUrls.get(key)
+      if (!url) {
+        url = invoke<ArrayBuffer>('library_cover', { key }).then(bytes => URL.createObjectURL(new Blob([bytes])))
+        coverUrls.set(key, url)
+      }
+      url.then(src => host.replaceChildren(el('img', { src, alt: '' }))).catch(() => coverUrls.delete(key))
+    }
+  },
+  { rootMargin: '400px' },
+)
+
+function loadCover(host: HTMLElement, key: string) {
+  host.dataset.key = key
+  coverObserver.observe(host)
 }
 
 function recentItem(book: RecentBook) {
@@ -202,7 +346,7 @@ function recentItem(book: RecentBook) {
       : {
           className: 'missing',
           title: 'File not found. Click to remove it from the list.',
-          onclick: () => void invoke('forget_recent', { key: book.key }).then(showStartScreen, console.error),
+          onclick: () => void invoke('forget_recent', { key: book.key }).then(refreshRecent, console.error),
         },
     span('title', book.title || book.fileName),
     span('percent', book.fraction == null ? '' : `${Math.round(book.fraction * 100)}%`),
@@ -282,6 +426,8 @@ async function runCommand(command: Command) {
       return changeSettings({ fontSize: stepFontSize(settings.fontSize, -1) })
     case 'open':
       return invoke('pick_book')
+    case 'library':
+      return invoke('show_library')
     case 'closeWindow':
       return appWindow.close()
   }
@@ -370,7 +516,7 @@ const settingsPanel = createSettingsPanel(
     clearHistory: () => {
       void invoke('clear_recent')
         .then(() => {
-          if (!book) void showStartScreen()
+          if (!book) void refreshRecent()
         })
         .catch(console.error)
     },
@@ -378,6 +524,7 @@ const settingsPanel = createSettingsPanel(
       const command = fileTypesRegistered ? 'unregister_file_types' : 'register_file_types'
       void invoke(command).then(refreshFileTypesStatus, console.error)
     },
+    changeLibrary: () => void chooseLibrary(true),
   },
 )
 
@@ -475,6 +622,31 @@ document.addEventListener('pointerdown', e => {
 })
 suppressContextMenu()
 $('toc-button').addEventListener('click', () => runCommand('toc'))
+$('library-button').addEventListener('click', () => runCommand('library'))
+$('setup-default').addEventListener('click', () => void chooseLibrary(false))
+$('setup-pick').addEventListener('click', () => void chooseLibrary(true))
+$('library-search').addEventListener('input', renderLibrary)
+$('library-status').append(...STATUSES.map(s => el('option', { value: s, textContent: STATUS_LABELS[s] })))
+$('library-sort').append(...SORTS.map(s => el('option', { value: s, textContent: SORT_LABELS[s] })))
+$<HTMLSelectElement>('library-status').addEventListener('change', e => {
+  changeSettings({ libraryStatus: (e.target as HTMLSelectElement).value as Status })
+  renderLibrary()
+})
+$<HTMLSelectElement>('library-sort').addEventListener('change', e => {
+  changeSettings({ librarySort: (e.target as HTMLSelectElement).value as Sort })
+  renderLibrary()
+})
+// Books may have been added, or read in another window, meanwhile.
+appWindow.onFocusChanged(({ payload: focused }) => {
+  if (!focused || !libraryVisible()) return
+  void refreshRecent()
+  void refreshLibrary()
+})
+appWindow.listen('library-changed', () => {
+  libraryBooks = []
+  if (!book) void showLibraryScreen()
+  else void invoke<LibraryInfo>('library_info').then(info => settingsPanel.setLibraryFolder(info.folder), console.error)
+})
 $('settings-button').addEventListener('click', () => runCommand('settings'))
 $('shortcuts-button').addEventListener('click', () => (shortcutsOpen() ? closePanels() : openInfoPanel('shortcuts')))
 $('about-button').addEventListener('click', () => (aboutOpen() ? closePanels() : openInfoPanel('about')))

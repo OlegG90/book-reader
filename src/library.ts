@@ -1,0 +1,80 @@
+/** A book as the backend's library scan reports it (see scan_library in lib.rs). */
+export interface LibraryBook {
+  key: string
+  title: string
+  authors: string[]
+  authorSort: string
+  series: string | null
+  seriesIndex: string | null
+  format: string
+  /** Share read, if a position is saved. */
+  fraction: number | null
+  /** When the file was last changed (ms). */
+  added: number
+  hasCover: boolean
+}
+
+export const STATUSES = ['all', 'new', 'reading', 'finished'] as const
+export type Status = (typeof STATUSES)[number]
+export const STATUS_LABELS: Record<Status, string> = {
+  all: 'All books',
+  new: 'Not started',
+  reading: 'Reading',
+  finished: 'Finished',
+}
+
+export const SORTS = ['author', 'title', 'added'] as const
+export type Sort = (typeof SORTS)[number]
+export const SORT_LABELS: Record<Sort, string> = { author: 'Author', title: 'Title', added: 'Recently added' }
+
+/** Past this share a book counts as finished (the last pages are often notes or ads). */
+const FINISHED_AT = 0.98
+
+export function statusOf(book: LibraryBook): Exclude<Status, 'all'> {
+  if (book.fraction == null || book.fraction <= 0) return 'new'
+  return book.fraction >= FINISHED_AT ? 'finished' : 'reading'
+}
+
+const fold = (text: string) => text.toLocaleLowerCase().normalize('NFKD').replace(/\p{M}/gu, '')
+
+/** Books matching every word of `query` (in title, authors or series) and the status. */
+export function filterBooks(books: LibraryBook[], query: string, status: Status): LibraryBook[] {
+  const words = fold(query).split(/\s+/).filter(Boolean)
+  return books.filter(book => {
+    if (status !== 'all' && statusOf(book) !== status) return false
+    const text = fold([book.title, ...book.authors, book.series ?? ''].join(' '))
+    return words.every(word => text.includes(word))
+  })
+}
+
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+const compareText = (a: string, b: string) => {
+  // Books without an author or title sort last.
+  if (!a !== !b) return a ? -1 : 1
+  return collator.compare(a, b)
+}
+const seriesNumber = (book: LibraryBook) => {
+  const n = parseFloat(book.seriesIndex ?? '')
+  return Number.isFinite(n) ? n : Infinity
+}
+
+const COMPARE: Record<Sort, (a: LibraryBook, b: LibraryBook) => number> = {
+  title: (a, b) => compareText(a.title, b.title),
+  // By author, then their series in reading order, then their other books by title.
+  author: (a, b) =>
+    compareText(a.authorSort, b.authorSort) ||
+    compareText(a.series ?? '', b.series ?? '') ||
+    seriesNumber(a) - seriesNumber(b) ||
+    compareText(a.title, b.title),
+  added: (a, b) => b.added - a.added || compareText(a.title, b.title),
+}
+
+export function sortBooks(books: LibraryBook[], sort: Sort): LibraryBook[] {
+  return [...books].sort(COMPARE[sort])
+}
+
+/** "Discworld #3", "Discworld", or "". */
+export function seriesLabel(book: LibraryBook): string {
+  if (!book.series) return ''
+  return book.seriesIndex ? `${book.series} #${book.seriesIndex}` : book.series
+}

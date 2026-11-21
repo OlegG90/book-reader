@@ -8,7 +8,7 @@ const initial: PanelValues = { ...DEFAULT_APPEARANCE, savePositions: true }
 function setup() {
   const host = document.createElement('aside')
   const onChange = vi.fn()
-  const actions = { clearHistory: vi.fn(), toggleFileTypes: vi.fn() }
+  const actions = { clearHistory: vi.fn(), toggleFileTypes: vi.fn(), changeLibrary: vi.fn() }
   const panel = createSettingsPanel(host, initial, onChange, actions)
   const button = (text: string) => {
     const found = [...host.querySelectorAll('button')].find(b => b.textContent === text)
@@ -40,6 +40,15 @@ describe('settings panel', () => {
     expect(actions.clearHistory).toHaveBeenCalledOnce()
     button('Register').click()
     expect(actions.toggleFileTypes).toHaveBeenCalledOnce()
+    button('Change…').click()
+    expect(actions.changeLibrary).toHaveBeenCalledOnce()
+  })
+
+  it('shows the library folder', () => {
+    const { host, panel } = setup()
+    expect(host.textContent).toContain('Not chosen yet')
+    panel.setLibraryFolder(String.raw`D:\Books`)
+    expect(host.textContent).toContain(String.raw`D:\Books`)
   })
 
   it('shows the file-type registration state', () => {

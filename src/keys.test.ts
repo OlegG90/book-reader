@@ -23,6 +23,7 @@ describe('commandFor', () => {
 
   it('maps window shortcuts', () => {
     expect(key('o', { ctrlKey: true })).toBe('open')
+    expect(key('L')).toBe('library')
     expect(key('W', { ctrlKey: true, shiftKey: true })).toBe('closeWindow')
   })
 

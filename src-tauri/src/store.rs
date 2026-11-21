@@ -17,6 +17,8 @@ pub struct State {
     pub window: Option<WindowGeometry>,
     /// Recently opened books, newest first.
     pub recent: Vec<RecentBook>,
+    /// The library folder; `None` until the first-run choice is made.
+    pub library: Option<PathBuf>,
 }
 
 /// How many books the start screen lists.
@@ -76,6 +78,11 @@ impl Store {
         Store { path, state: Mutex::new(state) }
     }
 
+    /// The folder the state file lives in, where caches go too.
+    pub fn dir(&self) -> PathBuf {
+        self.path.parent().map(Path::to_path_buf).unwrap_or_default()
+    }
+
     pub fn read<R>(&self, f: impl FnOnce(&State) -> R) -> R {
         f(&self.state.lock().unwrap())
     }
@@ -88,7 +95,7 @@ impl Store {
     }
 }
 
-fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }

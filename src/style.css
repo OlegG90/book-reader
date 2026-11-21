@@ -75,35 +75,189 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Start screen (also shows errors) */
+/* The window without a book: the library or the first-run setup (also shows errors) */
 #start {
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 24px;
-  text-align: center;
-  font-size: 18px;
-}
-
-#start p {
-  margin: 0;
+  overflow-y: auto;
+  padding: 56px 24px 24px; /* below the topbar, which stays shown here */
 }
 
 #error {
-  margin-bottom: 28px;
+  width: min(640px, 100%);
+  margin: 0 auto 20px;
   padding: 12px 18px;
   border: 1px solid var(--line);
   border-radius: 8px;
+  text-align: center;
+}
+
+#error p {
+  margin: 0;
 }
 
 #start h1 {
-  margin: 0 0 8px;
-  font-size: 26px;
+  margin: 0;
+  font-size: 22px;
   font-weight: 600;
+}
+
+#setup {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12vh;
+  text-align: center;
+  font-size: 16px;
+}
+
+#setup p {
+  margin: 0;
+}
+
+button.primary {
+  padding: 8px 16px;
+  color: var(--bg);
+  background: var(--fg);
+}
+
+button.primary:hover {
+  background: var(--fg);
+  opacity: 0.85;
+}
+
+#setup-suggested {
+  font-weight: 600;
+}
+
+/* In the library the topbar stays visible, and the reading buttons are gone */
+body.library-mode #topbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+body.library-mode #toc-button,
+body.library-mode #flow-button,
+body.library-mode #library-button,
+body.library-mode #fullscreen-button {
+  display: none;
+}
+
+.library-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.library-bar h1 {
+  margin-inline-end: auto !important;
+}
+
+.library-bar input,
+.library-bar select {
+  font: inherit;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+.library-bar input {
+  width: min(280px, 100%);
+}
+
+.library-bar button {
+  border: 1px solid var(--line);
+}
+
+#library h2 {
+  margin: 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+#library-message {
+  margin: 24px 0;
+  text-align: center;
+}
+
+#library-books {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 20px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#library-books button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px;
+  text-align: start;
+}
+
+#library-books .cover {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 2 / 3;
+  margin-bottom: 6px;
+  overflow: hidden;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--active);
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+#library-books .cover:has(img) {
+  padding: 0;
+}
+
+#library-books .cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#library-books .title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-weight: 600;
+}
+
+#library-books .author,
+#library-books .series,
+#library-books .meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#library-books .series:empty,
+#library-books .author:empty {
+  display: none;
+}
+
+#settings output.path {
+  overflow-wrap: anywhere;
+  font-size: 12px;
 }
 
 button.link {
@@ -118,8 +272,10 @@ button.link:hover {
 }
 
 #recent {
-  width: min(520px, 100%);
-  margin: 24px 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 4px;
+  margin: 0 0 24px;
   padding: 0;
   list-style: none;
   font-size: 14px;

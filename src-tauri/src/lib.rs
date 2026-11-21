@@ -2,6 +2,8 @@ mod cli;
 mod console;
 mod data_dir;
 mod fingerprint;
+mod library;
+mod metadata;
 mod paths;
 mod register;
 mod store;
@@ -59,20 +61,35 @@ impl ReaderWindows {
             .find(|(_, w)| w.file.as_deref().is_some_and(|file| paths::same_file(file, path)))
             .map(|(label, _)| label.clone())
     }
+
+    /// A window without a book: it shows the library.
+    fn library(&self) -> Option<String> {
+        let windows = self.0.lock().unwrap();
+        windows.iter().find(|(_, w)| w.file.is_none()).map(|(label, _)| label.clone())
+    }
+}
+
+/// Brings a window forward; false when it is gone.
+fn focus_window(app: &AppHandle, label: Option<String>) -> bool {
+    let Some(window) = label.and_then(|label| app.get_webview_window(&label)) else { return false };
+    let _ = window.unminimize();
+    window.set_focus().is_ok()
 }
 
 /// Brings forward the window (other than `except`) already showing `path`;
 /// false when there is none.
 fn focus_showing(app: &AppHandle, path: &Path, except: Option<&str>) -> bool {
-    let Some(label) = app.state::<ReaderWindows>().showing(path, except) else { return false };
-    let Some(window) = app.get_webview_window(&label) else { return false };
-    let _ = window.unminimize();
-    window.set_focus().is_ok()
+    focus_window(app, app.state::<ReaderWindows>().showing(path, except))
 }
 
 /// Shows `path` in `window` and tells its frontend to load it, unless another
 /// window already shows that book; then that window comes forward instead.
+/// The library window stays the library: the book gets a window of its own.
 fn show_book(window: &Window, path: PathBuf) {
+    if window.state::<ReaderWindows>().get(window.label()).file.is_none() {
+        let _ = open_or_focus(window.app_handle(), Launch { file: Some(path), no_save: false });
+        return;
+    }
     if focus_showing(window.app_handle(), &path, Some(window.label())) {
         return;
     }
@@ -251,12 +268,145 @@ fn pick_book(window: Window) -> Result<(), String> {
     Ok(())
 }
 
-/// Opens a window for `launch`, or brings forward the one already showing its file.
+/// Opens a window for `launch`, or brings forward the one already showing its
+/// file (or, without a file, the library window).
 fn open_or_focus(app: &AppHandle, launch: Launch) -> tauri::Result<()> {
-    if launch.file.as_deref().is_some_and(|file| focus_showing(app, file, None)) {
+    let focused = match launch.file.as_deref() {
+        Some(file) => focus_showing(app, file, None),
+        None => focus_window(app, app.state::<ReaderWindows>().library()),
+    };
+    if focused {
         return Ok(());
     }
     open_window(app, launch)
+}
+
+// ---- Library ------------------------------------------------------------------
+
+/// The books found by the last scan. The frontend names books by their key
+/// (the path inside the library), which is only accepted when the scan found
+/// it, so the frontend still cannot make the app open arbitrary files.
+#[derive(Default)]
+struct LibraryBooks(Mutex<Vec<library::Entry>>);
+
+impl LibraryBooks {
+    fn path_of(&self, store: &Store, key: &str) -> Result<PathBuf, String> {
+        let root = library_root(store)?;
+        let books = self.0.lock().unwrap();
+        let entry = books.iter().find(|b| b.path == key).ok_or("That book is no longer in the library")?;
+        Ok(entry.absolute(&root))
+    }
+}
+
+fn library_root(store: &Store) -> Result<PathBuf, String> {
+    store.read(|s| s.library.clone()).ok_or_else(|| "No library folder is set".into())
+}
+
+fn library_cache(store: &Store) -> library::Cache {
+    library::Cache::new(store.dir().join("breader-cache"))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryInfo {
+    /// The library folder, once chosen.
+    folder: Option<String>,
+    /// What the first-run screen offers.
+    suggested: String,
+}
+
+#[tauri::command]
+fn library_info(store: State<Store>) -> LibraryInfo {
+    LibraryInfo {
+        folder: store.read(|s| s.library.as_ref().map(|p| p.display().to_string())),
+        suggested: data_dir::resolve_default_library().display().to_string(),
+    }
+}
+
+/// Sets the library folder: the suggested one, or one the reader picks.
+/// Returns the folder, or `None` when the picker was cancelled.
+#[tauri::command(async)]
+fn set_library(window: Window, store: State<Store>, pick: bool) -> Result<Option<String>, String> {
+    let folder = if pick {
+        match window.dialog().file().set_parent(&window).blocking_pick_folder() {
+            Some(folder) => folder.into_path().map_err(|e| e.to_string())?,
+            None => return Ok(None),
+        }
+    } else {
+        data_dir::resolve_default_library()
+    };
+    std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    let folder = std::path::absolute(&folder).unwrap_or(folder);
+    store.update(|s| s.library = Some(folder.clone())).map_err(|e| e.to_string())?;
+    let _ = window.emit("library-changed", ());
+    Ok(Some(folder.display().to_string()))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryBook {
+    key: String,
+    title: String,
+    /// "First Last", one per author.
+    authors: Vec<String>,
+    /// "Last First" of the first author, for sorting.
+    author_sort: String,
+    series: Option<String>,
+    series_index: Option<String>,
+    format: &'static str,
+    /// Share read, if a position is saved.
+    fraction: Option<f64>,
+    /// When the file was last changed (ms), for "recently added".
+    added: u64,
+    has_cover: bool,
+}
+
+/// Scans the library folder (cheap after the first time: see library::scan).
+#[tauri::command(async)]
+fn scan_library(store: State<Store>, books: State<LibraryBooks>) -> Result<Vec<LibraryBook>, String> {
+    let root = library_root(&store)?;
+    let entries = library::scan(&root, &library_cache(&store)).map_err(|e| format!("{}: {e}", root.display()))?;
+    let views = store.read(|s| {
+        entries
+            .iter()
+            .map(|e| LibraryBook {
+                key: e.path.clone(),
+                title: e.title.clone(),
+                authors: e.authors.iter().map(metadata::Author::display).collect(),
+                author_sort: e.authors.first().map(metadata::Author::sort_name).unwrap_or_default(),
+                series: e.series.clone(),
+                series_index: e.series_index.clone(),
+                format: match metadata::Format::of(Path::new(&e.path)) {
+                    Some(metadata::Format::Epub) => "EPUB",
+                    _ => "FB2",
+                },
+                fraction: s.positions.get(&e.fingerprint).map(|p| p.fraction),
+                added: e.modified,
+                has_cover: e.cover.is_some(),
+            })
+            .collect()
+    });
+    *books.0.lock().unwrap() = entries;
+    Ok(views)
+}
+
+#[tauri::command(async)]
+fn library_cover(store: State<Store>, books: State<LibraryBooks>, key: String) -> Result<Response, String> {
+    let cover = books.0.lock().unwrap().iter().find(|b| b.path == key).and_then(|b| b.cover.clone()).ok_or("No cover")?;
+    std::fs::read(library_cache(&store).covers().join(cover)).map(Response::new).map_err(|e| e.to_string())
+}
+
+/// Opens a library book in a window of its own.
+#[tauri::command(async)]
+fn open_library_book(app: AppHandle, store: State<Store>, books: State<LibraryBooks>, key: String) -> Result<(), String> {
+    let path = books.path_of(&store, &key)?;
+    open_or_focus(&app, Launch { file: Some(path), no_save: false }).map_err(|e| e.to_string())
+}
+
+/// Brings the library window forward, opening it if needed.
+#[tauri::command]
+fn show_library(app: AppHandle) -> Result<(), String> {
+    open_or_focus(&app, Launch::default()).map_err(|e| e.to_string())
 }
 
 /// Blocks the WebView context menu in every frame (the app has no editing),
@@ -348,6 +498,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(ReaderWindows::default())
+        .manage(LibraryBooks::default())
         .invoke_handler(tauri::generate_handler![
             current_book,
             read_book,
@@ -364,6 +515,12 @@ pub fn run() {
             file_types_registered,
             app_version,
             pick_book,
+            library_info,
+            set_library,
+            scan_library,
+            library_cover,
+            open_library_book,
+            show_library,
         ])
         .on_window_event(|window, event| match event {
             WindowEvent::CloseRequested { .. } => {

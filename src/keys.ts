@@ -8,6 +8,7 @@ export type Command =
   | 'chapterStart'
   | 'chapterEnd'
   | 'toc'
+  | 'library'
   | 'toggleFlow'
   | 'settings'
   | 'cycleTheme'
@@ -63,6 +64,8 @@ export function commandFor(e: Key): Command | null {
       return 'chapterEnd'
     case 't':
       return 'toc'
+    case 'l':
+      return 'library'
     case 'm':
       return 'toggleFlow'
     case 's':

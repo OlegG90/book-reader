@@ -5,7 +5,7 @@ description = "A compact e-book reader with a local library"
 authors = ["OlegG90"]
 license = "MIT"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.85"
 
 [lib]
 name = "breader_lib"
@@ -29,6 +29,10 @@ tauri-plugin-single-instance = "2.4.5"
 tauri-plugin-dialog = "2.7.3"
 winreg = "0.56.0"
 windows-sys = { version = "0.61.2", features = ["Win32_System_Console", "Win32_UI_Shell"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+quick-xml = "0.41.0"
+encoding_rs = "0.8.35"
+base64 = "0.23.1"
 
 [dev-dependencies]
 tempfile = "3"

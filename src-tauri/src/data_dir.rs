@@ -21,11 +21,29 @@ pub fn resolve_state_file(data_dir: Option<&Path>) -> PathBuf {
     if let Some(dir) = data_dir {
         return dir.join(FILE_NAME);
     }
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf));
     let app_data = std::env::var_os("APPDATA").map(PathBuf::from);
-    state_file(exe_dir.as_deref(), app_data.as_deref())
+    state_file(exe_dir().as_deref(), app_data.as_deref())
+}
+
+/// The library folder offered on first run: `lib` next to the exe when that
+/// folder is writable (portable mode), otherwise `Documents\Book Reader`.
+pub fn default_library(exe_dir: Option<&Path>, home: Option<&Path>) -> PathBuf {
+    match (exe_dir, home) {
+        (Some(dir), _) if is_writable(dir) => dir.join("lib"),
+        (_, Some(home)) => home.join("Documents").join("Book Reader"),
+        (Some(dir), None) => dir.join("lib"),
+        (None, None) => PathBuf::from("lib"),
+    }
+}
+
+/// The first-run library folder for this exe and user.
+pub fn resolve_default_library() -> PathBuf {
+    let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
+    default_library(exe_dir().as_deref(), home.as_deref())
+}
+
+fn exe_dir() -> Option<PathBuf> {
+    std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf))
 }
 
 fn is_writable(dir: &Path) -> bool {
@@ -58,6 +76,15 @@ mod tests {
         let gone = app_data.path().join("does-not-exist");
         let file = state_file(Some(&gone), Some(app_data.path()));
         assert_eq!(file, app_data.path().join(APP_DIR).join(FILE_NAME));
+    }
+
+    #[test]
+    fn library_defaults_to_lib_next_to_a_writable_exe() {
+        let exe = tempfile::tempdir().unwrap();
+        let home = Path::new(r"C:\Users\me");
+        assert_eq!(default_library(Some(exe.path()), Some(home)), exe.path().join("lib"));
+        let gone = exe.path().join("does-not-exist");
+        assert_eq!(default_library(Some(&gone), Some(home)), home.join(r"Documents\Book Reader"));
     }
 
     #[test]
