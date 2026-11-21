@@ -13,6 +13,7 @@
    - Folder picking: the dialog plugin can't pick folders on Android; SAF would mean a second, Kotlin library backend over `content://` URIs. All files access it is (sideload only).
    - The debug APK is ~140 MB (debug symbols); its signing key changes per CI run, so a reinstall needs `adb uninstall` first. A stable release key comes with stage 4.
    - The page is drawn edge to edge: safe-area insets keep it clear of the system bars.
+   - Pages turn with a swipe (foliate-js's own gesture). Tapping a page edge, which turns pages with a mouse on Windows, does nothing on the phone yet: tap zones come in stage 4.
 3. **Servers** (on Windows)
    - OPDS sources (Basic / Digest auth, credentials in the OS store), catalog browsing, search, download into the library.
    - KOSync progress sync against CWA.
