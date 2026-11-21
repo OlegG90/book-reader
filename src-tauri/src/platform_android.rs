@@ -1,6 +1,6 @@
 //! Where the library lives on Android (see platform_desktop.rs for Windows):
 //! `Documents/Books` in shared storage, reached with All files access through
-//! `StoragePlugin.kt`. With the access on, the library is a plain folder and
+//! `SystemPlugin.kt`. With the access on, the library is a plain folder and
 //! the rest of the app (scanning, Organize) works on it as on Windows.
 
 use serde::Deserialize;
@@ -11,22 +11,22 @@ use tauri::{AppHandle, Builder, Manager, Window, Wry};
 /// The library folder offered on first run, inside the shared Documents folder.
 const LIBRARY_FOLDER: &str = "Books";
 
-/// The handle to `StoragePlugin.kt`, kept in the app's state.
-struct Storage(PluginHandle<Wry>);
+/// The handle to `SystemPlugin.kt`, kept in the app's state.
+struct System(PluginHandle<Wry>);
 
-/// Registers `StoragePlugin.kt` and keeps its handle in the app's state.
+/// Registers `SystemPlugin.kt` and keeps its handle in the app's state.
 pub fn plugins(builder: Builder<Wry>) -> Builder<Wry> {
     builder.plugin(
-        plugin::Builder::<Wry, ()>::new("storage")
+        plugin::Builder::<Wry, ()>::new("system")
             .setup(|app, api| {
-                app.manage(Storage(api.register_android_plugin("com.olegg90.bookreader", "StoragePlugin")?));
+                app.manage(System(api.register_android_plugin("com.olegg90.bookreader", "SystemPlugin")?));
                 Ok(())
             })
             .build(),
     )
 }
 
-/// What `StoragePlugin.status` reports.
+/// What `SystemPlugin.status` reports.
 #[derive(Deserialize)]
 struct Status {
     /// All files access is on.
@@ -35,8 +35,18 @@ struct Status {
     documents: PathBuf,
 }
 
+/// Runs a `SystemPlugin.kt` command.
+fn run<T: serde::de::DeserializeOwned>(app: &AppHandle, command: &str) -> Result<T, String> {
+    app.state::<System>().0.run_mobile_plugin(command, ()).map_err(|e| e.to_string())
+}
+
 fn status(app: &AppHandle) -> Result<Status, String> {
-    app.state::<Storage>().0.run_mobile_plugin("status", ()).map_err(|e| e.to_string())
+    run(app, "status")
+}
+
+/// Sends the app to the background (Back on the library screen).
+pub fn leave(app: &AppHandle) -> Result<(), String> {
+    run::<serde_json::Value>(app, "moveTaskToBack").map(|_| ())
 }
 
 /// What the first-run screen offers: `Documents/Books`.
@@ -54,10 +64,7 @@ pub fn chosen_library(window: &Window, pick: bool) -> Result<Option<PathBuf>, St
     let app = window.app_handle();
     let status = status(app)?;
     if !status.granted {
-        app.state::<Storage>()
-            .0
-            .run_mobile_plugin::<serde_json::Value>("askAllFilesAccess", ())
-            .map_err(|e| e.to_string())?;
+        run::<serde_json::Value>(app, "askAllFilesAccess")?;
         return Err("Turn on \"Allow access to manage all files\" for Book Reader, come back and tap again.".into());
     }
     Ok(Some(status.documents.join(LIBRARY_FOLDER)))

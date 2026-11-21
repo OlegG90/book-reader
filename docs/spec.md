@@ -45,6 +45,8 @@ Inherited from Simple Reader unless noted:
 - Full screen with the status bar hidden while reading.
 - The screen stays on while a book is open.
 - Orientation follows the system; no orientation lock in the first version.
+- One window: a book opens in place of the library, and the library comes back in its place (the desktop keeps a window per book).
+- Back, one step at a time: closes a footnote or a panel (contents, settings, Organize), then returns from the book to the library; on the library it sends the app to the background, as Android apps do.
 
 ## Library
 
@@ -138,7 +140,7 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 - **Frontend:** plain TypeScript, no framework.
 - **Rendering:** [foliate-js](https://github.com/johnfactotum/foliate-js) (MIT), vendored; modules not needed (PDF, MOBI, comics, TTS) are removed.
 - **Removed from Simple Reader:** Markdown support with marked, Mermaid and highlight.js.
-- **Native pieces** (All files access, credential stores, keep-screen-on, volume keys) via small app-level Tauri plugins in Kotlin (`StoragePlugin.kt`) called from Rust (`platform_android.rs`).
+- **Native pieces** (All files access, credential stores, keep-screen-on, volume keys) via small app-level Tauri plugins in Kotlin (`SystemPlugin.kt`) called from Rust (`platform_android.rs`).
 - **One crate for both platforms:** `src-tauri` builds the Windows exe and the Android library; desktop-only parts (file associations, the console, single-instance, the command line, window placement) are behind `cfg(desktop)` / `cfg(windows)`.
 - **Build:** Windows locally, `npm run build:win` → portable `breader.exe`. Android in GitHub Actions only (workflow *Android*): the Android SDK and NDK have no Windows-on-ARM64 builds. Each push that touches the app builds an arm64 APK (an artifact), installed with `adb install`. The Gradle project (`src-tauri/gen/android`) was made by `tauri android init` and is kept in the repo, changed by hand from there.
 - **Version control:** private GitHub repository `OlegG90/book-reader`.

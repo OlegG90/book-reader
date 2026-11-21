@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { onBackButtonPress } from '@tauri-apps/api/app'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import {
@@ -82,7 +83,8 @@ const TOP_EDGE_PX = 48
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 // Hides what the phone can't do yet (`.desktop-only` in style.css).
-document.documentElement.classList.toggle('android', /Android/.test(navigator.userAgent))
+const isAndroid = /Android/.test(navigator.userAgent)
+document.documentElement.classList.toggle('android', isAndroid)
 const appWindow = getCurrentWindow()
 const topbar = $('topbar')
 
@@ -589,6 +591,17 @@ async function handleEscape() {
   else if (await appWindow.isFullscreen()) await appWindow.setFullscreen(false)
 }
 
+/**
+ * Android's Back, one step at a time: a note or a panel closes first, then the
+ * book returns to the library, and the library sends the app to the background.
+ */
+function handleBack() {
+  if (!$('footnote').hidden) book?.hideFootnote()
+  else if (tocOpen() || organizeOpen() || scrimlessOpen()) closePanels()
+  else if (book) void invoke('show_library').catch(console.error)
+  else void invoke('leave_app').catch(console.error)
+}
+
 function toggleFlow() {
   if (!book) return
   const flow = (book.flow = book.flow === 'paginated' ? 'scrolled' : 'paginated')
@@ -862,6 +875,8 @@ $('progress').addEventListener('click', e => {
 })
 
 appWindow.listen('book-changed', () => openCurrentBook())
+// Listening takes Back over from Android, which would otherwise leave the app on every press.
+if (isAndroid) void onBackButtonPress(handleBack).catch(console.error)
 // Another window changed a setting: apply it here too (it is already saved).
 appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
   const valid = readSettings({ ...settings, ...payload })

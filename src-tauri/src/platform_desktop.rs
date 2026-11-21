@@ -22,6 +22,11 @@ pub fn chosen_library(window: &Window, pick: bool) -> Result<Option<PathBuf>, St
     file_dialog(window).blocking_pick_folder().map(|f| f.into_path().map_err(|e| e.to_string())).transpose()
 }
 
+/// The desktop has no Back button, so there is nothing to leave.
+pub fn leave(_app: &AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
 /// Any folder the reader chose can be read.
 pub fn check_library_access(_app: &AppHandle) -> Result<(), String> {
     Ok(())
