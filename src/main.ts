@@ -81,6 +81,8 @@ const SAVE_DELAY_MS = 500
 const TOP_EDGE_PX = 48
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
+// Hides what the phone can't do yet (`.desktop-only` in style.css).
+document.documentElement.classList.toggle('android', /Android/.test(navigator.userAgent))
 const appWindow = getCurrentWindow()
 const topbar = $('topbar')
 
@@ -316,8 +318,6 @@ interface RecentBook {
 interface LibraryInfo {
   folder: string | null
   suggested: string
-  /** Whether another folder can be picked (not on Android yet). */
-  canPick: boolean
 }
 
 /** The window without a book: the library, or the first-run folder choice. */
@@ -340,11 +340,10 @@ async function showLibraryScreen() {
 async function loadLibraryInfo(): Promise<LibraryInfo> {
   const info = await invoke<LibraryInfo>('library_info').catch((e): LibraryInfo => {
     console.error(e)
-    return { folder: null, suggested: '', canPick: true }
+    return { folder: null, suggested: '' }
   })
   libraryFolder = info.folder
-  settingsPanel.setLibraryFolder(info.folder, info.canPick)
-  $('setup-pick').hidden = !info.canPick
+  settingsPanel.setLibraryFolder(info.folder)
   return info
 }
 

@@ -12,7 +12,7 @@ import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 
 /**
- * The phone's shared storage for the library (see storage.rs). With All files
+ * The phone's shared storage for the library (see platform_android.rs). With All files
  * access turned on, the library is a plain folder (Documents/Books by default)
  * that the Rust side reads and writes like any other, so the same library code
  * runs on Windows and Android. Android 11 (API 30) is the minimum (see

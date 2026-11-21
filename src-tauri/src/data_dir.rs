@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const FILE_NAME: &str = "breader.json";
+const FILE_NAME: &str = "breader.json";
 const APP_DIR: &str = "book-reader";
 
 /// Picks where the state file lives: next to the exe when that folder is

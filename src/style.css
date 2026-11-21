@@ -66,15 +66,19 @@ body {
   color: var(--muted);
 }
 
-#stage,
+#stage {
+  position: absolute;
+  inset: var(--safe-top) 0 var(--safe-bottom);
+}
+
 #stage foliate-view {
   position: absolute;
   inset: 0;
 }
 
-#stage {
-  top: var(--safe-top);
-  bottom: var(--safe-bottom);
+/* What the phone can't do yet (main.ts marks the page on Android) */
+.android .desktop-only {
+  display: none !important;
 }
 
 /* Page numbers in the bottom margin (paginated mode) */

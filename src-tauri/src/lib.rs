@@ -4,7 +4,7 @@ mod cli;
 #[cfg(desktop)]
 #[cfg_attr(not(windows), path = "console_stdout.rs")]
 mod console;
-// Android keeps its data in the app's storage: only `FILE_NAME` is shared.
+// Android keeps its data in the app's storage: only `resolve_state_file` is shared.
 #[cfg_attr(mobile, allow(dead_code))]
 mod data_dir;
 mod fingerprint;
@@ -14,8 +14,10 @@ mod naming;
 mod paths;
 #[cfg_attr(not(windows), path = "register_unsupported.rs")]
 mod register;
-#[cfg(mobile)]
-mod storage;
+// Where the library lives: a folder of the reader's choice, or Documents/Books on Android.
+#[cfg_attr(desktop, path = "platform_desktop.rs")]
+#[cfg_attr(mobile, path = "platform_android.rs")]
+mod platform;
 mod store;
 #[cfg(desktop)]
 mod version;
@@ -377,61 +379,21 @@ struct LibraryInfo {
     folder: Option<String>,
     /// What the first-run screen offers.
     suggested: String,
-    /// Whether another folder can be picked (not on Android yet).
-    can_pick: bool,
 }
 
 #[tauri::command(async)]
 fn library_info(app: AppHandle, store: State<Store>) -> Result<LibraryInfo, String> {
     Ok(LibraryInfo {
         folder: store.read(|s| s.library.as_ref().map(|p| p.display().to_string())),
-        suggested: default_library(&app)?.display().to_string(),
-        can_pick: cfg!(desktop),
+        suggested: platform::suggested_library(&app)?.display().to_string(),
     })
-}
-
-/// The library folder the first-run screen offers: `lib` next to the exe (or
-/// `Documents\Book Reader`) on Windows, `Documents/Books` in shared storage on Android.
-fn default_library(app: &AppHandle) -> Result<PathBuf, String> {
-    #[cfg(desktop)]
-    {
-        let _ = app;
-        Ok(data_dir::resolve_default_library())
-    }
-    #[cfg(mobile)]
-    {
-        storage::of(app).default_library()
-    }
-}
-
-/// Asks for a folder; `None` when cancelled.
-#[cfg(desktop)]
-fn pick_folder(window: &Window) -> Result<Option<PathBuf>, String> {
-    file_dialog(window).blocking_pick_folder().map(|f| f.into_path().map_err(|e| e.to_string())).transpose()
-}
-
-/// On Android the library is `Documents/Books` for now: the dialog plugin
-/// can't pick folders there, and a folder browser of our own comes later.
-#[cfg(mobile)]
-fn pick_folder(_window: &Window) -> Result<Option<PathBuf>, String> {
-    Err("Choosing another folder is not available on Android yet".into())
 }
 
 /// Sets the library folder: the suggested one, or one the reader picks.
 /// Returns the folder, or `None` when the picker was cancelled.
 #[tauri::command(async)]
 fn set_library(window: Window, store: State<Store>, books: State<LibraryBooks>, pick: bool) -> Result<Option<String>, String> {
-    let folder = if pick {
-        match pick_folder(&window)? {
-            Some(folder) => folder,
-            None => return Ok(None),
-        }
-    } else {
-        // A folder in shared storage needs All files access on Android.
-        #[cfg(mobile)]
-        storage::of(window.app_handle()).require_access()?;
-        default_library(window.app_handle())?
-    };
+    let Some(folder) = platform::chosen_library(&window, pick)? else { return Ok(None) };
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     let folder = std::path::absolute(&folder).unwrap_or(folder);
     store.update(|s| s.library = Some(folder.clone())).map_err(|e| e.to_string())?;
@@ -464,12 +426,7 @@ struct LibraryBook {
 #[tauri::command(async)]
 fn scan_library(app: AppHandle, store: State<Store>, books: State<LibraryBooks>) -> Result<Vec<LibraryBook>, String> {
     let root = library_root(&store)?;
-    // Without All files access (turned off after the library was set up) the
-    // folder can't be read: say how to turn it back on.
-    #[cfg(mobile)]
-    storage::of(&app).check_access()?;
-    #[cfg(desktop)]
-    let _ = app;
+    platform::check_library_access(&app)?;
     let entries = library::scan(&root, &library_cache(&store)).map_err(|e| format!("{}: {e}", root.display()))?;
     let views = store.read(|s| {
         entries
@@ -799,9 +756,7 @@ pub fn run() {
             let _ = open_or_focus(app, launch);
         }
     }));
-    #[cfg(mobile)]
-    let builder = builder.plugin(storage::init());
-    builder
+    platform::plugins(builder)
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(ReaderWindows::default())
@@ -854,12 +809,10 @@ pub fn run() {
         .setup(move |app| {
             // Loaded here, in the one running app: a second launch hands over
             // its file and exits before setup, so it never touches the data file.
-            #[cfg(desktop)]
-            let state_file = data_dir::resolve_state_file(data_dir.as_deref());
             // On Android the app's private storage keeps the state.
             #[cfg(mobile)]
-            let state_file = app.path().app_data_dir()?.join(data_dir::FILE_NAME);
-            app.manage(Store::load(state_file));
+            let data_dir = Some(app.path().app_data_dir()?);
+            app.manage(Store::load(data_dir::resolve_state_file(data_dir.as_deref())));
             open_window(app.handle(), launch)?;
             Ok(())
         })

@@ -51,8 +51,6 @@ describe('settings panel', () => {
     expect(host.textContent).toContain('Not chosen yet')
     panel.setLibraryFolder(String.raw`D:\Books`)
     expect(host.textContent).toContain(String.raw`D:\Books`)
-    panel.setLibraryFolder('/storage/emulated/0/Documents/Books', false)
-    expect([...host.querySelectorAll('button')].find(b => b.textContent === 'Change…')?.hidden).toBe(true)
   })
 
   it('shows the file-type registration state', () => {
