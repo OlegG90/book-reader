@@ -1,18 +1,17 @@
 [package]
-name = "simple-reader"
-version = "0.4.1"
-description = "A minimal, portable e-book reader"
+name = "book-reader"
+version = "0.1.0"
+description = "A compact e-book reader with a local library"
 authors = ["OlegG90"]
 license = "MIT"
-repository = "https://github.com/OlegG90/simple-reader"
 edition = "2021"
 rust-version = "1.77.2"
 
 [lib]
-name = "sreader_lib"
+name = "breader_lib"
 
 [[bin]]
-name = "sreader"
+name = "breader"
 path = "src/main.rs"
 
 [build-dependencies]

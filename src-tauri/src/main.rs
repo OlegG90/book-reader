@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    sreader_lib::run();
+    breader_lib::run();
 }

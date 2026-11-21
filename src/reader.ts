@@ -1,9 +1,14 @@
 import { suppressContextMenu } from './dom'
 import { PAGE_GAP, columnLayout, type Flow } from './layout'
-import type { TocItem } from './markdown'
 import { pageLabels } from './pages'
 import './vendor/foliate-js/view.js'
 import { FootnoteHandler } from './vendor/foliate-js/footnotes.js'
+
+export interface TocItem {
+  label: string
+  href?: string
+  subitems?: TocItem[]
+}
 
 export interface Relocation {
   fraction: number
@@ -21,8 +26,6 @@ interface Book {
   destroy?(): void
 }
 
-/** A book file for foliate-js to parse, or a book object the app built itself (Markdown). */
-export type BookSource = File | Book
 
 interface Renderer extends HTMLElement {
   setStyles?(css: string): void
@@ -45,7 +48,7 @@ interface FoliateView extends HTMLElement {
   book: Book
   renderer: Renderer
   lastLocation: Relocation | null
-  open(book: BookSource): Promise<void>
+  open(book: File): Promise<void>
   init(options: { lastLocation?: string; showTextStart?: boolean }): Promise<void>
   close(): void
   goTo(target: string | number): Promise<unknown>
@@ -150,7 +153,7 @@ export class BookView {
   static async open(
     host: HTMLElement,
     footnoteHost: HTMLElement,
-    source: BookSource,
+    source: File,
     options: OpenOptions,
     events: BookViewEvents,
   ): Promise<BookView> {
@@ -245,7 +248,7 @@ export class BookView {
     this.view.remove()
   }
 
-  async #open(source: BookSource, { flow, lastLocation, style }: OpenOptions) {
+  async #open(source: File, { flow, lastLocation, style }: OpenOptions) {
     const { view } = this
     await view.open(source)
     view.renderer.setAttribute('gap', PAGE_GAP)
@@ -274,7 +277,7 @@ export class BookView {
     })
     this.#setUpFootnotes()
 
-    // A saved location can stop resolving (e.g. after a Markdown edit); start over then.
+    // A saved location can stop resolving (e.g. after a foliate-js update); start over then.
     await view.init({ lastLocation, showTextStart: true }).catch(error => {
       if (!lastLocation) throw error
       return view.init({ showTextStart: true })

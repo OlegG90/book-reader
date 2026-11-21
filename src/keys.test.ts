@@ -24,7 +24,6 @@ describe('commandFor', () => {
   it('maps window shortcuts', () => {
     expect(key('o', { ctrlKey: true })).toBe('open')
     expect(key('W', { ctrlKey: true, shiftKey: true })).toBe('closeWindow')
-    expect(key('F5')).toBe('reload')
   })
 
   it('leaves other combinations to the browser', () => {

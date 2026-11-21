@@ -1,6 +1,6 @@
 //! File associations for the current user (HKCU, no admin rights).
 //!
-//! `--register` adds Simple Reader to "Open with" for its file types and makes
+//! `--register` adds Book Reader to "Open with" for its file types and makes
 //! it the default where the user hasn't chosen another app. Windows keeps the
 //! user's own choice (set via "Open with → Always") out of reach of apps, so
 //! that one stays the user's to make. `.fb2.zip` can't be associated: Windows
@@ -11,9 +11,9 @@ use std::path::Path;
 use winreg::enums::{HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, KEY_ALL_ACCESS};
 use winreg::RegKey;
 
-const PROG_ID: &str = "SimpleReader.Book";
-const APP_KEY: &str = r"Applications\sreader.exe";
-pub const EXTENSIONS: &[&str] = &[".epub", ".fb2", ".fbz", ".md"];
+const PROG_ID: &str = "BookReader.Book";
+const APP_KEY: &str = r"Applications\breader.exe";
+pub const EXTENSIONS: &[&str] = &[".epub", ".fb2", ".fbz"];
 
 fn user_classes() -> io::Result<RegKey> {
     RegKey::predef(HKEY_CURRENT_USER).create_subkey(r"Software\Classes").map(|(key, _)| key)
@@ -60,7 +60,7 @@ fn register_in(classes: &RegKey, exe: &Path, current_default: impl Fn(&str) -> O
     prog.create_subkey(r"shell\open\command")?.0.set_value("", &open)?;
 
     let (app, _) = classes.create_subkey(APP_KEY)?;
-    app.set_value("FriendlyAppName", &"Simple Reader")?;
+    app.set_value("FriendlyAppName", &"Book Reader")?;
     app.create_subkey(r"shell\open\command")?.0.set_value("", &open)?;
     let (types, _) = app.create_subkey("SupportedTypes")?;
 
@@ -114,7 +114,7 @@ mod tests {
 
     impl TestClasses {
         fn new(name: &str) -> (Self, RegKey) {
-            let path = format!(r"Software\SimpleReaderTest-{}-{name}", std::process::id());
+            let path = format!(r"Software\BookReaderTest-{}-{name}", std::process::id());
             let (key, _) = RegKey::predef(HKEY_CURRENT_USER).create_subkey(&path).unwrap();
             (TestClasses(path), key)
         }
@@ -126,7 +126,7 @@ mod tests {
         }
     }
 
-    const EXE: &str = r"C:\Tools\sreader.exe";
+    const EXE: &str = r"C:\Tools\breader.exe";
 
     #[test]
     fn register_adds_open_with_and_default_then_unregister_removes_them() {
@@ -163,11 +163,11 @@ mod tests {
     #[test]
     fn another_apps_default_is_kept() {
         let (_guard, classes) = TestClasses::new("other");
-        classes.create_subkey(".md").unwrap().0.set_value("", &"VSCode.md").unwrap();
+        classes.create_subkey(".fb2").unwrap().0.set_value("", &"OtherReader.Fb2").unwrap();
         register_in(&classes, Path::new(EXE), |ext| default_of(&classes, ext)).unwrap();
         unregister_in(&classes).unwrap();
-        let default: String = classes.open_subkey(".md").unwrap().get_value("").unwrap();
-        assert_eq!(default, "VSCode.md");
+        let default: String = classes.open_subkey(".fb2").unwrap().get_value("").unwrap();
+        assert_eq!(default, "OtherReader.Fb2");
     }
 
     #[test]
@@ -175,7 +175,7 @@ mod tests {
         let (_guard, classes) = TestClasses::new("machine");
         register_in(&classes, Path::new(EXE), |ext| (ext == ".epub").then(|| "Calibre.Epub".to_string())).unwrap();
         assert!(classes.open_subkey(".epub").unwrap().get_value::<String, _>("").is_err());
-        assert_eq!(classes.open_subkey(".fb2").unwrap().get_value::<String, _>("").unwrap(), PROG_ID);
+        assert_eq!(classes.open_subkey(".fbz").unwrap().get_value::<String, _>("").unwrap(), PROG_ID);
     }
 
     #[test]

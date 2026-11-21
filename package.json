@@ -1,5 +1,5 @@
 {
-  "name": "simple-reader",
+  "name": "book-reader",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,6 +9,7 @@
     "build": "tauri build --no-bundle",
     "build:x64": "npm run build -- --target x86_64-pc-windows-msvc",
     "build:arm64": "npm run build -- --target aarch64-pc-windows-msvc",
+    "build:win": "npm run build:x64",
     "clean": "node scripts/clean.mjs",
     "test": "vitest run && cargo test --manifest-path src-tauri/Cargo.toml"
   },
@@ -22,13 +23,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-opener": "^2.5.5",
-    "highlight.js": "^11.12.0",
-    "marked": "^18.0.14",
-    "mermaid": "^12.0.0"
-  },
-  "overrides": {
-    "lodash-es": "^4.18.1"
+    "@tauri-apps/plugin-opener": "^2.5.5"
   },
   "engines": {
     "node": "^24.15.0 || >=26.0.0"

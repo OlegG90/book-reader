@@ -108,14 +108,14 @@ mod tests {
     #[test]
     fn missing_file_gives_empty_state() {
         let dir = tempfile::tempdir().unwrap();
-        let store = Store::load(dir.path().join("sreader.json"));
+        let store = Store::load(dir.path().join("breader.json"));
         assert_eq!(store.read(State::clone), State::default());
     }
 
     #[test]
     fn updates_survive_reload() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nested").join("sreader.json");
+        let path = dir.path().join("nested").join("breader.json");
         let store = Store::load(path.clone());
         store
             .update(|s| {
@@ -148,7 +148,7 @@ mod tests {
     #[test]
     fn corrupt_file_is_backed_up() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sreader.json");
+        let path = dir.path().join("breader.json");
         fs::write(&path, "{ not json").unwrap();
         let store = Store::load(path.clone());
         assert_eq!(store.read(State::clone), State::default());
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn unknown_and_missing_fields_are_tolerated() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sreader.json");
+        let path = dir.path().join("breader.json");
         fs::write(&path, r#"{"settings":{"flow":"scrolled"},"future":1}"#).unwrap();
         let store = Store::load(path);
         assert_eq!(store.read(|s| s.settings["flow"].clone()), "scrolled");

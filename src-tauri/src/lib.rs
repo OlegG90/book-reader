@@ -84,8 +84,6 @@ fn show_book(window: &Window, path: PathBuf) {
 #[serde(rename_all = "camelCase")]
 struct BookInfo {
     file_name: String,
-    /// Markdown is rendered by the app itself; everything else by foliate-js.
-    markdown: bool,
     fingerprint: String,
     position: Option<Position>,
     no_save: bool,
@@ -99,23 +97,13 @@ fn current_book(window: Window, windows: State<ReaderWindows>, store: State<Stor
     let file_name = paths::file_name(&path);
     let fingerprint = fingerprint::fingerprint(&path).map_err(|e| format!("{file_name}: {e}"))?;
     let position = store.read(|s| s.positions.get(&fingerprint).cloned());
-    Ok(Some(BookInfo { file_name, markdown: paths::is_markdown(&path), fingerprint, position, no_save }))
+    Ok(Some(BookInfo { file_name, fingerprint, position, no_save }))
 }
 
 #[tauri::command(async)]
 fn read_book(window: Window, windows: State<ReaderWindows>) -> Result<Response, String> {
     let path = windows.path_of(window.label())?;
     std::fs::read(path).map(Response::new).map_err(|e| e.to_string())
-}
-
-/// Reads an image referenced by the open book (a Markdown file), relative to
-/// the book's folder. Only image files are served (see paths::resource_path),
-/// so a document cannot use this to read anything else.
-#[tauri::command(async)]
-fn read_book_resource(window: Window, windows: State<ReaderWindows>, path: String) -> Result<Response, String> {
-    let book = windows.path_of(window.label())?;
-    let target = paths::resource_path(&book, &path).ok_or("Not an image next to the book")?;
-    std::fs::read(target).map(Response::new).map_err(|e| e.to_string())
 }
 
 /// Takes the fingerprint from the frontend so a position that is still
@@ -255,7 +243,7 @@ fn pick_book(window: Window) -> Result<(), String> {
         .dialog()
         .file()
         .set_parent(&window)
-        .add_filter("Books", &["epub", "fb2", "fb2.zip", "fbz", "md"])
+        .add_filter("Books", &["epub", "fb2", "fb2.zip", "fbz"])
         .blocking_pick_file();
     if let Some(path) = picked {
         show_book(&window, path.into_path().map_err(|e| e.to_string())?);
@@ -284,7 +272,7 @@ fn open_window(app: &AppHandle, launch: Launch) -> tauri::Result<()> {
 
     let (geometry, theme) = app.state::<Store>().read(|s| (s.window.clone(), s.settings.get("theme").cloned()));
     let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::default())
-        .title("Simple Reader")
+        .title("Book Reader")
         .min_inner_size(400.0, 300.0)
         .initialization_script(theme_script(theme.as_ref().and_then(|t| t.as_str())))
         .initialization_script_for_all_frames(NO_CONTEXT_MENU_SCRIPT)
@@ -363,7 +351,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             current_book,
             read_book,
-            read_book_resource,
             save_position,
             get_settings,
             update_settings,
@@ -400,7 +387,7 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running Simple Reader");
+        .expect("error while running Book Reader");
 }
 
 /// Runs a command that doesn't open a window; returns the exit code.
@@ -415,12 +402,12 @@ fn run_command(command: Command) -> i32 {
         Command::Register => report(
             std::env::current_exe().and_then(|exe| register::register(&exe)),
             &format!(
-                "Simple Reader is registered for {}.\nIf another app still opens them, right-click a file > Open with > \
-                 Choose another app > Simple Reader, and tick \"Always\".",
+                "Book Reader is registered for {}.\nIf another app still opens them, right-click a file > Open with > \
+                 Choose another app > Book Reader, and tick \"Always\".",
                 register::EXTENSIONS.join(", ")
             ),
         ),
-        Command::Unregister => report(register::unregister(), "Simple Reader is no longer registered for any file types."),
+        Command::Unregister => report(register::unregister(), "Book Reader is no longer registered for any file types."),
         Command::Open { .. } => unreachable!("opening is handled by run()"),
     }
 }

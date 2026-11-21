@@ -1,11 +1,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const FILE_NAME: &str = "sreader.json";
-const APP_DIR: &str = "simple-reader";
+const FILE_NAME: &str = "breader.json";
+const APP_DIR: &str = "book-reader";
 
 /// Picks where the state file lives: next to the exe when that folder is
-/// writable (portable mode), otherwise `%APPDATA%\simple-reader`.
+/// writable (portable mode), otherwise `%APPDATA%\book-reader`.
 pub fn state_file(exe_dir: Option<&Path>, app_data: Option<&Path>) -> PathBuf {
     match (exe_dir, app_data) {
         (Some(dir), _) if is_writable(dir) => dir.join(FILE_NAME),
@@ -29,7 +29,7 @@ pub fn resolve_state_file(data_dir: Option<&Path>) -> PathBuf {
 }
 
 fn is_writable(dir: &Path) -> bool {
-    let probe = dir.join(format!(".sreader-probe-{}", std::process::id()));
+    let probe = dir.join(format!(".breader-probe-{}", std::process::id()));
     match fs::File::create(&probe) {
         Ok(_) => {
             let _ = fs::remove_file(&probe);

@@ -293,6 +293,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "book-reader"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
+ "tempfile",
+ "toml 0.9.12+spec-1.1.0",
+ "windows-sys 0.61.2",
+ "winreg 0.56.0",
+]
+
+[[package]]
 name = "brotli"
 version = "8.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3153,24 +3171,6 @@ name = "simd-adler32"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
-
-[[package]]
-name = "simple-reader"
-version = "0.4.1"
-dependencies = [
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-single-instance",
- "tempfile",
- "toml 0.9.12+spec-1.1.0",
- "windows-sys 0.61.2",
- "winreg 0.56.0",
-]
 
 [[package]]
 name = "siphasher"

@@ -10,7 +10,7 @@ include!(concat!(env!("OUT_DIR"), "/libraries.rs"));
 pub fn text(webview: Option<&str>) -> String {
     let rows: Vec<(&str, &str)> = std::iter::once(("WebView2", webview.unwrap_or("not found"))).chain(LIBRARIES.iter().copied()).collect();
     let width = rows.iter().map(|(name, _)| name.len()).max().unwrap_or(0);
-    let mut text = format!("Simple Reader {}", env!("CARGO_PKG_VERSION"));
+    let mut text = format!("Book Reader {}", env!("CARGO_PKG_VERSION"));
     for (name, version) in rows {
         write!(text, "\n  {name:<width$}  {version}").unwrap();
     }
@@ -30,7 +30,7 @@ mod tests {
     #[test]
     fn lists_the_app_runtime_and_libraries() {
         let text = text(Some("140.0.1"));
-        assert_eq!(text.lines().next().unwrap(), format!("Simple Reader {}", env!("CARGO_PKG_VERSION")));
+        assert_eq!(text.lines().next().unwrap(), format!("Book Reader {}", env!("CARGO_PKG_VERSION")));
         let expected: Vec<(&str, &str)> = std::iter::once(("WebView2", "140.0.1")).chain(LIBRARIES.iter().copied()).collect();
         assert_eq!(rows(&text), expected);
     }

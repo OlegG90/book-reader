@@ -14,8 +14,7 @@ import {
 import { el, suppressContextMenu } from './dom'
 import { commandFor, type Command } from './keys'
 import type { Flow } from './layout'
-import { makeMarkdownBook } from './markdown-book'
-import { BookView, type BookSource, type BookStyle, type Relocation } from './reader'
+import { BookView, type BookStyle, type Relocation } from './reader'
 import { createSettingsPanel, type PanelValues } from './settings-panel'
 import { createTOCView } from './vendor/foliate-js/ui/tree.js'
 
@@ -26,8 +25,6 @@ interface Position {
 
 interface BookInfo {
   fileName: string
-  /** Markdown is rendered by the app itself (the backend decides by extension). */
-  markdown: boolean
   fingerprint: string
   position: Position | null
   noSave: boolean
@@ -39,9 +36,7 @@ interface PendingSave {
 }
 
 interface Settings extends PanelValues {
-  /** Books and Markdown remember their paginated / scrolled mode separately. */
-  bookFlow: Flow
-  markdownFlow: Flow
+  flow: Flow
 }
 
 const FLOWS: readonly Flow[] = ['paginated', 'scrolled']
@@ -49,15 +44,13 @@ const FLOWS: readonly Flow[] = ['paginated', 'scrolled']
 function readSettings(stored: Record<string, unknown>): Settings {
   return {
     ...readAppearance(stored),
-    bookFlow: oneOf(stored.bookFlow, FLOWS, 'paginated'),
-    markdownFlow: oneOf(stored.markdownFlow, FLOWS, 'scrolled'),
+    flow: oneOf(stored.flow, FLOWS, 'paginated'),
     savePositions: stored.savePositions !== false,
   }
 }
 
 const SAVE_DELAY_MS = 500
 const TOP_EDGE_PX = 48
-const REPO_URL = 'https://github.com/OlegG90/simple-reader'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const appWindow = getCurrentWindow()
@@ -81,9 +74,6 @@ let book: BookView | null = null
 let fingerprint = ''
 /** `--no-save`: this window keeps no positions (the backend skips recent books too). */
 let noSave = false
-/** Whether the open file is Markdown (which has its own mode and can be reloaded). */
-let markdownOpen = false
-const flowKey = () => (markdownOpen ? 'markdownFlow' : 'bookFlow')
 let tocView: { element: HTMLElement; setCurrentHref(href: string): void } | null = null
 
 // ---- Reading position -------------------------------------------------------
@@ -107,19 +97,15 @@ async function flushSave() {
 
 // ---- Opening books ----------------------------------------------------------
 
-/** Reads the window's book: a file for foliate-js, or a book built from Markdown. */
-async function loadBook({ fileName, markdown }: BookInfo): Promise<BookSource> {
+/** Reads the window's book as a file for foliate-js. */
+async function loadBook({ fileName }: BookInfo): Promise<File> {
   const bytes = await invoke<ArrayBuffer>('read_book')
-  if (markdown) {
-    const loadImage = (path: string) => invoke<ArrayBuffer>('read_book_resource', { path })
-    return makeMarkdownBook(new TextDecoder().decode(bytes), fileName, loadImage)
-  }
   // foliate-js detects some formats by extension, so normalise its case.
   return new File([bytes], fileName.toLowerCase())
 }
 
-/** Opens the window's book; `lastLocation` overrides the saved position (used by reload). */
-async function openCurrentBook(lastLocation?: string) {
+/** Opens the window's book at its saved position. */
+async function openCurrentBook() {
   await flushSave()
   closeBook()
   let info: BookInfo | null = null
@@ -128,12 +114,11 @@ async function openCurrentBook(lastLocation?: string) {
     if (!info) return await showStartScreen()
     fingerprint = info.fingerprint
     noSave = info.noSave
-    markdownOpen = info.markdown
     const source = await loadBook(info)
     await settingsReady
     book = await BookView.open($('stage'), $('footnote'), source, {
-      flow: settings[flowKey()],
-      lastLocation: lastLocation ?? info.position?.cfi,
+      flow: settings.flow,
+      lastLocation: info.position?.cfi,
       style: currentBookStyle(),
     }, {
       relocate: onRelocate,
@@ -199,7 +184,7 @@ interface RecentBook {
 
 /** The window without a book: a drop hint, Ctrl+O and the recent books. */
 async function showStartScreen() {
-  void appWindow.setTitle('Simple Reader').catch(console.error)
+  void appWindow.setTitle('Book Reader').catch(console.error)
   const books = await invoke<RecentBook[]>('recent_books').catch((e): RecentBook[] => {
     console.error(e)
     return []
@@ -299,9 +284,6 @@ async function runCommand(command: Command) {
       return invoke('pick_book')
     case 'closeWindow':
       return appWindow.close()
-    case 'reload':
-      // Works after a failed reload too (e.g. the editor was still saving).
-      return markdownOpen ? openCurrentBook(book?.location) : undefined
   }
   if (!book) return
   switch (command) {
@@ -338,7 +320,7 @@ function toggleFlow() {
   if (!book) return
   const flow = (book.flow = book.flow === 'paginated' ? 'scrolled' : 'paginated')
   updateFlowButton()
-  changeSettings(markdownOpen ? { markdownFlow: flow } : { bookFlow: flow })
+  changeSettings({ flow })
 }
 
 function updateFlowButton() {
@@ -431,8 +413,8 @@ function applySettings(changes: Partial<Settings>) {
   settings = { ...settings, ...changes }
   if (Object.keys(changes).some(isAppearanceKey)) restyle()
   settingsPanel.show(settings)
-  if (book && book.flow !== settings[flowKey()]) {
-    book.flow = settings[flowKey()]
+  if (book && book.flow !== settings.flow) {
+    book.flow = settings.flow
     updateFlowButton()
   }
 }
@@ -496,7 +478,6 @@ $('toc-button').addEventListener('click', () => runCommand('toc'))
 $('settings-button').addEventListener('click', () => runCommand('settings'))
 $('shortcuts-button').addEventListener('click', () => (shortcutsOpen() ? closePanels() : openInfoPanel('shortcuts')))
 $('about-button').addEventListener('click', () => (aboutOpen() ? closePanels() : openInfoPanel('about')))
-$('github-button').addEventListener('click', () => void openUrl(REPO_URL).catch(console.error))
 $('open-button').addEventListener('click', () => runCommand('open'))
 $('flow-button').addEventListener('click', () => runCommand('toggleFlow'))
 $('fullscreen-button').addEventListener('click', () => runCommand('fullscreen'))

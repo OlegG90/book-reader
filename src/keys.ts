@@ -14,7 +14,6 @@ export type Command =
   | 'fontBigger'
   | 'fontSmaller'
   | 'fullscreen'
-  | 'reload'
   | 'open'
   | 'closeWindow'
   | 'escape'
@@ -72,8 +71,6 @@ export function commandFor(e: Key): Command | null {
       return 'cycleTheme'
     case 'F11':
       return 'fullscreen'
-    case 'F5':
-      return 'reload'
     case 'Escape':
       return 'escape'
   }

@@ -22,22 +22,22 @@ pub enum Command {
 }
 
 pub const USAGE: &str = "\
-Simple Reader - a minimal e-book reader
+Book Reader - a compact e-book reader
 
 Usage:
-  sreader [<file>] [--no-save] [--data-dir <path>]
-  sreader --register | --unregister
-  sreader --help | --version
+  breader [<file>] [--no-save] [--data-dir <path>]
+  breader --register | --unregister
+  breader --help | --version
 
 Options:
-  <file>               Open an .epub, .fb2, .fb2.zip or .md file
+  <file>               Open an .epub, .fb2 or .fb2.zip file
   --no-save            Don't remember the reading position for this window
   --data-dir <path>    Keep settings and positions in this folder
-                       (a running Simple Reader keeps the folder it started with)
-  --register           Offer Simple Reader for .epub, .fb2, .fbz and .md files (current user)
+                       (a running Book Reader keeps the folder it started with)
+  --register           Offer Book Reader for .epub, .fb2 and .fbz files (current user)
   --unregister         Remove what --register added
   --help, -h           Show this help
-  --version, -V        Show the version of Simple Reader and what it is built on";
+  --version, -V        Show the version of Book Reader and what it is built on";
 
 /// Parses command-line arguments (without the program name). Relative file
 /// paths are resolved against `cwd`, which matters when a second launch is
@@ -95,8 +95,8 @@ mod tests {
     #[test]
     fn options_combine_in_any_order() {
         assert_eq!(
-            run(&["--no-save", "book.md", "--data-dir", "data"]),
-            open(Some(r"C:\Books\book.md"), true, Some(r"C:\Books\data"))
+            run(&["--no-save", "book.fb2", "--data-dir", "data"]),
+            open(Some(r"C:\Books\book.fb2"), true, Some(r"C:\Books\data"))
         );
         assert_eq!(run(&[r"--data-dir=E:\cfg"]), open(None, false, Some(r"E:\cfg")));
     }

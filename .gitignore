@@ -7,7 +7,7 @@ target/
 src-tauri/gen/
 
 # Local app data written next to the exe during development
-sreader.json
+breader.json
 
 # Editors / OS
 .vscode/
