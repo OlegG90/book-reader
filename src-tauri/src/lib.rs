@@ -1,4 +1,8 @@
+// The desktop app's command line and exe-relative data folders are unused on Android.
+#![cfg_attr(mobile, allow(dead_code))]
+
 mod cli;
+#[cfg_attr(not(windows), path = "console_other.rs")]
 mod console;
 mod data_dir;
 mod fingerprint;
@@ -6,20 +10,27 @@ mod library;
 mod metadata;
 mod naming;
 mod paths;
+#[cfg_attr(not(windows), path = "register_other.rs")]
 mod register;
 mod store;
 mod version;
 
-use cli::{Command, Launch};
+#[cfg(desktop)]
+use cli::Command;
+use cli::Launch;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
-use store::{Position, RecentBook, Store, WindowGeometry};
+#[cfg(desktop)]
+use store::WindowGeometry;
+use store::{Position, RecentBook, Store};
 use tauri::ipc::Response;
-use tauri::{AppHandle, DragDropEvent, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, Window, WindowEvent};
+#[cfg(desktop)]
+use tauri::DragDropEvent;
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, Window, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 
 const DEFAULT_WIDTH: f64 = 1100.0;
@@ -82,6 +93,7 @@ impl ReaderWindows {
 /// Brings a window forward; false when it is gone.
 fn focus_window(app: &AppHandle, label: Option<String>) -> bool {
     let Some(window) = label.and_then(|label| app.get_webview_window(&label)) else { return false };
+    #[cfg(desktop)]
     let _ = window.unminimize();
     window.set_focus().is_ok()
 }
@@ -284,15 +296,18 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// A file dialog, modal to `window` where the platform has parent windows.
+fn file_dialog(window: &Window) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
+    let dialog = window.dialog().file();
+    #[cfg(desktop)]
+    let dialog = dialog.set_parent(window);
+    dialog
+}
+
 /// Ctrl+O: asks for a book and opens it in this window.
 #[tauri::command(async)]
 fn pick_book(window: Window) -> Result<(), String> {
-    let picked = window
-        .dialog()
-        .file()
-        .set_parent(&window)
-        .add_filter("Books", &["epub", "fb2", "fb2.zip", "fbz"])
-        .blocking_pick_file();
+    let picked = file_dialog(&window).add_filter("Books", &["epub", "fb2", "fb2.zip", "fbz"]).blocking_pick_file();
     if let Some(path) = picked {
         show_book(&window, path.into_path().map_err(|e| e.to_string())?);
     }
@@ -358,11 +373,35 @@ struct LibraryInfo {
 }
 
 #[tauri::command(async)]
-fn library_info(store: State<Store>) -> LibraryInfo {
+fn library_info(app: AppHandle, store: State<Store>) -> LibraryInfo {
     LibraryInfo {
         folder: store.read(|s| s.library.as_ref().map(|p| p.display().to_string())),
-        suggested: data_dir::resolve_default_library().display().to_string(),
+        suggested: default_library(&app).display().to_string(),
     }
+}
+
+/// The library folder the first-run screen offers. On Android, for now, the
+/// app's private storage (choosing a shared folder is the spike's next step).
+fn default_library(app: &AppHandle) -> PathBuf {
+    #[cfg(desktop)]
+    let _ = app;
+    #[cfg(desktop)]
+    return data_dir::resolve_default_library();
+    #[cfg(mobile)]
+    return app.path().app_data_dir().unwrap_or_default().join("lib");
+}
+
+/// Asks for a folder; `None` when cancelled.
+#[cfg(desktop)]
+fn pick_folder(window: &Window) -> Result<Option<PathBuf>, String> {
+    file_dialog(window).blocking_pick_folder().map(|f| f.into_path().map_err(|e| e.to_string())).transpose()
+}
+
+/// The dialog plugin can't pick folders on Android: that takes the Storage
+/// Access Framework (the Android spike's next step).
+#[cfg(mobile)]
+fn pick_folder(_window: &Window) -> Result<Option<PathBuf>, String> {
+    Err("Choosing a folder is not available on Android yet".into())
 }
 
 /// Sets the library folder: the suggested one, or one the reader picks.
@@ -370,12 +409,12 @@ fn library_info(store: State<Store>) -> LibraryInfo {
 #[tauri::command(async)]
 fn set_library(window: Window, store: State<Store>, books: State<LibraryBooks>, pick: bool) -> Result<Option<String>, String> {
     let folder = if pick {
-        match window.dialog().file().set_parent(&window).blocking_pick_folder() {
-            Some(folder) => folder.into_path().map_err(|e| e.to_string())?,
+        match pick_folder(&window)? {
+            Some(folder) => folder,
             None => return Ok(None),
         }
     } else {
-        data_dir::resolve_default_library()
+        default_library(window.app_handle())
     };
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     let folder = std::path::absolute(&folder).unwrap_or(folder);
@@ -639,14 +678,27 @@ fn open_window(app: &AppHandle, launch: Launch) -> tauri::Result<()> {
     let first = app.webview_windows().is_empty();
     app.state::<ReaderWindows>().insert(&label, launch);
 
-    let (geometry, theme) = app.state::<Store>().read(|s| (s.window.clone(), s.settings.get("theme").cloned()));
-    let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::default())
-        .title("Book Reader")
-        .min_inner_size(400.0, 300.0)
+    let theme = app.state::<Store>().read(|s| s.settings.get("theme").cloned());
+    let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::default())
         .initialization_script(theme_script(theme.as_ref().and_then(|t| t.as_str())))
         .initialization_script_for_all_frames(NO_CONTEXT_MENU_SCRIPT)
-        .initialization_script(QUIET_RESIZE_OBSERVER_SCRIPT)
-        .visible(false);
+        .initialization_script(QUIET_RESIZE_OBSERVER_SCRIPT);
+    #[cfg(desktop)]
+    return place_on_desktop(app, builder, first);
+    // A phone has one full-screen window.
+    #[cfg(mobile)]
+    {
+        let _ = first;
+        builder.build().map(|_| ())
+    }
+}
+
+/// Sizes and places a desktop window: the first one where the last window
+/// was (if that is still on a screen), later ones cascaded by Windows.
+#[cfg(desktop)]
+fn place_on_desktop(app: &AppHandle, builder: WebviewWindowBuilder<tauri::Wry, AppHandle>, first: bool) -> tauri::Result<()> {
+    let geometry = app.state::<Store>().read(|s| s.window.clone());
+    let mut builder = builder.title("Book Reader").min_inner_size(400.0, 300.0).visible(false);
     builder = match &geometry {
         Some(g) if first => builder.inner_size(g.width, g.height).position(g.x, g.y).maximized(g.maximized),
         // Windows places (and cascades) later windows itself.
@@ -677,11 +729,13 @@ fn theme_script(theme: Option<&str>) -> String {
 }
 
 /// A saved position can point at a monitor that is no longer connected.
+#[cfg(desktop)]
 fn is_on_screen(window: &tauri::WebviewWindow) -> tauri::Result<bool> {
     let pos = window.outer_position()?;
     Ok(window.monitor_from_point(pos.x.into(), pos.y.into())?.is_some())
 }
 
+#[cfg(desktop)]
 fn remember_geometry(window: &Window) -> tauri::Result<()> {
     if window.is_fullscreen()? {
         return Ok(());
@@ -701,20 +755,29 @@ fn remember_geometry(window: &Window) -> tauri::Result<()> {
     Ok(())
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let (launch, data_dir) = match cli::parse(std::env::args().skip(1), &cwd) {
-        Command::Open { launch, data_dir } => (launch, data_dir),
-        other => std::process::exit(run_command(other)),
+    // The desktop app takes a book and options on the command line.
+    #[cfg(desktop)]
+    let (launch, data_dir) = {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        match cli::parse(std::env::args().skip(1), &cwd) {
+            Command::Open { launch, data_dir } => (launch, data_dir),
+            other => std::process::exit(run_command(other)),
+        }
     };
+    #[cfg(mobile)]
+    let launch = Launch::default();
 
-    tauri::Builder::default()
-        // Must come first: a second launch hands its arguments to this process and exits.
-        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
-            if let Command::Open { launch, .. } = cli::parse(argv.into_iter().skip(1), Path::new(&cwd)) {
-                let _ = open_or_focus(app, launch);
-            }
-        }))
+    let builder = tauri::Builder::default();
+    // Must come first: a second launch hands its arguments to this process and exits.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+        if let Command::Open { launch, .. } = cli::parse(argv.into_iter().skip(1), Path::new(&cwd)) {
+            let _ = open_or_focus(app, launch);
+        }
+    }));
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(ReaderWindows::default())
@@ -749,12 +812,14 @@ pub fn run() {
             organize_apply,
         ])
         .on_window_event(|window, event| match event {
+            #[cfg(desktop)]
             WindowEvent::CloseRequested { .. } => {
                 let _ = remember_geometry(window);
             }
             WindowEvent::Destroyed => {
                 window.state::<ReaderWindows>().remove(window.label());
             }
+            #[cfg(desktop)]
             WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) => {
                 if let Some(path) = paths.first() {
                     show_book(window, path.clone());
@@ -765,7 +830,12 @@ pub fn run() {
         .setup(move |app| {
             // Loaded here, in the one running app: a second launch hands over
             // its file and exits before setup, so it never touches the data file.
-            app.manage(Store::load(data_dir::resolve_state_file(data_dir.as_deref())));
+            #[cfg(desktop)]
+            let state_file = data_dir::resolve_state_file(data_dir.as_deref());
+            // On Android the app's private storage keeps the state.
+            #[cfg(mobile)]
+            let state_file = app.path().app_data_dir()?.join(data_dir::FILE_NAME);
+            app.manage(Store::load(state_file));
             open_window(app.handle(), launch)?;
             Ok(())
         })
@@ -774,6 +844,7 @@ pub fn run() {
 }
 
 /// Runs a command that doesn't open a window; returns the exit code.
+#[cfg(desktop)]
 fn run_command(command: Command) -> i32 {
     match command {
         Command::Help => report(Ok(()), cli::USAGE),
@@ -795,6 +866,7 @@ fn run_command(command: Command) -> i32 {
     }
 }
 
+#[cfg(desktop)]
 fn report(result: std::io::Result<()>, success: &str) -> i32 {
     match result {
         Ok(()) => {

@@ -1,0 +1,74 @@
+# Builds the Android app into an APK for the phone (arm64 only). The Android
+# SDK and NDK have no Windows-on-ARM64 builds, so the APK is made here, never
+# on the PC, and installed with `adb install`. Until the Gradle project is
+# kept in the repo (src-tauri/gen/android), each run makes it with
+# `tauri android init` and uploads it as an artifact.
+name: Android
+
+on:
+  push:
+    paths: ['src/**', 'src-tauri/**', 'index.html', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: android
+
+      # The runner has the SDK and an NDK.
+      - run: echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+
+      - run: npm ci
+
+      - name: The Gradle project and the app icons
+        run: |
+          if [ ! -d src-tauri/gen/android ]; then npx tauri android init --ci; fi
+          npx tauri icon src-tauri/icons/app-icon.svg
+
+      # A debug build, signed with the runner's throwaway debug key: reinstalling
+      # needs `adb uninstall com.olegg90.bookreader` first. A release key comes
+      # with the full Android version.
+      - run: npx tauri android build --debug --apk --target aarch64 --ci
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: book-reader-apk
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android-project
+          path: |
+            src-tauri/gen/android
+            !src-tauri/gen/android/**/build
+            !src-tauri/gen/android/.gradle
+            !src-tauri/gen/android/app/src/main/jniLibs
