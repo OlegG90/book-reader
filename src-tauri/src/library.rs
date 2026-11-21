@@ -3,6 +3,7 @@
 
 use crate::fingerprint::fingerprint;
 use crate::metadata::{self, Author, Format};
+use crate::naming;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -30,8 +31,42 @@ pub struct Entry {
 
 impl Entry {
     pub fn absolute(&self, root: &Path) -> PathBuf {
-        root.join(&self.path)
+        join(root, &self.path)
     }
+}
+
+/// A library-relative path (`/` separators) under `root`.
+pub fn join(root: &Path, relative: &str) -> PathBuf {
+    relative.split('/').fold(root.to_path_buf(), |path, part| path.join(part))
+}
+
+/// The moves that make every book follow the naming template: each book with
+/// the new path it gets. A book whose identical copy already sits at its
+/// template path stays where it is (nothing is ever overwritten or deleted).
+pub fn organize_plan(root: &Path, books: &[Entry]) -> io::Result<Vec<(Entry, String)>> {
+    // Targets of planned moves; files already on disk are checked there.
+    let mut taken = HashSet::new();
+    let mut plan = Vec::new();
+    for book in books {
+        let Some(format) = Format::of(Path::new(&book.path)) else { continue };
+        let wanted = naming::template_path(&naming::BookName {
+            title: &book.title,
+            authors: &book.authors,
+            series: book.series.as_deref(),
+            series_index: book.series_index.as_deref(),
+            format,
+        });
+        if wanted.to_lowercase() == book.path.to_lowercase() {
+            continue;
+        }
+        // The book's own file counts as the identical copy, so a book already
+        // at "Title (2)" because "Title" is taken stays put.
+        if let naming::Placement::Free(to) = naming::place(root, &wanted, &book.fingerprint, &taken)? {
+            taken.insert(to.to_lowercase());
+            plan.push((book.clone(), to));
+        }
+    }
+    Ok(plan)
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -234,6 +269,39 @@ mod tests {
         let books = scan(dir.path(), &Cache::new(dir.path().join(".cache"))).unwrap();
         assert_eq!(books[0].title, "Broken Book");
         assert!(books[0].authors.is_empty());
+    }
+
+    #[test]
+    fn organizing_moves_books_to_their_template_paths() {
+        let (dir, root) = library_with_samples();
+        let cache = Cache::new(dir.path().join("cache"));
+        let books = scan(&root, &cache).unwrap();
+        let plan = organize_plan(&root, &books).unwrap();
+        let moves: Vec<(&str, &str)> = plan.iter().map(|(b, to)| (b.path.as_str(), to.as_str())).collect();
+        assert_eq!(moves.len(), 2);
+        assert_eq!(moves[0].0, "Carroll Lewis/Alice.epub");
+        assert!(moves[0].1.starts_with("Carroll Lewis/Alice"), "{}", moves[0].1);
+        assert!(moves[1].1.ends_with(".fb2.zip"), "{}", moves[1].1);
+
+        for (book, to) in &plan {
+            naming::move_file(&book.absolute(&root), &join(&root, to)).unwrap();
+        }
+        let again = scan(&root, &cache).unwrap();
+        assert!(organize_plan(&root, &again).unwrap().is_empty(), "a second run changes nothing");
+    }
+
+    #[test]
+    fn organizing_keeps_duplicates_where_they_are() {
+        let (dir, root) = library_with_samples();
+        let cache = Cache::new(dir.path().join("cache"));
+        let books = scan(&root, &cache).unwrap();
+        let plan = organize_plan(&root, &books).unwrap();
+        let (alice, to) = plan.iter().find(|(b, _)| b.path.ends_with("Alice.epub")).unwrap();
+        // Put an identical copy where Alice should go: Alice itself then stays.
+        fs::copy(alice.absolute(&root), join(&root, to)).unwrap();
+        let books = scan(&root, &cache).unwrap();
+        let plan = organize_plan(&root, &books).unwrap();
+        assert!(plan.iter().all(|(b, _)| !b.path.ends_with("Alice.epub")));
     }
 
     #[test]

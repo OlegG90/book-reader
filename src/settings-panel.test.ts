@@ -3,12 +3,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_APPEARANCE } from './appearance'
 import { createSettingsPanel, type PanelValues } from './settings-panel'
 
-const initial: PanelValues = { ...DEFAULT_APPEARANCE, savePositions: true }
+const initial: PanelValues = { ...DEFAULT_APPEARANCE, savePositions: true, offerLibrary: true }
 
 function setup() {
   const host = document.createElement('aside')
   const onChange = vi.fn()
-  const actions = { clearHistory: vi.fn(), toggleFileTypes: vi.fn(), changeLibrary: vi.fn() }
+  const actions = { clearHistory: vi.fn(), toggleFileTypes: vi.fn(), changeLibrary: vi.fn(), organizeLibrary: vi.fn() }
   const panel = createSettingsPanel(host, initial, onChange, actions)
   const button = (text: string) => {
     const found = [...host.querySelectorAll('button')].find(b => b.textContent === text)
@@ -42,6 +42,8 @@ describe('settings panel', () => {
     expect(actions.toggleFileTypes).toHaveBeenCalledOnce()
     button('Change…').click()
     expect(actions.changeLibrary).toHaveBeenCalledOnce()
+    button('Organize…').click()
+    expect(actions.organizeLibrary).toHaveBeenCalledOnce()
   })
 
   it('shows the library folder', () => {

@@ -53,6 +53,26 @@
 
     <aside id="settings" aria-label="Settings" hidden></aside>
 
+    <div id="offer" role="status" hidden>
+      <span id="offer-text">This book is not in your library.</span>
+      <span id="offer-buttons">
+        <button id="offer-move">Move to library</button>
+        <button id="offer-copy">Copy to library</button>
+        <button id="offer-later">Not now</button>
+        <button id="offer-never">Never for this file</button>
+      </span>
+    </div>
+
+    <section id="organize" role="dialog" aria-labelledby="organize-title" hidden>
+      <h2 id="organize-title">Organize library</h2>
+      <p id="organize-summary" class="muted"></p>
+      <ol id="organize-list"></ol>
+      <p class="organize-actions">
+        <button id="organize-cancel">Cancel</button>
+        <button id="organize-apply" class="primary"></button>
+      </p>
+    </section>
+
     <aside id="shortcuts" aria-label="Keyboard shortcuts" hidden>
       <h2>Shortcuts</h2>
       <dl>

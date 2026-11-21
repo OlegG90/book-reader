@@ -19,6 +19,8 @@ pub struct State {
     pub recent: Vec<RecentBook>,
     /// The library folder; `None` until the first-run choice is made.
     pub library: Option<PathBuf>,
+    /// Fingerprints of books the reader never wants offered for the library.
+    pub declined: Vec<String>,
 }
 
 /// How many books the start screen lists.

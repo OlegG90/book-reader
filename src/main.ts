@@ -41,7 +41,11 @@ interface BookInfo {
   fingerprint: string
   position: Position | null
   noSave: boolean
+  /** The book is outside the library folder and may be offered for it. */
+  offerLibrary: boolean
 }
+
+type AddMode = 'move' | 'copy'
 
 interface PendingSave {
   fingerprint: string
@@ -52,6 +56,8 @@ interface Settings extends PanelValues {
   flow: Flow
   librarySort: Sort
   libraryStatus: Status
+  /** The last choice in the "add to library" bar, offered first next time. */
+  libraryAddMode: AddMode
 }
 
 const FLOWS: readonly Flow[] = ['paginated', 'scrolled']
@@ -62,7 +68,9 @@ function readSettings(stored: Record<string, unknown>): Settings {
     flow: oneOf(stored.flow, FLOWS, 'paginated'),
     librarySort: oneOf(stored.librarySort, SORTS, 'author'),
     libraryStatus: oneOf(stored.libraryStatus, STATUSES, 'all'),
+    libraryAddMode: oneOf(stored.libraryAddMode, ['move', 'copy'] as const, 'move'),
     savePositions: stored.savePositions !== false,
+    offerLibrary: stored.offerLibrary !== false,
   }
 }
 
@@ -87,6 +95,9 @@ const settingsReady = invoke<Record<string, unknown>>('get_settings')
     settingsPanel.show(settings)
     showLibraryControls()
   })
+void invoke<LibraryInfo>('library_info')
+  .then(info => settingsPanel.setLibraryFolder(info.folder))
+  .catch(console.error)
 let currentTocHref: string | undefined
 let book: BookView | null = null
 let fingerprint = ''
@@ -168,9 +179,43 @@ async function openCurrentBook() {
   highlightToc(book.view.lastLocation?.tocItem?.href)
   $('progress').hidden = false
   updateTopbarButtons()
+  if (info.offerLibrary && settings.offerLibrary) showOffer()
+}
+
+// ---- Adding a book to the library ------------------------------------------
+
+/** Shows the bar, with the last used of Move / Copy first. */
+function showOffer() {
+  $('offer-text').textContent = 'This book is not in your library.'
+  $('offer-buttons').hidden = false
+  $('offer-move').classList.toggle('primary', settings.libraryAddMode === 'move')
+  $('offer-copy').classList.toggle('primary', settings.libraryAddMode === 'copy')
+  $('offer').hidden = false
+}
+
+let offerTimer: number | undefined
+
+function hideOffer() {
+  clearTimeout(offerTimer)
+  $('offer').hidden = true
+}
+
+async function addToLibrary(mode: AddMode) {
+  changeSettings({ libraryAddMode: mode })
+  $('offer-buttons').hidden = true
+  try {
+    const { path, existed } = await invoke<{ path: string; existed: boolean }>('add_to_library', { mode })
+    $('offer-text').textContent = existed
+      ? `Already in the library: ${path}`
+      : `${mode === 'move' ? 'Moved' : 'Copied'} to the library: ${path}`
+  } catch (e) {
+    $('offer-text').textContent = `Couldn't add the book: ${e}`
+  }
+  offerTimer = window.setTimeout(hideOffer, 4000)
 }
 
 function closeBook() {
+  hideOffer()
   book?.destroy()
   book = null
   tocView = null
@@ -292,7 +337,7 @@ function renderLibrary() {
 function bookCard(book: LibraryBook) {
   const status = statusOf(book)
   const progress =
-    status === 'finished' ? 'Finished' : status === 'reading' ? `${Math.round((book.fraction ?? 0) * 100)}%` : ''
+    status === 'finished' ? 'Finished' : status === 'reading' ? `${Math.max(1, Math.round((book.fraction ?? 0) * 100))}%` : ''
   const cover = el('div', { className: 'cover' }, el('span', { textContent: book.title }))
   if (book.hasCover) loadCover(cover, book.key)
   const button = el(
@@ -406,6 +451,8 @@ function panelHasKeyboard(e: KeyboardEvent, command: Command) {
 function onKey(e: KeyboardEvent) {
   const command = commandFor(e)
   if (!command || panelHasKeyboard(e, command)) return
+  // The organize preview is modal: only Escape gets past it.
+  if (organizeOpen() && command !== 'escape') return
   e.preventDefault()
   runCommand(command).catch(console.error)
 }
@@ -458,7 +505,7 @@ async function runCommand(command: Command) {
 
 async function handleEscape() {
   if (!$('footnote').hidden) book?.hideFootnote()
-  else if (tocOpen() || scrimlessOpen()) closePanels()
+  else if (tocOpen() || organizeOpen() || scrimlessOpen()) closePanels()
   else if (await appWindow.isFullscreen()) await appWindow.setFullscreen(false)
 }
 
@@ -496,8 +543,62 @@ function openSettings() {
   $('settings').querySelector<HTMLElement>('button, select, input')?.focus()
 }
 
+// ---- Organize library ---------------------------------------------------------
+
+interface Rename {
+  from: string
+  to: string
+}
+
+const organizeOpen = () => !$('organize').hidden
+
+/** Shows what "Organize library" would rename, for confirmation. */
+async function openOrganize() {
+  closePanels()
+  $('scrim').hidden = false
+  $('organize').hidden = false
+  $('organize-summary').textContent = 'Checking the library…'
+  $('organize-list').replaceChildren()
+  $('organize-apply').hidden = true
+  try {
+    // The plan works on the last scan, so make it current first.
+    await invoke('scan_library')
+    const renames = await invoke<Rename[]>('organize_preview')
+    showOrganizePlan(renames)
+  } catch (e) {
+    $('organize-summary').textContent = `Can't read the library: ${e}`
+  }
+}
+
+function showOrganizePlan(renames: Rename[]) {
+  $('organize-summary').textContent = renames.length
+    ? `${renames.length === 1 ? 'This book' : `These ${renames.length} books`} will be renamed to “Author/Series NN - Title”. Nothing is deleted or overwritten.`
+    : 'Every book already follows the naming pattern.'
+  $('organize-list').replaceChildren(
+    ...renames.map(r => el('li', {}, el('span', { className: 'from muted', textContent: r.from }), el('span', { className: 'to', textContent: `→ ${r.to}` }))),
+  )
+  $('organize-apply').textContent = `Rename ${renames.length === 1 ? 'the book' : `${renames.length} books`}`
+  $('organize-apply').hidden = !renames.length
+  $('organize-cancel').textContent = renames.length ? 'Cancel' : 'Close'
+  ;(renames.length ? $('organize-apply') : $('organize-cancel')).focus()
+}
+
+async function applyOrganize() {
+  $('organize-apply').hidden = true
+  $('organize-summary').textContent = 'Renaming…'
+  try {
+    const count = await invoke<number>('organize_apply')
+    $('organize-summary').textContent = `Renamed ${count} ${count === 1 ? 'book' : 'books'}.`
+    $('organize-list').replaceChildren()
+    $('organize-cancel').textContent = 'Close'
+  } catch (e) {
+    $('organize-summary').textContent = `Renaming stopped: ${e}`
+  }
+}
+
 function closePanels() {
   $('scrim').hidden = true
+  $('organize').hidden = true
   $('toc').hidden = true
   $('settings').hidden = true
   $('about').hidden = true
@@ -525,6 +626,7 @@ const settingsPanel = createSettingsPanel(
       void invoke(command).then(refreshFileTypesStatus, console.error)
     },
     changeLibrary: () => void chooseLibrary(true),
+    organizeLibrary: () => void openOrganize(),
   },
 )
 
@@ -642,6 +744,19 @@ appWindow.onFocusChanged(({ payload: focused }) => {
   void refreshRecent()
   void refreshLibrary()
 })
+// Books were added or renamed (by this or another window).
+appWindow.listen('library-updated', () => {
+  if (libraryVisible()) void Promise.all([refreshRecent(), refreshLibrary()])
+})
+$('offer-move').addEventListener('click', () => void addToLibrary('move'))
+$('offer-copy').addEventListener('click', () => void addToLibrary('copy'))
+$('offer-later').addEventListener('click', hideOffer)
+$('offer-never').addEventListener('click', () => {
+  hideOffer()
+  void invoke('decline_library', { fingerprint }).catch(console.error)
+})
+$('organize-apply').addEventListener('click', () => void applyOrganize())
+$('organize-cancel').addEventListener('click', closePanels)
 appWindow.listen('library-changed', () => {
   libraryBooks = []
   if (!book) void showLibraryScreen()

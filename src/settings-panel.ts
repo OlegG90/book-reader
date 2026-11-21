@@ -4,6 +4,8 @@ import { el } from './dom'
 /** Everything the settings panel edits. */
 export interface PanelValues extends Appearance {
   savePositions: boolean
+  /** Offer to copy or move books opened from outside the library into it. */
+  offerLibrary: boolean
 }
 
 /** Buttons in the panel that act instead of changing a value. */
@@ -14,6 +16,8 @@ export interface PanelActions {
   toggleFileTypes(): void
   /** Picks another library folder. */
   changeLibrary(): void
+  /** Renames the library's books to follow the naming pattern (after a preview). */
+  organizeLibrary(): void
 }
 
 const THEME_LABELS: Record<Theme, string> = { system: 'System', light: 'Light', dark: 'Dark', sepia: 'Sepia' }
@@ -63,7 +67,14 @@ export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onC
     onclick: actions.clearHistory,
   })
   const libraryFolder = el('output', { className: 'path' })
-  const changeLibrary = el('button', { type: 'button', textContent: 'Change…', onclick: actions.changeLibrary })
+  const libraryButtons = el(
+    'div',
+    { className: 'buttons' },
+    el('button', { type: 'button', textContent: 'Change…', onclick: actions.changeLibrary }),
+    el('button', { type: 'button', textContent: 'Organize…', onclick: actions.organizeLibrary }),
+  )
+  const offerLibrary = el('input', { type: 'checkbox' })
+  offerLibrary.onchange = () => onChange({ offerLibrary: offerLibrary.checked })
   const fileTypesStatus = el('output')
   const fileTypesButton = el('button', {
     type: 'button',
@@ -78,13 +89,15 @@ export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onC
     field('Line spacing', lineHeight, lineHeightValue),
     field('Line length', lineLength, lineLengthValue),
     el('label', { className: 'check' }, savePositions, 'Remember reading position'),
-    field('Library folder', libraryFolder, changeLibrary),
+    field('Library folder', libraryFolder, libraryButtons),
+    el('label', { className: 'check' }, offerLibrary, 'Offer to add books opened from elsewhere'),
     field('History', clearHistory),
     field('File types', fileTypesStatus, fileTypesButton),
   )
 
   function show(values: PanelValues) {
     current = values
+    offerLibrary.checked = values.offerLibrary
     themeButtons.forEach((button, i) => button.setAttribute('aria-pressed', String(THEMES[i] === values.theme)))
     font.value = values.font
     size.textContent = `${values.fontSize}px`
