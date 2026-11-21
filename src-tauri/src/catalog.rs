@@ -65,7 +65,7 @@ fn on_server(source: &Source, url: &str) -> bool {
     }
 }
 
-fn login(source: &Source) -> Option<Login> {
+pub fn login(source: &Source) -> Option<Login> {
     (!source.user.is_empty()).then(|| Login { user: source.user.clone(), password: platform::password(&source.id).unwrap_or_default() })
 }
 

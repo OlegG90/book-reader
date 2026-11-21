@@ -1,6 +1,10 @@
-//! KOReader progress sync (KOSync), as Calibre-Web-Automated serves it.
+//! KOReader progress sync (KOSync), as Calibre-Web-Automated serves it: at
+//! `/kosync` on the server, with the CWA login over HTTP Basic.
 
+use crate::catalog::{self, Source};
+use crate::net;
 use md5::{Digest, Md5};
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
@@ -28,6 +32,84 @@ pub fn document_id(path: &Path) -> io::Result<String> {
         md5.update(&buffer[..read]);
     }
     Ok(md5.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+const ACCEPT: &str = "application/vnd.koreader.v1+json";
+
+/// A reading position as the server keeps it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Progress {
+    /// Where in the book: a CFI from Book Reader (KOReader puts its own xpointers here).
+    pub progress: String,
+    /// Share read, 0–1.
+    pub percentage: f64,
+    /// Which device: "Book Reader on Android"…
+    pub device: String,
+    pub device_id: String,
+    /// When the server got it, in seconds since the Unix epoch.
+    pub timestamp: u64,
+}
+
+/// What the server sends back for a book (`{}` when it has nothing).
+#[derive(Deserialize)]
+struct Stored {
+    progress: Option<String>,
+    percentage: Option<f64>,
+    device: Option<String>,
+    device_id: Option<String>,
+    timestamp: Option<u64>,
+}
+
+/// `https://host/kosync`: the sync service next to the source's catalog.
+fn base(source: &Source) -> Result<String, String> {
+    let url = catalog::check_url(&source.url)?;
+    Ok(format!("{}/kosync", url.origin().ascii_serialization()))
+}
+
+/// Turns the server's answer into a result, with CWA's errors as sentences.
+fn check(source: &Source, reply: net::Reply) -> Result<net::Reply, String> {
+    match reply.status {
+        200..=299 => Ok(reply),
+        503 => Err(format!("Progress sync is turned off on {}", source.name)),
+        // CWA answers a refused login with 400 and error 2001.
+        400 if String::from_utf8_lossy(&reply.body).contains("2001") => {
+            Err(format!("{} didn't accept the user name or password", source.name))
+        }
+        401 | 403 => Err(format!("{} didn't accept the user name or password", source.name)),
+        status => Err(format!("{} answered with an error ({status})", source.name)),
+    }
+}
+
+/// The position the server has for a book, if any.
+pub fn pull(source: &Source, document: &str) -> Result<Option<Progress>, String> {
+    let url = format!("{}/syncs/progress/{document}", base(source)?);
+    let reply = check(source, net::get(&url, catalog::login(source).as_ref(), ACCEPT)?)?;
+    let stored: Stored = serde_json::from_slice(&reply.body).map_err(|e| e.to_string())?;
+    let (Some(progress), Some(percentage)) = (stored.progress, stored.percentage) else { return Ok(None) };
+    Ok(Some(Progress {
+        progress,
+        // CWA stores percents; the protocol speaks of a 0–1 share.
+        percentage: if percentage > 1.0 { percentage / 100.0 } else { percentage },
+        device: stored.device.unwrap_or_default(),
+        device_id: stored.device_id.unwrap_or_default(),
+        timestamp: stored.timestamp.unwrap_or_default(),
+    }))
+}
+
+/// Sends a book's position to the server (which stamps the time itself).
+pub fn push(source: &Source, document: &str, progress: &str, percentage: f64, device: &str, device_id: &str) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct Update<'a> {
+        document: &'a str,
+        progress: &'a str,
+        percentage: f64,
+        device: &'a str,
+        device_id: &'a str,
+    }
+    let body = serde_json::to_string(&Update { document, progress, percentage, device, device_id }).map_err(|e| e.to_string())?;
+    let url = format!("{}/syncs/progress", base(source)?);
+    check(source, net::put_json(&url, catalog::login(source).as_ref(), ACCEPT, &body)?).map(|_| ())
 }
 
 /// Reads until `buffer` is full or the file ends.
@@ -66,6 +148,12 @@ mod tests {
         let bytes: Vec<u8> = (0..300_000u32).map(|i| (i * 7 % 251) as u8).collect();
         fs::write(&path, &bytes).unwrap();
         assert_eq!(document_id(&path).unwrap(), expected(&bytes));
+    }
+
+    #[test]
+    fn the_sync_service_sits_at_the_servers_root() {
+        let source = Source { id: "1".into(), name: "CWA".into(), url: "http://192.168.1.5:8083/opds".into(), user: "u".into(), sync: true };
+        assert_eq!(base(&source).unwrap(), "http://192.168.1.5:8083/kosync");
     }
 
     #[test]

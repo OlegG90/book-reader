@@ -196,7 +196,8 @@ fn read_book(window: Window, windows: State<ReaderWindows>) -> Result<Response, 
 /// Takes the fingerprint from the frontend so a position that is still
 /// pending when another book replaces it is saved under the right book.
 #[tauri::command(async)]
-fn save_position(store: State<Store>, fingerprint: String, position: Position) -> Result<(), String> {
+fn save_position(store: State<Store>, fingerprint: String, mut position: Position) -> Result<(), String> {
+    position.time = now_ms();
     store
         .update(|s| {
             s.positions.insert(fingerprint, position);
@@ -559,6 +560,77 @@ fn put_in_library(store: &Store, books: &LibraryBooks, source: &Path, mode: AddM
         naming::Placement::Exists(rel) => Added { path: rel, existed: true },
     };
     Ok((added, fingerprint))
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
+// ---- Progress sync (KOSync) -----------------------------------------------------
+
+/// The source that syncs progress, if one is set.
+fn sync_source(store: &Store) -> Option<catalog::Source> {
+    store.read(|s| s.sources.iter().find(|source| source.sync).cloned())
+}
+
+/// This install's id for the sync server, made once.
+fn device_id(store: &Store) -> Result<String, String> {
+    let id = store.read(|s| s.device_id.clone());
+    if !id.is_empty() {
+        return Ok(id);
+    }
+    let id = format!("{:016x}", now_ms() ^ u64::from(std::process::id()).rotate_left(32));
+    store.update(|s| s.device_id = id.clone()).map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+const DEVICE_NAME: &str = if cfg!(mobile) { "Book Reader on Android" } else { "Book Reader on Windows" };
+
+/// The window's book, when its progress may be synced.
+fn sync_book(window: &Window) -> Option<PathBuf> {
+    let launch = window.state::<ReaderWindows>().get(window.label());
+    if launch.no_save {
+        return None;
+    }
+    launch.file
+}
+
+/// A newer position from another device, offered when a book opens.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncOffer {
+    cfi: String,
+    fraction: f64,
+    device: String,
+    /// When the other device was there (ms since the Unix epoch).
+    time: u64,
+}
+
+/// Asks the sync server for the window's book. Offers its position only if
+/// it comes from another device, differs from the one here and is newer.
+#[tauri::command(async)]
+fn sync_pull(window: Window, store: State<Store>) -> Result<Option<SyncOffer>, String> {
+    let (Some(source), Some(path)) = (sync_source(&store), sync_book(&window)) else { return Ok(None) };
+    let document = kosync::document_id(&path).map_err(|e| e.to_string())?;
+    let Some(remote) = kosync::pull(&source, &document)? else { return Ok(None) };
+    if remote.device_id == device_id(&store)? {
+        return Ok(None);
+    }
+    let fingerprint = fingerprint::fingerprint(&path).map_err(|e| e.to_string())?;
+    let time = remote.timestamp * 1000;
+    let local = store.read(|s| s.positions.get(&fingerprint).cloned());
+    if local.is_some_and(|here| here.cfi == remote.progress || here.time >= time) {
+        return Ok(None);
+    }
+    Ok(Some(SyncOffer { cfi: remote.progress, fraction: remote.percentage, device: remote.device, time }))
+}
+
+/// Sends the window's book's position to the sync server.
+#[tauri::command(async)]
+fn sync_push(window: Window, store: State<Store>, cfi: String, fraction: f64) -> Result<(), String> {
+    let (Some(source), Some(path)) = (sync_source(&store), sync_book(&window)) else { return Ok(()) };
+    let document = kosync::document_id(&path).map_err(|e| e.to_string())?;
+    kosync::push(&source, &document, &cfi, fraction, DEVICE_NAME, &device_id(&store)?)
 }
 
 // ---- Catalogs -----------------------------------------------------------------
@@ -968,6 +1040,8 @@ pub fn run() {
             catalog_search,
             catalog_image,
             catalog_download,
+            sync_pull,
+            sync_push,
             add_to_library,
             decline_library,
             get_bookmarks,

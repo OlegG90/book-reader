@@ -479,7 +479,8 @@ body.library-mode #fullscreen-button {
 }
 
 /* "Add to library" bar for books opened from outside the library */
-#offer {
+#offer,
+#sync-bar {
   position: fixed;
   left: 50%;
   bottom: calc(16px + var(--safe-bottom));
@@ -499,7 +500,8 @@ body.library-mode #fullscreen-button {
   box-shadow: var(--shadow);
 }
 
-#offer-buttons {
+#offer-buttons,
+#sync-bar .bar-buttons {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;

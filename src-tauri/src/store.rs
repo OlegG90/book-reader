@@ -25,6 +25,9 @@ pub struct State {
     pub bookmarks: HashMap<String, Value>,
     /// OPDS catalogs (their passwords are in the OS credential store).
     pub sources: Vec<crate::catalog::Source>,
+    /// This install's id for progress sync, so its own positions on the
+    /// server can be told from another device's.
+    pub device_id: String,
 }
 
 /// How many books the start screen lists.
@@ -53,6 +56,10 @@ impl State {
 pub struct Position {
     pub cfi: String,
     pub fraction: f64,
+    /// When it was saved (ms since the Unix epoch), to compare with the
+    /// server's; 0 for positions saved before sync existed.
+    #[serde(default)]
+    pub time: u64,
 }
 
 /// Window placement in logical pixels.
@@ -115,7 +122,7 @@ mod tests {
     use super::*;
 
     fn position(cfi: &str) -> Position {
-        Position { cfi: cfi.into(), fraction: 0.5 }
+        Position { cfi: cfi.into(), fraction: 0.5, time: 0 }
     }
 
     #[test]

@@ -193,6 +193,72 @@ async function openCurrentBook() {
     return []
   })
   renderBookmarks()
+  void pullSync()
+}
+
+// ---- Progress sync ----------------------------------------------------------
+
+/** How often a changed position goes to the sync server while reading. */
+const SYNC_EVERY_MS = 60_000
+/** Closing the window waits this long at most for the last push. */
+const SYNC_ON_CLOSE_MS = 3_000
+
+interface SyncOffer {
+  cfi: string
+  fraction: number
+  device: string
+  time: number
+}
+
+let syncOffer: SyncOffer | null = null
+/** The position moved since the last push. */
+let syncDirty = false
+
+/** Asks the sync server whether another device read on, and offers to jump there. */
+async function pullSync() {
+  const offer = await invoke<SyncOffer | null>('sync_pull').catch(e => {
+    console.warn('sync:', e)
+    return null
+  })
+  if (!offer || !book) return
+  syncOffer = offer
+  $('sync-text').textContent = `${offer.device || 'Another device'}, ${timeAgo(offer.time)}: ${Math.round(offer.fraction * 100)}%`
+  $('sync-bar').hidden = false
+}
+
+/** "2 h ago", "yesterday"... */
+function timeAgo(time: number) {
+  const minutes = Math.round((Date.now() - time) / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours} h ago`
+  const days = Math.round(hours / 24)
+  return days === 1 ? 'yesterday' : `${days} days ago`
+}
+
+async function jumpToSynced() {
+  const offer = syncOffer
+  hideSyncBar()
+  if (!offer || !book) return
+  // The same file on both devices, so the CFI should resolve; the share read is the fallback.
+  await book.view.goTo(offer.cfi).catch(() => book?.view.goToFraction(offer.fraction))
+}
+
+function hideSyncBar() {
+  syncOffer = null
+  $('sync-bar').hidden = true
+}
+
+/** Sends the position if it moved; failures stay quiet and are retried next time. */
+async function pushSync() {
+  const location = book?.view.lastLocation
+  if (!syncDirty || !location) return
+  syncDirty = false
+  await invoke('sync_push', { cfi: location.cfi, fraction: location.fraction }).catch(e => {
+    syncDirty = true
+    console.warn('sync:', e)
+  })
 }
 
 // ---- Bookmarks --------------------------------------------------------------
@@ -285,6 +351,8 @@ async function addToLibrary(mode: AddMode) {
 }
 
 function closeBook() {
+  void pushSync()
+  hideSyncBar()
   hideOffer()
   book?.destroy()
   book = null
@@ -502,6 +570,7 @@ function onRelocate(location: Relocation) {
   highlightToc(tocItem?.href)
   updateBookmarkButton()
   scheduleSave({ fingerprint, position: { cfi, fraction } })
+  if (!noSave) syncDirty = true
 }
 
 function highlightToc(href: string | undefined) {
@@ -888,6 +957,11 @@ $('offer-never').addEventListener('click', () => {
   void invoke('decline_library', { fingerprint }).catch(console.error)
 })
 $('organize-apply').addEventListener('click', () => void applyOrganize())
+$('sync-jump').addEventListener('click', () => void jumpToSynced())
+$('sync-stay').addEventListener('click', hideSyncBar)
+setInterval(() => void pushSync(), SYNC_EVERY_MS)
+// Going to the background (minimising, switching apps on the phone) sends the position too.
+document.addEventListener('visibilitychange', () => document.hidden && void pushSync())
 $('organize-cancel').addEventListener('click', closePanels)
 $('tab-books').addEventListener('click', () => showTab('books'))
 $('tab-catalogs').addEventListener('click', () => showTab('catalogs'))
@@ -921,7 +995,8 @@ appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
 })
 // flushSave never throws, so a failed save cannot keep the window open.
 appWindow.onCloseRequested(async () => {
-  await Promise.all([flushSave(), flushSettings()])
+  const lastPush = Promise.race([pushSync(), new Promise(done => setTimeout(done, SYNC_ON_CLOSE_MS))])
+  await Promise.all([flushSave(), flushSettings(), lastPush])
 })
 systemDark.addEventListener('change', () => settings.theme === 'system' && restyle())
 
