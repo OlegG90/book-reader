@@ -97,27 +97,31 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 
 ### Sources
 
-- A list of OPDS sources, each with a name, URL, user name and password. Expected: CWA as the main library, the Calibre Content Server as a secondary one.
+- A list of OPDS sources, kept in **Settings → Catalogs**: name, server address, user name, password. Expected: CWA as the main library, the Calibre Content Server as a secondary one.
+- The reader types the **server's address** (`http://host:8083`); saving finds the OPDS catalog behind it (the address itself, else `/opds`, where CWA, Calibre-Web and the Calibre Content Server keep it) and keeps that address. A refused login is reported on saving.
 - One source is marked as the **progress-sync source** (KOSync; in practice CWA).
-- Authentication: HTTP Basic (CWA) and Digest (Calibre Content Server).
-- Passwords are stored in the OS credential store: Windows Credential Manager, Android Keystore. The config file stays portable and holds no secrets.
-- Plain `http://` is allowed. Saving a source whose host is outside private ranges and Tailscale (`100.64.0.0/10`, `*.ts.net`) shows a warning.
+- Authentication: HTTP Basic sent with the first request (what CWA expects), Digest when the server answers with a Digest challenge (the Calibre Content Server).
+- Passwords are stored in the OS credential store: Windows Credential Manager now, Android Keystore with the full Android version. The config file stays portable and holds no secrets.
+- Plain `http://` is allowed. Saving a source whose host is outside private ranges, single-label home-network names, `.local` / `.lan` and Tailscale (`100.64.0.0/10`, `*.ts.net`) shows a warning.
+- The app only ever requests addresses on a source's own server (scheme, host and port), so a feed or a book can't make it fetch anything else.
 
 ### Catalog browsing
 
-- Navigation follows the server's OPDS feeds (new, authors, series, categories…), plus OPDS search.
-- Covers in the lists.
-- A mark on books that are already in the local library.
-- Download format: EPUB if available, otherwise FB2; another format can be chosen by hand.
-- Downloaded books go into the library folder under the [naming template](#file-naming).
+- The library window has two tabs, **Library** and **Catalogs**. With several sources, a list at the top picks one.
+- Navigation follows the server's OPDS feeds (new, authors, series, categories…), with **← Back** (Android's Back too), **More** for the next page of a long list, and OPDS search (the server's OpenSearch template).
+- Covers in the lists, fetched through the app with the source's login.
+- A mark on books the library seems to hold (same title and first author's surname: a hint; downloading checks the content).
+- Download format: EPUB if available, otherwise FB2. CWA serves FB2 as `text/xml`, so the download link tells the format. (Choosing another format by hand: later.)
+- Downloaded books go into the library folder under the [naming template](#file-naming), the same way as Copy / Move: a book the library already holds isn't added twice.
 
 ### Progress sync
 
 - Only between the user's own devices (Windows ↔ Android); compatibility with KOReader or Kobo is not a goal.
-- **Transport:** the KOSync protocol built into CWA.
-- **Document id:** the KOSync hash of the file. Sync is therefore guaranteed only when both devices hold byte-identical files — in practice books downloaded from the same server. A book without a match on the server simply does not sync; this is not an error.
+- **Transport:** the KOSync protocol built into CWA, at `/kosync` on the sync source's server, with the CWA login over HTTP Basic (CWA doesn't accept KOReader's md5 key). It must be turned on in CWA's settings; when it's off, pushes and pulls fail quietly.
+- **Document id:** KOReader's partial MD5 of the file (1 KiB samples at 0, 1K, 4K, 16K … 1G). Sync is therefore guaranteed only when both devices hold byte-identical files — in practice books downloaded from the same server; CWA computes the same hash for its library's files and matches them. A book without a match on the server simply does not sync; this is not an error.
+- **Newer / another device:** each install has a device id; positions keep the time they were saved. A server position counts only if it comes from another device, differs from the local one and is newer.
 - **Payload:** `progress` holds the foliate-js position (EPUB CFI); `percentage` is filled in truthfully, so other clients could at least jump by percent.
-- **Push:** when a book is closed, when the app goes to the background, and once a minute while reading if the position changed.
+- **Push:** when a book is closed, when the app goes to the background, and once a minute while reading if the position changed. Closing the window waits 3 s at most for it. `--no-save` windows don't sync.
 - **Pull:** when a book is opened. If the server has a different, newer position, a bar offers to jump to it, e.g. "Jump to 63% (Android, 2 h ago)?" — never a silent jump.
 - **Offline:** failures are silent; pending pushes are retried later.
 
