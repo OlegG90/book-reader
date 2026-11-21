@@ -1,0 +1,468 @@
+/* Themes: main.ts sets data-theme to the resolved theme ("system" becomes light
+   or dark). The book is drawn with --fg and --link too (see appearance.ts), so
+   these variables are the one place a theme's colours are defined. */
+:root {
+  color-scheme: light;
+  --bg: #fbfbf8;
+  --fg: #1f1f1f;
+  --link: #1a5fb4;
+  --muted: #777;
+  --panel: #ffffff;
+  --line: rgba(0, 0, 0, 0.12);
+  --active: rgba(0, 0, 0, 0.07);
+  --accent: #6b6b6b;
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #1b1b1c;
+  --fg: #d8d8d6;
+  --link: #8ab4f8;
+  --muted: #8a8a8a;
+  --panel: #262628;
+  --line: rgba(255, 255, 255, 0.12);
+  --active: rgba(255, 255, 255, 0.08);
+  --accent: #9a9a9a;
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+}
+
+:root[data-theme='sepia'] {
+  --bg: #f4ecd8;
+  --fg: #5b4636;
+  --link: #8a4b1f;
+  --muted: #8c7b66;
+  --panel: #faf4e6;
+  --line: rgba(91, 70, 54, 0.18);
+  --active: rgba(91, 70, 54, 0.08);
+  --accent: #9c8467;
+  --shadow: 0 8px 28px rgba(91, 70, 54, 0.2);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+#stage,
+#stage foliate-view {
+  position: absolute;
+  inset: 0;
+}
+
+/* Page numbers in the bottom margin (paginated mode) */
+#stage foliate-view::part(foot) {
+  color: var(--muted);
+  opacity: 1; /* foliate-js dims the margins too; the muted colour is enough */
+  font-variant-numeric: tabular-nums;
+}
+
+/* Start screen (also shows errors) */
+#start {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 24px;
+  text-align: center;
+  font-size: 18px;
+}
+
+#start p {
+  margin: 0;
+}
+
+#error {
+  margin-bottom: 28px;
+  padding: 12px 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+#start h1 {
+  margin: 0 0 8px;
+  font-size: 26px;
+  font-weight: 600;
+}
+
+button.link {
+  padding: 0;
+  font-size: inherit;
+  color: var(--link);
+  text-decoration: underline;
+}
+
+button.link:hover {
+  background: none;
+}
+
+#recent {
+  width: min(520px, 100%);
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  text-align: start;
+}
+
+#recent:empty {
+  display: none;
+}
+
+#recent button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: start;
+}
+
+#recent .title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#recent .author,
+#recent .percent {
+  color: var(--muted);
+}
+
+#recent .percent {
+  grid-row: span 2;
+  align-self: center;
+  padding-inline-start: 12px;
+}
+
+#recent .missing {
+  opacity: 0.45;
+}
+
+/* Controls shown near the window edges */
+.edge {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.edge.shown {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#topbar {
+  top: 0;
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+#topbar .spacer {
+  flex: 1;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--active);
+}
+
+/* Book-dependent topbar buttons are dimmed until a book is open */
+#topbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#topbar button:disabled:hover {
+  background: none;
+}
+
+/* Table of contents */
+#scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+#toc {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 21;
+  width: min(360px, 85vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+#toc h2 {
+  margin: 16px 16px 2px;
+  font-size: 16px;
+}
+
+#toc-author {
+  margin: 0 16px 8px;
+}
+
+#toc-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px 16px;
+  border-top: 1px solid var(--line);
+}
+
+#toc-tree ol,
+#toc-tree li {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#toc-tree a,
+#toc-tree span {
+  display: block;
+  padding: 7px 8px;
+  border-radius: 6px;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+#toc-tree span {
+  color: var(--muted);
+}
+
+#toc-tree a:hover {
+  background: var(--active);
+}
+
+#toc-tree [aria-current] {
+  font-weight: 600;
+  background: var(--active);
+}
+
+#toc-tree svg {
+  margin-inline-start: -22px;
+  padding-inline: 4px 5px;
+  fill: currentColor;
+  opacity: 0.5;
+}
+
+#toc-tree [aria-expanded='false'] svg {
+  transform: rotate(-90deg);
+}
+
+#toc-tree [aria-expanded='false'] + [role='group'] {
+  display: none;
+}
+
+/* Side panels: settings, about, shortcuts */
+#settings,
+#about,
+#shortcuts {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  z-index: 21; /* above the scrim (20), like the contents */
+  width: min(320px, 85vw);
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  accent-color: var(--accent);
+}
+
+#settings h2,
+#about h2,
+#shortcuts h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+#settings .field {
+  display: grid;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+/* A slider with its value beside it */
+#settings .field:has(> output) {
+  grid-template-columns: 1fr auto;
+}
+
+#settings .label {
+  grid-column: 1 / -1;
+  color: var(--muted);
+}
+
+#settings select {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+#settings .segmented {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+#settings .segmented button {
+  flex: 1;
+  padding: 5px 4px;
+}
+
+#settings .segmented button[aria-pressed='true'] {
+  background: var(--active);
+  font-weight: 600;
+}
+
+#settings .stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#settings .stepper output {
+  min-width: 48px;
+  text-align: center;
+}
+
+#settings .stepper button {
+  border: 1px solid var(--line);
+}
+
+/* Action buttons (history, file types) read as buttons, not labels */
+#settings .field > button {
+  border: 1px solid var(--line);
+  justify-self: start;
+}
+
+#settings .check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Shortcut list: keys on the left, explanations take twice the share on the right */
+#shortcuts dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 14px;
+}
+
+#shortcuts dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* Footnote pop-up */
+#footnote {
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  z-index: 30;
+  width: min(640px, calc(100vw - 32px));
+  height: 45vh; /* until the note is laid out, then fitted to it */
+  max-height: 45vh;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+#footnote foliate-view {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Progress bar */
+#progress {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  height: 3px;
+  cursor: pointer;
+  transition: height 0.12s;
+}
+
+#progress:hover {
+  height: 22px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+
+#progress-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  opacity: 0.45;
+}
+
+#progress-label {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+#progress:hover #progress-label {
+  display: flex;
+}

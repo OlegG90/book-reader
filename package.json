@@ -1,0 +1,36 @@
+{
+  "name": "simple-reader",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build:web": "tsc --noEmit && vite build",
+    "tauri": "tauri",
+    "build": "tauri build --no-bundle",
+    "build:x64": "npm run build -- --target x86_64-pc-windows-msvc",
+    "build:arm64": "npm run build -- --target aarch64-pc-windows-msvc",
+    "clean": "node scripts/clean.mjs",
+    "test": "vitest run && cargo test --manifest-path src-tauri/Cargo.toml"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.5",
+    "@types/node": "^24.19.2",
+    "jsdom": "^30.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-opener": "^2.5.5",
+    "highlight.js": "^11.12.0",
+    "marked": "^18.0.14",
+    "mermaid": "^12.0.0"
+  },
+  "overrides": {
+    "lodash-es": "^4.18.1"
+  },
+  "engines": {
+    "node": "^24.15.0 || >=26.0.0"
+  }
+}
