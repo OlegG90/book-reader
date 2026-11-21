@@ -116,7 +116,11 @@ fn focus_showing(app: &AppHandle, path: &Path, except: Option<&str>) -> bool {
 /// Shows `path` in `window` and tells its frontend to load it, unless another
 /// window already shows that book; then that window comes forward instead.
 /// The library window stays the library: the book gets a window of its own.
+/// A phone has one window, so there the book opens in it.
 fn show_book(window: &Window, path: PathBuf) {
+    if cfg!(mobile) {
+        return show_here(window, Some(path));
+    }
     let current = window.state::<ReaderWindows>().get(window.label());
     if current.file.is_none() {
         // A `--no-save` library window passes that on to the books it opens.
@@ -127,6 +131,15 @@ fn show_book(window: &Window, path: PathBuf) {
         return;
     }
     window.state::<ReaderWindows>().set_path(window.label(), path);
+    let _ = window.emit_to(window.label(), "book-changed", ());
+}
+
+/// Shows a book, or the library for `None`, in `window` itself. A phone has
+/// one window, so everything opens there and Back returns to the library.
+fn show_here(window: &Window, file: Option<PathBuf>) {
+    let windows = window.state::<ReaderWindows>();
+    let no_save = windows.get(window.label()).no_save;
+    windows.insert(window.label(), Launch { file, no_save });
     let _ = window.emit_to(window.label(), "book-changed", ());
 }
 
@@ -455,18 +468,11 @@ fn library_cover(store: State<Store>, books: State<LibraryBooks>, key: String) -
     std::fs::read(library_cache(&store).covers().join(cover)).map(Response::new).map_err(|e| e.to_string())
 }
 
-/// Opens a library book in a window of its own.
+/// Opens a library book: in a window of its own, or on a phone in its one window.
 #[tauri::command(async)]
-fn open_library_book(
-    window: Window,
-    windows: State<ReaderWindows>,
-    store: State<Store>,
-    books: State<LibraryBooks>,
-    key: String,
-) -> Result<(), String> {
-    let path = books.path_of(&store, &key)?;
-    let no_save = windows.get(window.label()).no_save;
-    open_or_focus(window.app_handle(), Launch { file: Some(path), no_save }).map_err(|e| e.to_string())
+fn open_library_book(window: Window, store: State<Store>, books: State<LibraryBooks>, key: String) -> Result<(), String> {
+    show_book(&window, books.path_of(&store, &key)?);
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -629,12 +635,24 @@ fn organize_apply(app: AppHandle, store: State<Store>, books: State<LibraryBooks
     result.map(|()| moved.len())
 }
 
-/// Brings the library window forward, opening it if needed.
+/// Brings the library window forward, opening it if needed; on a phone,
+/// shows the library in its one window.
 /// Async: on Windows, building a window in a sync command (which runs on the
 /// main thread) deadlocks.
 #[tauri::command(async)]
-fn show_library(app: AppHandle) -> Result<(), String> {
-    open_or_focus(&app, Launch::default()).map_err(|e| e.to_string())
+fn show_library(window: Window) -> Result<(), String> {
+    if cfg!(mobile) {
+        show_here(&window, None);
+        return Ok(());
+    }
+    open_or_focus(window.app_handle(), Launch::default()).map_err(|e| e.to_string())
+}
+
+/// Back on the library screen of a phone: the app goes to the background,
+/// as Android apps do. Nothing happens on the desktop.
+#[tauri::command(async)]
+fn leave_app(app: AppHandle) -> Result<(), String> {
+    platform::leave(&app)
 }
 
 /// Blocks the WebView context menu in every frame (the app has no editing),
@@ -783,6 +801,7 @@ pub fn run() {
             library_cover,
             open_library_book,
             show_library,
+            leave_app,
             add_to_library,
             decline_library,
             get_bookmarks,

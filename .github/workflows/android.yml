@@ -2,7 +2,7 @@
 # SDK and NDK have no Windows-on-ARM64 builds, so the APK is made here, never
 # on the PC, and installed with `adb install`. The Gradle project in
 # src-tauri/gen/android was made by `tauri android init` and is kept in the
-# repo, changed by hand from there (StoragePlugin.kt, the manifest).
+# repo, changed by hand from there (SystemPlugin.kt, the manifest).
 name: Android
 
 # Every push that touches the app or what it is built from, on any branch.
