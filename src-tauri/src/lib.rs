@@ -8,9 +8,11 @@ mod console;
 #[cfg_attr(mobile, allow(dead_code))]
 mod data_dir;
 mod fingerprint;
+mod kosync;
 mod library;
 mod metadata;
 mod naming;
+mod opds;
 mod paths;
 #[cfg_attr(not(windows), path = "register_unsupported.rs")]
 mod register;
@@ -21,6 +23,7 @@ mod platform;
 mod store;
 #[cfg(desktop)]
 mod version;
+mod xml;
 
 #[cfg(desktop)]
 use cli::Command;

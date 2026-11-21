@@ -32,6 +32,8 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2-zli
 quick-xml = "0.41.0"
 encoding_rs = "0.8.35"
 base64 = "0.23.1"
+url = "2.5.9"
+md-5 = "0.10"
 
 # Windows only: file associations and the console for --help / --version.
 [target.'cfg(windows)'.dependencies]
