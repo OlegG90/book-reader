@@ -32,7 +32,8 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-          cache: gradle
+          # No Gradle cache until the Gradle project is in the repo: the cache
+          # needs its files to exist before the run makes them.
 
       - uses: dtolnay/rust-toolchain@stable
         with:
