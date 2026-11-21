@@ -53,7 +53,7 @@ Inherited from Simple Reader unless noted:
 - **One** library folder, stored in the config.
 - **First run** asks which folder to use as the library:
   - Desktop: default is `lib` next to the exe. If the exe's folder is not writable, the default becomes `%USERPROFILE%\Documents\Book Reader`.
-  - Android: the system folder picker (Storage Access Framework), suggesting `Documents/Books`. "Skip" uses the app's private storage, with a warning that those books are deleted together with the app. If SAF turns out too painful in Tauri, the fallback is the "All files access" permission (acceptable for a sideloaded personal app).
+  - Android: `Documents/Books` in shared storage, through the **All files access** permission (`MANAGE_EXTERNAL_STORAGE`; fine for a sideloaded app, not allowed on Google Play). The first-run button opens Android's setting for it; with it on, the library is a plain folder and the same Rust code scans, fills and organizes it as on Windows. The Storage Access Framework was not chosen: every file operation would have to go through `content://` URIs in Kotlin, a second library backend. Choosing another folder on Android comes with the full Android version.
 - The folder is scanned recursively for supported formats; metadata (title, author, series, cover) is cached.
 
 ### Library screen
@@ -138,9 +138,10 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 - **Frontend:** plain TypeScript, no framework.
 - **Rendering:** [foliate-js](https://github.com/johnfactotum/foliate-js) (MIT), vendored; modules not needed (PDF, MOBI, comics, TTS) are removed.
 - **Removed from Simple Reader:** Markdown support with marked, Mermaid and highlight.js.
-- **Native pieces** (SAF, credential stores, keep-screen-on, volume keys) via Tauri plugins or small custom Kotlin / Rust code.
-- **Build:** local scripts, `npm run build:win` → portable `breader.exe`, `npm run build:android` → signed APK. CI on GitHub may be added later.
-- **Version control:** local git repository; a GitHub repository is optional later.
+- **Native pieces** (All files access, credential stores, keep-screen-on, volume keys) via small app-level Tauri plugins in Kotlin (`StoragePlugin.kt`) called from Rust (`storage.rs`).
+- **One crate for both platforms:** `src-tauri` builds the Windows exe and the Android library; desktop-only parts (file associations, the console, single-instance, the command line, window placement) are behind `cfg(desktop)` / `cfg(windows)`.
+- **Build:** Windows locally, `npm run build:win` → portable `breader.exe`. Android in GitHub Actions only (workflow *Android*): the Android SDK and NDK have no Windows-on-ARM64 builds. Each push that touches the app builds an arm64 APK (an artifact), installed with `adb install`. The Gradle project (`src-tauri/gen/android`) was made by `tauri android init` and is kept in the repo, changed by hand from there.
+- **Version control:** private GitHub repository `OlegG90/book-reader`.
 
 ## Testing
 
