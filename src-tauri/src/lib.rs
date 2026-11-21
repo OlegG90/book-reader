@@ -624,6 +624,15 @@ fn show_library(app: AppHandle) -> Result<(), String> {
 const NO_CONTEXT_MENU_SCRIPT: &str =
     "document.addEventListener('contextmenu', e => { if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]')) return; e.preventDefault(); });";
 
+/// foliate-js's paginator re-lays pages out from a ResizeObserver, and the
+/// browser then reports "ResizeObserver loop completed with undelivered
+/// notifications". It is harmless (the rest arrives next frame), so it is
+/// dropped before any other listener (such as Vite's dev overlay) sees it.
+/// It has to be an initialization script: listeners on `window` run in the
+/// order they were added, and this runs before the page's own scripts.
+const QUIET_RESIZE_OBSERVER_SCRIPT: &str =
+    "addEventListener('error', e => { if (String(e.message).includes('ResizeObserver loop')) { e.preventDefault(); e.stopImmediatePropagation(); } });";
+
 fn open_window(app: &AppHandle, launch: Launch) -> tauri::Result<()> {
     static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
     let label = format!("reader-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed));
@@ -636,6 +645,7 @@ fn open_window(app: &AppHandle, launch: Launch) -> tauri::Result<()> {
         .min_inner_size(400.0, 300.0)
         .initialization_script(theme_script(theme.as_ref().and_then(|t| t.as_str())))
         .initialization_script_for_all_frames(NO_CONTEXT_MENU_SCRIPT)
+        .initialization_script(QUIET_RESIZE_OBSERVER_SCRIPT)
         .visible(false);
     builder = match &geometry {
         Some(g) if first => builder.inner_size(g.width, g.height).position(g.x, g.y).maximized(g.maximized),
