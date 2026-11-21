@@ -116,6 +116,7 @@ fn focus_showing(app: &AppHandle, path: &Path, except: Option<&str>) -> bool {
 /// Shows `path` in `window` and tells its frontend to load it, unless another
 /// window already shows that book; then that window comes forward instead.
 /// The library window stays the library: the book gets a window of its own.
+/// A phone has one window, so there the book opens in it.
 fn show_book(window: &Window, path: PathBuf) {
     if cfg!(mobile) {
         return show_here(window, Some(path));
@@ -467,22 +468,11 @@ fn library_cover(store: State<Store>, books: State<LibraryBooks>, key: String) -
     std::fs::read(library_cache(&store).covers().join(cover)).map(Response::new).map_err(|e| e.to_string())
 }
 
-/// Opens a library book in a window of its own.
+/// Opens a library book: in a window of its own, or on a phone in its one window.
 #[tauri::command(async)]
-fn open_library_book(
-    window: Window,
-    windows: State<ReaderWindows>,
-    store: State<Store>,
-    books: State<LibraryBooks>,
-    key: String,
-) -> Result<(), String> {
-    let path = books.path_of(&store, &key)?;
-    if cfg!(mobile) {
-        show_here(&window, Some(path));
-        return Ok(());
-    }
-    let no_save = windows.get(window.label()).no_save;
-    open_or_focus(window.app_handle(), Launch { file: Some(path), no_save }).map_err(|e| e.to_string())
+fn open_library_book(window: Window, store: State<Store>, books: State<LibraryBooks>, key: String) -> Result<(), String> {
+    show_book(&window, books.path_of(&store, &key)?);
+    Ok(())
 }
 
 #[derive(Serialize)]

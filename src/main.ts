@@ -585,10 +585,16 @@ async function runCommand(command: Command) {
   }
 }
 
-async function handleEscape() {
+/** Closes the footnote, or else any open panel; false when there was none. */
+function closeTopLayer() {
   if (!$('footnote').hidden) book?.hideFootnote()
   else if (tocOpen() || organizeOpen() || scrimlessOpen()) closePanels()
-  else if (await appWindow.isFullscreen()) await appWindow.setFullscreen(false)
+  else return false
+  return true
+}
+
+async function handleEscape() {
+  if (!closeTopLayer() && (await appWindow.isFullscreen())) await appWindow.setFullscreen(false)
 }
 
 /**
@@ -596,10 +602,8 @@ async function handleEscape() {
  * book returns to the library, and the library sends the app to the background.
  */
 function handleBack() {
-  if (!$('footnote').hidden) book?.hideFootnote()
-  else if (tocOpen() || organizeOpen() || scrimlessOpen()) closePanels()
-  else if (book) void invoke('show_library').catch(console.error)
-  else void invoke('leave_app').catch(console.error)
+  if (closeTopLayer()) return
+  void invoke(book ? 'show_library' : 'leave_app').catch(console.error)
 }
 
 function toggleFlow() {
