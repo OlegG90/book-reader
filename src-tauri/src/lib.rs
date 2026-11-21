@@ -473,6 +473,26 @@ fn repath_recent(store: &Store, fingerprint: &str, path: &Path) -> Result<(), St
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command(async)]
+fn get_bookmarks(store: State<Store>, fingerprint: String) -> Value {
+    store.read(|s| s.bookmarks.get(&fingerprint).cloned().unwrap_or_else(|| Value::Array(vec![])))
+}
+
+/// Replaces a book's bookmarks (an empty list forgets the book).
+#[tauri::command(async)]
+fn set_bookmarks(store: State<Store>, fingerprint: String, bookmarks: Value) -> Result<(), String> {
+    store
+        .update(|s| match bookmarks.as_array() {
+            Some(list) if !list.is_empty() => {
+                s.bookmarks.insert(fingerprint, bookmarks);
+            }
+            _ => {
+                s.bookmarks.remove(&fingerprint);
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
 /// "Never for this file": stops offering this book for the library.
 #[tauri::command(async)]
 fn decline_library(store: State<Store>, fingerprint: String) -> Result<(), String> {
@@ -648,6 +668,8 @@ pub fn run() {
             show_library,
             add_to_library,
             decline_library,
+            get_bookmarks,
+            set_bookmarks,
             organize_preview,
             organize_apply,
         ])

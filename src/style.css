@@ -137,6 +137,7 @@ body.library-mode #topbar {
   pointer-events: auto;
 }
 
+body.library-mode #bookmark-button,
 body.library-mode #toc-button,
 body.library-mode #flow-button,
 body.library-mode #library-button,
@@ -542,6 +543,43 @@ button:hover {
 
 #toc-tree [aria-expanded='false'] + [role='group'] {
   display: none;
+}
+
+#topbar #bookmark-button[aria-pressed='true'] {
+  font-weight: 600;
+  background: var(--active);
+}
+
+#bookmarks {
+  max-height: 40%;
+  overflow-y: auto;
+  padding: 4px 8px 12px;
+  border-top: 1px solid var(--line);
+}
+
+#bookmarks h3 {
+  margin: 8px 8px 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+#bookmark-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#bookmark-list li {
+  display: flex;
+}
+
+#bookmark-list .go {
+  flex: 1;
+  text-align: start;
+}
+
+#bookmark-list .remove {
+  color: var(--muted);
 }
 
 /* Side panels: settings, about, shortcuts */

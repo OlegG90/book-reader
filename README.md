@@ -5,7 +5,9 @@ Calibre-Web-Automated / Calibre library. Started as a fork of [Simple Reader](ht
 
 - Formats: EPUB, FB2 (`.fb2`, `.fb2.zip`)
 - Paginated or scrolled reading, table of contents, footnote pop-ups
-- Remembers your place in every book
+- A library folder with covers, search and filters; books from elsewhere can be copied or moved in
+  under one naming pattern ("Author/Series NN - Title")
+- Remembers your place in every book; local bookmarks
 - A single portable `breader.exe` — no installer
 
 See [docs/spec.md](docs/spec.md) for the specification and [docs/roadmap.md](docs/roadmap.md) for the stages.
@@ -14,7 +16,7 @@ See [docs/spec.md](docs/spec.md) for the specification and [docs/roadmap.md](doc
 
 ```
 breader book.epub            # open a book (each file gets its own window)
-breader                      # start screen
+breader                      # the library (first run: choose its folder)
 breader --no-save book.fb2   # just take a look: don't remember the position
 breader --register           # offer Book Reader for .epub, .fb2 and .fbz (current user)
 breader --help

@@ -37,6 +37,7 @@
       <button id="library-button" title="Library (L)">Library</button>
       <button id="toc-button" title="Contents (T)">Contents</button>
       <span class="spacer"></span>
+      <button id="bookmark-button" title="Bookmark this page (B)">Bookmark</button>
       <button id="flow-button" title="Paginated / scrolled (M)"></button>
       <button id="settings-button" title="Settings (S)">Settings</button>
       <button id="shortcuts-button" title="Keyboard shortcuts">Shortcuts</button>
@@ -49,6 +50,10 @@
       <h2 id="toc-title"></h2>
       <p id="toc-author" class="muted"></p>
       <div id="toc-tree"></div>
+      <section id="bookmarks" hidden>
+        <h3>Bookmarks</h3>
+        <ol id="bookmark-list"></ol>
+      </section>
     </nav>
 
     <aside id="settings" aria-label="Settings" hidden></aside>
@@ -80,7 +85,8 @@
         <dt>↑ · ↓</dt><dd>Scroll a line (turn a page in paginated mode)</dd>
         <dt>Home · End</dt><dd>Start / end of the chapter</dd>
         <dt>L</dt><dd>Library</dd>
-        <dt>T</dt><dd>Contents</dd>
+        <dt>T</dt><dd>Contents and bookmarks</dd>
+        <dt>B</dt><dd>Bookmark this page (again to remove)</dd>
         <dt>M</dt><dd>Paginated / scrolled mode</dd>
         <dt>S · Ctrl+,</dt><dd>Settings</dd>
         <dt>D</dt><dd>Next theme</dd>

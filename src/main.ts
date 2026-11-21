@@ -28,6 +28,7 @@ import {
   type Status,
 } from './library'
 import { BookView, type BookStyle, type Relocation } from './reader'
+import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
 import { createSettingsPanel, type PanelValues } from './settings-panel'
 import { createTOCView } from './vendor/foliate-js/ui/tree.js'
 
@@ -180,6 +181,62 @@ async function openCurrentBook() {
   $('progress').hidden = false
   updateTopbarButtons()
   if (info.offerLibrary && settings.offerLibrary) showOffer()
+  bookmarks = await invoke<Bookmark[]>('get_bookmarks', { fingerprint }).catch((e): Bookmark[] => {
+    console.error(e)
+    return []
+  })
+  renderBookmarks()
+}
+
+// ---- Bookmarks --------------------------------------------------------------
+
+let bookmarks: Bookmark[] = []
+
+/** B: bookmarks the current page, or removes the bookmark that is there. */
+function toggleCurrentBookmark() {
+  const location = book?.view.lastLocation
+  if (!location || noSave) return
+  const mark = { cfi: location.cfi, fraction: location.fraction, chapter: location.tocItem?.label?.trim() ?? '' }
+  setBookmarks(toggleBookmark(bookmarks, mark))
+}
+
+function setBookmarks(list: Bookmark[]) {
+  bookmarks = list
+  renderBookmarks()
+  void invoke('set_bookmarks', { fingerprint, bookmarks: list }).catch(console.error)
+}
+
+function renderBookmarks() {
+  $('bookmarks').hidden = !bookmarks.length
+  $('bookmark-list').replaceChildren(
+    ...bookmarks.map(mark =>
+      el(
+        'li',
+        {},
+        el('button', {
+          className: 'go',
+          textContent: bookmarkLabel(mark),
+          onclick: () => {
+            book?.view.goTo(mark.cfi).catch(console.error)
+            closePanels()
+          },
+        }),
+        el('button', {
+          className: 'remove',
+          textContent: '×',
+          title: 'Remove bookmark',
+          onclick: () => setBookmarks(bookmarks.filter(b => b !== mark)),
+        }),
+      ),
+    ),
+  )
+  updateBookmarkButton()
+}
+
+function updateBookmarkButton() {
+  const marked = hasBookmark(bookmarks, book?.view.lastLocation?.cfi)
+  $('bookmark-button').setAttribute('aria-pressed', String(marked))
+  $('bookmark-button').textContent = marked ? 'Bookmarked' : 'Bookmark'
 }
 
 // ---- Adding a book to the library ------------------------------------------
@@ -219,6 +276,8 @@ function closeBook() {
   book?.destroy()
   book = null
   tocView = null
+  bookmarks = []
+  renderBookmarks()
   closePanels()
   updateTopbarButtons()
   $('toc-tree').replaceChildren()
@@ -234,6 +293,8 @@ function updateTopbarButtons() {
   const withoutBook = !book
   $('toc-button').toggleAttribute('disabled', withoutBook)
   $('flow-button').toggleAttribute('disabled', withoutBook)
+  // --no-save keeps nothing, bookmarks included.
+  $('bookmark-button').toggleAttribute('disabled', withoutBook || noSave)
   updateFlowButton()
 }
 
@@ -418,6 +479,7 @@ function onRelocate(location: Relocation) {
   $('progress-fill').style.width = `${fraction * 100}%`
   $('progress-label').textContent = tocItem?.label ? `${percent}% · ${tocItem.label}` : `${percent}%`
   highlightToc(tocItem?.href)
+  updateBookmarkButton()
   scheduleSave({ fingerprint, position: { cfi, fraction } })
 }
 
@@ -500,6 +562,8 @@ async function runCommand(command: Command) {
       return tocOpen() ? closePanels() : openToc()
     case 'toggleFlow':
       return toggleFlow()
+    case 'bookmark':
+      return toggleCurrentBookmark()
   }
 }
 
@@ -767,6 +831,7 @@ $('shortcuts-button').addEventListener('click', () => (shortcutsOpen() ? closePa
 $('about-button').addEventListener('click', () => (aboutOpen() ? closePanels() : openInfoPanel('about')))
 $('open-button').addEventListener('click', () => runCommand('open'))
 $('flow-button').addEventListener('click', () => runCommand('toggleFlow'))
+$('bookmark-button').addEventListener('click', () => runCommand('bookmark'))
 $('fullscreen-button').addEventListener('click', () => runCommand('fullscreen'))
 $('progress').addEventListener('click', e => {
   book?.view.goToFraction(e.clientX / innerWidth).catch(console.error)

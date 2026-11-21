@@ -21,6 +21,8 @@ pub struct State {
     pub library: Option<PathBuf>,
     /// Fingerprints of books the reader never wants offered for the library.
     pub declined: Vec<String>,
+    /// Bookmarks keyed by book fingerprint; owned by the frontend like settings.
+    pub bookmarks: HashMap<String, Value>,
 }
 
 /// How many books the start screen lists.
