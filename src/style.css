@@ -81,6 +81,30 @@ body {
   display: none !important;
 }
 
+/* A finger needs bigger targets than a mouse; the top bar wraps instead of
+   running off a narrow screen. It is shown by a tap in the page's middle. */
+@media (pointer: coarse) {
+  #topbar {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  #topbar .spacer {
+    display: none;
+  }
+
+  #topbar button {
+    min-height: 44px;
+    padding: 8px 12px;
+    font-size: 16px;
+  }
+
+  /* The library sits below the taller bar */
+  #start {
+    padding-top: calc(76px + var(--safe-top));
+  }
+}
+
 /* Page numbers in the bottom margin (paginated mode) */
 #stage foliate-view::part(foot) {
   color: var(--muted);

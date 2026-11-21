@@ -158,6 +158,7 @@ async function openCurrentBook() {
       relocate: onRelocate,
       key: onKey,
       pointer: onPointer,
+      menu: toggleTopbar,
       pointerDown: () => {
         if (!scrimlessOpen()) return false
         closePanels()
@@ -794,6 +795,12 @@ async function refreshFileTypesStatus() {
 
 let hideTopbarTimer: number | undefined
 
+/** A tap in the middle of the page (touch screens) shows or hides the top bar. */
+function toggleTopbar() {
+  clearTimeout(hideTopbarTimer)
+  topbar.classList.toggle('shown')
+}
+
 function onPointer(y: number) {
   if (y < TOP_EDGE_PX) {
     clearTimeout(hideTopbarTimer)
@@ -807,7 +814,8 @@ function onPointer(y: number) {
 // ---- Wiring -----------------------------------------------------------------
 
 document.addEventListener('keydown', onKey)
-document.addEventListener('mousemove', e => onPointer(e.clientY))
+// Mouse only: on a touch screen the menu comes and goes with a tap in the page's middle.
+document.addEventListener('pointermove', e => e.pointerType === 'mouse' && onPointer(e.clientY))
 $('scrim').addEventListener('click', closePanels)
 
 // The book shows through, so the panels open without the scrim;

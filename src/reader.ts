@@ -1,6 +1,7 @@
 import { suppressContextMenu } from './dom'
 import { PAGE_GAP, columnLayout, type Flow } from './layout'
 import { pageLabels } from './pages'
+import { isTap, tapZone, type Touch } from './touch'
 import './vendor/foliate-js/view.js'
 import { FootnoteHandler } from './vendor/foliate-js/footnotes.js'
 
@@ -65,6 +66,8 @@ interface BookViewEvents {
   key(event: KeyboardEvent): void
   /** Mouse movement inside the book: the distance from the window top. */
   pointer(y: number): void
+  /** A tap in the middle of the page (touch screens): show or hide the menu. */
+  menu(): void
   /**
    * Presses inside the book, which lives in iframes (the main document never sees them).
    * True when the press closed a panel, so the click that follows it can be swallowed.
@@ -128,6 +131,10 @@ export class BookView {
   #onResize = () => this.#fillWindow()
   /** A press that closed a panel swallows the click that follows it (like the scrim does). */
   #justClosedPanel = false
+  /** Where the current touch on the page began; touches are read as taps (see touch.ts). */
+  #touchStart: Touch | null = null
+  /** The last press was a finger: the click the browser adds after a tap is then ignored. */
+  #lastPressWasTouch = false
 
   /** Consumes the flag set by a panel-closing press. */
   #consumePanelClose() {
@@ -139,6 +146,7 @@ export class BookView {
   /** Forwards a primary press, remembering whether it closed a panel. */
   #onPress(e: PointerEvent) {
     if (e.button !== 0) return
+    this.#lastPressWasTouch = e.pointerType === 'touch'
     this.#justClosedPanel = this.events.pointerDown()
   }
 
@@ -272,7 +280,7 @@ export class BookView {
     view.addEventListener('wheel', e => this.#onWheel(e), { passive: true })
     view.addEventListener('pointerdown', e => this.#onPress(e))
     view.addEventListener('click', e => {
-      if (this.#consumePanelClose()) return
+      if (this.#lastPressWasTouch || this.#consumePanelClose()) return
       this.#onEdgeClick(e.clientX)
     })
     this.#setUpFootnotes()
@@ -374,16 +382,36 @@ export class BookView {
     }
     doc.addEventListener('keydown', ev => this.events.key(ev))
     doc.addEventListener('wheel', ev => this.#onWheel(ev), { passive: true })
-    doc.addEventListener('mousemove', ev => this.events.pointer(toWindow(ev).y))
-    doc.addEventListener('pointerdown', ev => this.#onPress(ev))
+    // Mouse only: a tap's emulated mouse events would hide the menu it just showed.
+    doc.addEventListener('pointermove', ev => ev.pointerType === 'mouse' && this.events.pointer(toWindow(ev).y))
+    doc.addEventListener('pointerdown', ev => {
+      this.#onPress(ev)
+      if (ev.pointerType === 'touch') this.#touchStart = { ...toWindow(ev), time: ev.timeStamp }
+    })
+    doc.addEventListener('pointerup', ev => {
+      const start = this.#touchStart
+      this.#touchStart = null
+      if (ev.pointerType !== 'touch' || !start || !isTap(start, { ...toWindow(ev), time: ev.timeStamp })) return
+      if (this.#consumePanelClose() || (ev.target as Element).closest?.('a[href]')) return
+      if (doc.getSelection()?.toString()) return
+      this.hideFootnote()
+      this.#onTap(toWindow(ev).x)
+    })
     suppressContextMenu(doc)
     doc.addEventListener('click', ev => {
-      if (this.#consumePanelClose()) return
+      if (this.#lastPressWasTouch || this.#consumePanelClose()) return
       if (ev.defaultPrevented || (ev.target as Element).closest?.('a[href]')) return
       if (doc.getSelection()?.toString()) return
       this.hideFootnote()
       this.#onEdgeClick(toWindow(ev).x)
     })
+  }
+
+  /** A finger's tap: the sides turn pages (paginated), the middle shows the menu. */
+  #onTap(x: number) {
+    const zone = tapZone(x, innerWidth)
+    if (zone === 'menu') this.events.menu()
+    else if (this.flow === 'paginated') void (zone === 'prev' ? this.view.goLeft() : this.view.goRight())
   }
 
   #onEdgeClick(x: number) {
