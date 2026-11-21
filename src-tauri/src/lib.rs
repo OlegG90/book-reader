@@ -63,14 +63,14 @@ impl ReaderWindows {
             .map(|(label, _)| label.clone())
     }
 
-    /// A window without a book: it shows the library.
-    fn library(&self) -> Option<String> {
+    /// The library window's label: the window without a book.
+    fn library_window(&self) -> Option<String> {
         let windows = self.0.lock().unwrap();
         windows.iter().find(|(_, w)| w.file.is_none()).map(|(label, _)| label.clone())
     }
 
     /// Points windows showing a file that moved at its new place.
-    fn moved(&self, from: &Path, to: &Path) {
+    fn repath(&self, from: &Path, to: &Path) {
         for w in self.0.lock().unwrap().values_mut() {
             if w.file.as_deref().is_some_and(|file| paths::same_file(file, from)) {
                 w.file = Some(to.to_path_buf());
@@ -301,10 +301,13 @@ fn pick_book(window: Window) -> Result<(), String> {
 
 /// Opens a window for `launch`, or brings forward the one already showing its
 /// file (or, without a file, the library window).
+///
+/// Every command that can get here must be `async`: a sync command runs on the
+/// main thread, and building a window there deadlocks on Windows.
 fn open_or_focus(app: &AppHandle, launch: Launch) -> tauri::Result<()> {
     let focused = match launch.file.as_deref() {
         Some(file) => focus_showing(app, file, None),
-        None => focus_window(app, app.state::<ReaderWindows>().library()),
+        None => focus_window(app, app.state::<ReaderWindows>().library_window()),
     };
     if focused {
         return Ok(());
@@ -321,11 +324,19 @@ fn open_or_focus(app: &AppHandle, launch: Launch) -> tauri::Result<()> {
 struct LibraryBooks(Mutex<Vec<library::Entry>>);
 
 impl LibraryBooks {
-    fn path_of(&self, store: &Store, key: &str) -> Result<PathBuf, String> {
-        let root = library_root(store)?;
+    fn entry(&self, key: &str) -> Result<library::Entry, String> {
         let books = self.0.lock().unwrap();
-        let entry = books.iter().find(|b| b.path == key).ok_or("That book is no longer in the library")?;
-        Ok(entry.absolute(&root))
+        books.iter().find(|b| b.path == key).cloned().ok_or_else(|| "That book is no longer in the library".into())
+    }
+
+    fn path_of(&self, store: &Store, key: &str) -> Result<PathBuf, String> {
+        Ok(self.entry(key)?.absolute(&library_root(store)?))
+    }
+
+    /// The last scan's books; before any scan in this run, the cached ones.
+    fn snapshot(&self, store: &Store, root: &Path) -> Vec<library::Entry> {
+        let books = self.0.lock().unwrap();
+        if books.is_empty() { library_cache(store).load(root) } else { books.clone() }
     }
 }
 
@@ -404,12 +415,12 @@ fn scan_library(store: State<Store>, books: State<LibraryBooks>) -> Result<Vec<L
             .iter()
             .map(|e| LibraryBook {
                 key: e.path.clone(),
-                title: e.title.clone(),
-                authors: e.authors.iter().map(metadata::Author::display).collect(),
-                author_sort: e.authors.first().map(metadata::Author::sort_name).unwrap_or_default(),
-                series: e.series.clone(),
-                series_index: e.series_index.clone(),
-                format: metadata::Format::of(Path::new(&e.path)).map_or("", metadata::Format::label),
+                title: e.book.title.clone(),
+                authors: e.book.authors.iter().map(metadata::Author::display).collect(),
+                author_sort: e.book.authors.first().map(metadata::Author::sort_name).unwrap_or_default(),
+                series: e.book.series.clone(),
+                series_index: e.book.series_index.clone(),
+                format: e.format().map_or("", metadata::Format::label),
                 fraction: s.positions.get(&e.fingerprint).map(|p| p.fraction),
                 added: e.added,
                 has_cover: e.cover.is_some(),
@@ -422,7 +433,7 @@ fn scan_library(store: State<Store>, books: State<LibraryBooks>) -> Result<Vec<L
 
 #[tauri::command(async)]
 fn library_cover(store: State<Store>, books: State<LibraryBooks>, key: String) -> Result<Response, String> {
-    let cover = books.0.lock().unwrap().iter().find(|b| b.path == key).and_then(|b| b.cover.clone()).ok_or("No cover")?;
+    let cover = books.entry(&key)?.cover.ok_or("No cover")?;
     std::fs::read(library_cache(&store).covers().join(cover)).map(Response::new).map_err(|e| e.to_string())
 }
 
@@ -470,30 +481,30 @@ fn saving_window(windows: &ReaderWindows, window: &Window) -> Result<PathBuf, St
 /// holds the same book (under any name), nothing is copied or moved and the
 /// window switches to that copy.
 #[tauri::command(async)]
-fn add_to_library(window: Window, windows: State<ReaderWindows>, store: State<Store>, mode: AddMode) -> Result<Added, String> {
+fn add_to_library(
+    window: Window,
+    windows: State<ReaderWindows>,
+    store: State<Store>,
+    books: State<LibraryBooks>,
+    mode: AddMode,
+) -> Result<Added, String> {
     let source = saving_window(&windows, &window)?;
     let root = library_root(&store)?;
     let err = |e: std::io::Error| format!("{}: {e}", paths::file_name(&source));
     let format = metadata::Format::of(&source).ok_or("Not a book file")?;
-    let meta = metadata::read(&source).unwrap_or_default();
-    let title = if meta.title.is_empty() { library::title_from_file_name(&source) } else { meta.title.clone() };
-    let wanted = naming::template_path(&naming::BookName {
-        title: &title,
-        authors: &meta.authors,
-        series: meta.series.as_deref(),
-        series_index: meta.series_index.as_deref(),
-        format,
-    });
-    let fingerprint = fingerprint::fingerprint(&source).map_err(err)?;
+    let (fingerprint, meta) = library::read_book(&source).map_err(err)?;
     // The same book may already be in the library under another name.
-    let known = library_cache(&store)
-        .load(&root)
+    let known = books
+        .snapshot(&store, &root)
         .into_iter()
         .find(|e| e.fingerprint == fingerprint && e.absolute(&root).is_file())
         .map(|e| naming::Placement::Exists(e.path));
     let placement = match known {
         Some(found) => found,
-        None => naming::place(&root, &wanted, &fingerprint, &Default::default()).map_err(err)?,
+        None => {
+            let wanted = naming::template_path(&meta.book, format);
+            naming::place(&root, &wanted, &fingerprint, &Default::default()).map_err(err)?
+        }
     };
     let (rel, existed) = match placement {
         naming::Placement::Free(rel) => {
@@ -509,15 +520,19 @@ fn add_to_library(window: Window, windows: State<ReaderWindows>, store: State<St
     };
     let target = library::join(&root, &rel);
     windows.set_path(window.label(), target.clone());
-    repath_recent(&store, &fingerprint, &target)?;
+    repath_recent(&store, &[(fingerprint, target)])?;
     let _ = window.emit("library-updated", ());
     Ok(Added { path: rel, existed })
 }
 
-/// Points recent-list entries for a book at its new place.
-fn repath_recent(store: &Store, fingerprint: &str, path: &Path) -> Result<(), String> {
+/// Points recent-list entries at the books' new places (by fingerprint), in one write.
+fn repath_recent(store: &Store, moves: &[(String, PathBuf)]) -> Result<(), String> {
     store
-        .update(|s| s.recent.iter_mut().filter(|r| r.fingerprint == fingerprint).for_each(|r| r.path = path.to_path_buf()))
+        .update(|s| {
+            for (fingerprint, path) in moves {
+                s.recent.iter_mut().filter(|r| &r.fingerprint == fingerprint).for_each(|r| r.path = path.clone());
+            }
+        })
         .map_err(|e| e.to_string())
 }
 
@@ -553,9 +568,7 @@ fn set_bookmarks(
 fn decline_library(store: State<Store>, fingerprint: String) -> Result<(), String> {
     store
         .update(|s| {
-            if !s.declined.contains(&fingerprint) {
-                s.declined.push(fingerprint);
-            }
+            s.declined.insert(fingerprint);
         })
         .map_err(|e| e.to_string())
 }
@@ -567,16 +580,10 @@ struct Rename {
 }
 
 /// The renames that would make the last scan's books follow the naming template.
-fn organize_plan(store: &Store, books: &LibraryBooks) -> Result<(PathBuf, Vec<(library::Entry, String)>), String> {
-    let root = library_root(store)?;
-    let entries = books.0.lock().unwrap().clone();
-    let plan = library::organize_plan(&root, &entries).map_err(|e| e.to_string())?;
-    Ok((root, plan))
-}
-
 #[tauri::command(async)]
 fn organize_preview(store: State<Store>, books: State<LibraryBooks>) -> Result<Vec<Rename>, String> {
-    let (_, plan) = organize_plan(&store, &books)?;
+    let root = library_root(&store)?;
+    let plan = library::organize_plan(&root, &books.snapshot(&store, &root)).map_err(|e| e.to_string())?;
     Ok(plan.into_iter().map(|(entry, to)| Rename { from: entry.path, to }).collect())
 }
 
@@ -584,21 +591,24 @@ fn organize_preview(store: State<Store>, books: State<LibraryBooks>) -> Result<V
 /// files). Returns how many books were renamed.
 #[tauri::command(async)]
 fn organize_apply(app: AppHandle, store: State<Store>, books: State<LibraryBooks>, windows: State<ReaderWindows>) -> Result<usize, String> {
-    let (root, plan) = organize_plan(&store, &books)?;
-    let mut done = 0;
-    for (entry, to) in &plan {
+    let root = library_root(&store)?;
+    let plan = library::organize_plan(&root, &books.snapshot(&store, &root)).map_err(|e| e.to_string())?;
+    let mut moved = Vec::new();
+    let result = plan.iter().try_for_each(|(entry, to)| {
         let from = entry.absolute(&root);
         let target = library::join(&root, to);
         naming::move_file(&from, &target).map_err(|e| format!("{}: {e}", entry.path))?;
         if let Some(dir) = from.parent() {
             naming::remove_empty_dirs(&root, dir.to_path_buf());
         }
-        windows.moved(&from, &target);
-        repath_recent(&store, &entry.fingerprint, &target)?;
-        done += 1;
-    }
+        windows.repath(&from, &target);
+        moved.push((entry.fingerprint.clone(), target));
+        Ok::<_, String>(())
+    });
+    // Books moved before a failure are recorded too.
+    repath_recent(&store, &moved)?;
     let _ = app.emit("library-updated", ());
-    Ok(done)
+    result.map(|()| moved.len())
 }
 
 /// Brings the library window forward, opening it if needed.

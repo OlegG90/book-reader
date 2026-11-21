@@ -9,7 +9,7 @@ export interface LibraryBook {
   format: string
   /** Share read, if a position is saved. */
   fraction: number | null
-  /** When the file was last changed (ms). */
+  /** When the book came into the library (ms). */
   added: number
   hasCover: boolean
 }
@@ -37,12 +37,23 @@ export function statusOf(book: LibraryBook): Exclude<Status, 'all'> {
 
 const fold = (text: string) => text.toLocaleLowerCase().normalize('NFKD').replace(/\p{M}/gu, '')
 
+/** Each book's searchable text, folded once (books are replaced on every scan). */
+const searchText = new WeakMap<LibraryBook, string>()
+const searchTextOf = (book: LibraryBook) => {
+  let text = searchText.get(book)
+  if (text == null) {
+    text = fold([book.title, ...book.authors, book.series ?? ''].join(' '))
+    searchText.set(book, text)
+  }
+  return text
+}
+
 /** Books matching every word of `query` (in title, authors or series) and the status. */
 export function filterBooks(books: LibraryBook[], query: string, status: Status): LibraryBook[] {
   const words = fold(query).split(/\s+/).filter(Boolean)
   return books.filter(book => {
     if (status !== 'all' && statusOf(book) !== status) return false
-    const text = fold([book.title, ...book.authors, book.series ?? ''].join(' '))
+    const text = searchTextOf(book)
     return words.every(word => text.includes(word))
   })
 }

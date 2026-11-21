@@ -9,12 +9,8 @@ export interface Bookmark {
   chapter: string
 }
 
-/** The page shown: foliate-js reports it as a range CFI. */
-export interface Page {
-  cfi: string
-  fraction: number
-  chapter: string
-}
+/** The page shown: like a bookmark, but its CFI is the page's range. */
+export type Page = Bookmark
 
 /**
  * Whether a bookmark lies on the page. Pages move when the font or window

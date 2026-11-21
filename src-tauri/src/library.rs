@@ -2,7 +2,7 @@
 //! and covers, so a rescan only reads files that are new or changed.
 
 use crate::fingerprint::fingerprint;
-use crate::metadata::{self, Author, Format};
+use crate::metadata::{self, Format, Metadata};
 use crate::naming;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -21,10 +21,8 @@ pub struct Entry {
     /// Modification time in ms since the Unix epoch.
     pub modified: u64,
     pub fingerprint: String,
-    pub title: String,
-    pub authors: Vec<Author>,
-    pub series: Option<String>,
-    pub series_index: Option<String>,
+    #[serde(flatten)]
+    pub book: metadata::Book,
     /// The cached cover's file name in the covers folder.
     pub cover: Option<String>,
     /// When the book came into the library (ms since the Unix epoch). Copies
@@ -37,6 +35,21 @@ impl Entry {
     pub fn absolute(&self, root: &Path) -> PathBuf {
         join(root, &self.path)
     }
+
+    pub fn format(&self) -> Option<Format> {
+        Format::split(&self.path).map(|(_, format)| format)
+    }
+}
+
+/// A book file's fingerprint and metadata. A book whose metadata can't be
+/// read is still a book, titled after its file name.
+pub fn read_book(path: &Path) -> io::Result<(String, Metadata)> {
+    let fingerprint = fingerprint(path)?;
+    let mut meta = metadata::read(path).unwrap_or_default();
+    if meta.book.title.is_empty() {
+        meta.book.title = title_from_file_name(path);
+    }
+    Ok((fingerprint, meta))
 }
 
 /// A library-relative path (`/` separators) under `root`.
@@ -52,14 +65,8 @@ pub fn organize_plan(root: &Path, books: &[Entry]) -> io::Result<Vec<(Entry, Str
     let mut taken = HashSet::new();
     let mut plan = Vec::new();
     for book in books {
-        let Some(format) = Format::of(Path::new(&book.path)) else { continue };
-        let wanted = naming::template_path(&naming::BookName {
-            title: &book.title,
-            authors: &book.authors,
-            series: book.series.as_deref(),
-            series_index: book.series_index.as_deref(),
-            format,
-        });
+        let Some(format) = book.format() else { continue };
+        let wanted = naming::template_path(&book.book, format);
         if wanted.to_lowercase() == book.path.to_lowercase() {
             continue;
         }
@@ -115,14 +122,16 @@ impl Cache {
 }
 
 /// Lists the books under `root`, reusing cached metadata for files whose size
-/// and modification time are unchanged, and saves the result to the cache.
+/// and modification time are unchanged, and saves the result to the cache
+/// when anything changed.
 pub fn scan(root: &Path, cache: &Cache) -> io::Result<Vec<Entry>> {
     let cached = cache.load(root);
+    let unchanged = |books: &[Entry]| books == cached.as_slice();
     // A book seen before (even under another name, after Organize) keeps its
     // date; on the very first scan the files' own dates are all there is.
     let first_scan = cached.is_empty();
-    let added_before: HashMap<String, u64> = cached.iter().map(|e| (e.fingerprint.clone(), e.added)).collect();
-    let previous: HashMap<String, Entry> = cached.into_iter().map(|e| (e.path.clone(), e)).collect();
+    let added_before: HashMap<&str, u64> = cached.iter().map(|e| (e.fingerprint.as_str(), e.added)).collect();
+    let previous: HashMap<&str, &Entry> = cached.iter().map(|e| (e.path.as_str(), e)).collect();
     let now = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
     let mut files = Vec::new();
     find_books(root, &mut files)?;
@@ -133,24 +142,27 @@ pub fn scan(root: &Path, cache: &Cache) -> io::Result<Vec<Entry>> {
             let meta = fs::metadata(&path).ok()?;
             let rel = relative(root, &path)?;
             let modified = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_millis() as u64;
-            match previous.get(&rel) {
-                Some(e) if e.size == meta.len() && e.modified == modified => Some(e.clone()),
+            match previous.get(rel.as_str()) {
+                Some(e) if e.size == meta.len() && e.modified == modified => Some((*e).clone()),
                 _ => {
-                    let mut entry = read_entry(&path, rel, meta.len(), modified, cache).ok()?;
-                    entry.added = match added_before.get(&entry.fingerprint) {
+                    let (fingerprint, meta_read) = read_book(&path).ok()?;
+                    let added = match added_before.get(fingerprint.as_str()) {
                         Some(&added) => added,
                         None if first_scan => modified,
                         None => now,
                     };
-                    Some(entry)
+                    let cover = cache_cover(cache, &fingerprint, meta_read.cover);
+                    Some(Entry { path: rel, size: meta.len(), modified, fingerprint, book: meta_read.book, cover, added })
                 }
             }
         })
         .collect();
     books.sort_by(|a, b| a.path.cmp(&b.path));
 
-    remove_unused_covers(cache, &books);
-    cache.save(root, &books)?;
+    if !unchanged(&books) {
+        remove_unused_covers(cache, &books);
+        cache.save(root, &books)?;
+    }
     Ok(books)
 }
 
@@ -172,44 +184,25 @@ fn find_books(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
 }
 
 /// `path` relative to `root`, with `/` separators.
-pub fn relative(root: &Path, path: &Path) -> Option<String> {
+fn relative(root: &Path, path: &Path) -> Option<String> {
     let rel = path.strip_prefix(root).ok()?;
     let parts: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
     Some(parts.join("/"))
 }
 
-/// Reads a new or changed file. A book whose metadata can't be read still
-/// appears, titled after its file name.
-fn read_entry(path: &Path, rel: String, size: u64, modified: u64, cache: &Cache) -> io::Result<Entry> {
-    let fingerprint = fingerprint(path)?;
-    let meta = metadata::read(path).unwrap_or_default();
-    let title = if meta.title.is_empty() { title_from_file_name(path) } else { meta.title };
-    let cover = meta.cover.and_then(|cover| {
-        let name = format!("{fingerprint}.{}", cover.ext);
-        fs::create_dir_all(cache.covers()).ok()?;
-        fs::write(cache.covers().join(&name), &cover.bytes).ok()?;
-        Some(name)
-    });
-    Ok(Entry {
-        path: rel,
-        size,
-        modified,
-        fingerprint,
-        title,
-        authors: meta.authors,
-        series: meta.series,
-        series_index: meta.series_index,
-        cover,
-        added: modified,
-    })
+/// Saves a book's cover to the cache; returns its file name there.
+fn cache_cover(cache: &Cache, fingerprint: &str, cover: Option<metadata::Cover>) -> Option<String> {
+    let cover = cover?;
+    let name = format!("{fingerprint}.{}", cover.ext);
+    fs::create_dir_all(cache.covers()).ok()?;
+    fs::write(cache.covers().join(&name), &cover.bytes).ok()?;
+    Some(name)
 }
 
 /// "Some Book.fb2.zip" -> "Some Book".
-pub fn title_from_file_name(path: &Path) -> String {
-    let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
-    let lower = name.to_lowercase();
-    let cut = [".fb2.zip", ".epub", ".fb2", ".fbz"].iter().find(|ext| lower.ends_with(*ext)).map_or(0, |ext| ext.len());
-    name[..name.len() - cut].to_string()
+fn title_from_file_name(path: &Path) -> String {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    Format::split(&name).map_or(&*name, |(stem, _)| stem).to_string()
 }
 
 fn remove_unused_covers(cache: &Cache, books: &[Entry]) {
@@ -249,7 +242,7 @@ mod tests {
         let books = scan(&root, &cache).unwrap();
         let paths: Vec<_> = books.iter().map(|b| b.path.as_str()).collect();
         assert_eq!(paths, ["Carroll Lewis/Alice.epub", "sample.fb2.zip"]);
-        assert!(books[0].title.contains("Alice"));
+        assert!(books[0].book.title.contains("Alice"));
         let cover = books[0].cover.as_ref().expect("the sample EPUB has a cover");
         assert!(cache.covers().join(cover).is_file());
     }
@@ -263,9 +256,9 @@ mod tests {
 
         // A cached entry is trusted while size and time match: mark it to prove reuse.
         let mut marked = first.clone();
-        marked[1].title = "From cache".into();
+        marked[1].book.title = "From cache".into();
         cache.save(&root, &marked).unwrap();
-        assert_eq!(scan(&root, &cache).unwrap()[1].title, "From cache");
+        assert_eq!(scan(&root, &cache).unwrap()[1].book.title, "From cache");
 
         fs::remove_file(root.join("Carroll Lewis/Alice.epub")).unwrap();
         let after = scan(&root, &cache).unwrap();
@@ -286,8 +279,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("Broken Book.epub"), "not a zip").unwrap();
         let books = scan(dir.path(), &Cache::new(dir.path().join(".cache"))).unwrap();
-        assert_eq!(books[0].title, "Broken Book");
-        assert!(books[0].authors.is_empty());
+        assert_eq!(books[0].book.title, "Broken Book");
+        assert!(books[0].book.authors.is_empty());
     }
 
     #[test]

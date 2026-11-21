@@ -3,7 +3,7 @@
 //! without a series, and `Unknown Author/...` without an author.
 
 use crate::fingerprint::fingerprint;
-use crate::metadata::{Author, Format};
+use crate::metadata::{Author, Book, Format};
 use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -12,28 +12,19 @@ const UNKNOWN_AUTHOR: &str = "Unknown Author";
 /// Longest folder or file name (in characters) the template produces.
 const MAX_NAME: usize = 120;
 
-/// What the template needs to know about a book.
-pub struct BookName<'a> {
-    pub title: &'a str,
-    pub authors: &'a [Author],
-    pub series: Option<&'a str>,
-    pub series_index: Option<&'a str>,
-    pub format: Format,
-}
-
 /// The book's path inside the library, with `/` separators.
-pub fn template_path(book: &BookName) -> String {
+pub fn template_path(book: &Book, format: Format) -> String {
     let author = book.authors.first().map(Author::sort_name).filter(|a| !a.is_empty());
     let folder = sanitize(author.as_deref().unwrap_or(UNKNOWN_AUTHOR));
-    let title = if book.title.trim().is_empty() { "Untitled" } else { book.title };
-    let stem = match book.series.filter(|s| !s.trim().is_empty()) {
-        Some(series) => match book.series_index.map(pad_index) {
+    let title = if book.title.trim().is_empty() { "Untitled" } else { &book.title };
+    let stem = match book.series.as_deref().filter(|s| !s.trim().is_empty()) {
+        Some(series) => match book.series_index.as_deref().map(pad_index) {
             Some(index) => format!("{series} {index} - {title}"),
             None => format!("{series} - {title}"),
         },
         None => title.to_string(),
     };
-    format!("{folder}/{}.{}", sanitize(&stem), book.format.extension())
+    format!("{folder}/{}.{}", sanitize(&stem), format.extension())
 }
 
 /// "3" -> "03", so books in a series list in order; "2.5" stays as is.
@@ -47,7 +38,7 @@ fn pad_index(index: &str) -> String {
 /// Makes one path component safe for Windows (and Android): a subtitle colon
 /// becomes " - ", other invalid characters `_`, trailing dots and spaces go,
 /// reserved device names get a `_`.
-pub fn sanitize(name: &str) -> String {
+fn sanitize(name: &str) -> String {
     let replaced: String = name
         .replace(": ", " - ")
         .chars()
@@ -103,9 +94,8 @@ pub fn place(root: &Path, wanted: &str, source_fingerprint: &str, taken: &HashSe
 
 /// "A/B.fb2.zip" -> ("A/B", ".fb2.zip"): the book extension stays whole.
 fn split_ext(path: &str) -> (&str, &str) {
-    let lower = path.to_lowercase();
-    let ext_len = [".fb2.zip", ".epub", ".fb2"].iter().find(|e| lower.ends_with(*e)).map_or(0, |e| e.len());
-    path.split_at(path.len() - ext_len)
+    let stem = Format::split(path).map_or(path, |(stem, _)| stem);
+    path.split_at(stem.len())
 }
 
 /// Creates the target's folders; refuses a target that exists, so a book is
@@ -158,7 +148,13 @@ mod tests {
     }
 
     fn path(title: &str, authors: &[Author], series: Option<&str>, index: Option<&str>, format: Format) -> String {
-        template_path(&BookName { title, authors, series, series_index: index, format })
+        let book = Book {
+            title: title.into(),
+            authors: authors.to_vec(),
+            series: series.map(Into::into),
+            series_index: index.map(Into::into),
+        };
+        template_path(&book, format)
     }
 
     #[test]

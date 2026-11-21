@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ pub struct State {
     /// The library folder; `None` until the first-run choice is made.
     pub library: Option<PathBuf>,
     /// Fingerprints of books the reader never wants offered for the library.
-    pub declined: Vec<String>,
+    pub declined: BTreeSet<String>,
     /// Bookmarks keyed by book fingerprint; owned by the frontend like settings.
     pub bookmarks: HashMap<String, Value>,
 }

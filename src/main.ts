@@ -98,9 +98,7 @@ const settingsReady = invoke<Record<string, unknown>>('get_settings')
     settingsPanel.show(settings)
     showLibraryControls()
   })
-void invoke<LibraryInfo>('library_info')
-  .then(info => settingsPanel.setLibraryFolder(info.folder))
-  .catch(console.error)
+void loadLibraryInfo()
 let currentTocHref: string | undefined
 let book: BookView | null = null
 let fingerprint = ''
@@ -325,12 +323,7 @@ async function showLibraryScreen() {
   void appWindow.setTitle('Book Reader').catch(console.error)
   document.body.classList.add('library-mode')
   $('start').hidden = false
-  const info = await invoke<LibraryInfo>('library_info').catch((e): LibraryInfo => {
-    console.error(e)
-    return { folder: null, suggested: '' }
-  })
-  libraryFolder = info.folder
-  settingsPanel.setLibraryFolder(info.folder)
+  const info = await loadLibraryInfo()
   $('setup').hidden = !!info.folder
   $('library').hidden = !info.folder
   if (!info.folder) {
@@ -338,8 +331,21 @@ async function showLibraryScreen() {
     $('setup-default').focus()
     return
   }
-  await Promise.all([refreshRecent(), refreshLibrary()])
+  await refreshLibraryScreen()
 }
+
+/** Reads the library folder (and the first-run suggestion), and shows it in the settings. */
+async function loadLibraryInfo(): Promise<LibraryInfo> {
+  const info = await invoke<LibraryInfo>('library_info').catch((e): LibraryInfo => {
+    console.error(e)
+    return { folder: null, suggested: '' }
+  })
+  libraryFolder = info.folder
+  settingsPanel.setLibraryFolder(info.folder)
+  return info
+}
+
+const refreshLibraryScreen = () => Promise.all([refreshRecent(), refreshLibrary()])
 
 async function refreshRecent() {
   const books = await invoke<RecentBook[]>('recent_books').catch((e): RecentBook[] => {
@@ -802,23 +808,27 @@ $('setup-pick').addEventListener('click', () => void chooseLibrary(true))
 $('library-search').addEventListener('input', renderLibrary)
 $('library-status').append(...STATUSES.map(s => el('option', { value: s, textContent: STATUS_LABELS[s] })))
 $('library-sort').append(...SORTS.map(s => el('option', { value: s, textContent: SORT_LABELS[s] })))
-$<HTMLSelectElement>('library-status').addEventListener('change', e => {
-  changeSettings({ libraryStatus: (e.target as HTMLSelectElement).value as Status })
-  renderLibrary()
-})
-$<HTMLSelectElement>('library-sort').addEventListener('change', e => {
-  changeSettings({ librarySort: (e.target as HTMLSelectElement).value as Sort })
-  renderLibrary()
-})
+for (const [id, key] of [
+  ['library-status', 'libraryStatus'],
+  ['library-sort', 'librarySort'],
+] as const) {
+  $<HTMLSelectElement>(id).addEventListener('change', e => {
+    changeSettings({ [key]: (e.target as HTMLSelectElement).value })
+    renderLibrary()
+  })
+}
+/** Alt-tabbing back rescans at most this often. */
+const FOCUS_RESCAN_MS = 15_000
+let lastFocusRescan = 0
 // Books may have been added, or read in another window, meanwhile.
 appWindow.onFocusChanged(({ payload: focused }) => {
-  if (!focused || !libraryVisible()) return
-  void refreshRecent()
-  void refreshLibrary()
+  if (!focused || !libraryVisible() || Date.now() - lastFocusRescan < FOCUS_RESCAN_MS) return
+  lastFocusRescan = Date.now()
+  void refreshLibraryScreen()
 })
 // Books were added or renamed (by this or another window).
 appWindow.listen('library-updated', () => {
-  if (libraryVisible()) void Promise.all([refreshRecent(), refreshLibrary()])
+  if (libraryVisible()) void refreshLibraryScreen()
 })
 $('offer-move').addEventListener('click', () => void addToLibrary('move'))
 $('offer-copy').addEventListener('click', () => void addToLibrary('copy'))
@@ -836,7 +846,7 @@ $('organize-cancel').addEventListener('click', closePanels)
 appWindow.listen('library-changed', () => {
   libraryBooks = []
   if (!book) void showLibraryScreen()
-  else void invoke<LibraryInfo>('library_info').then(info => settingsPanel.setLibraryFolder(info.folder), console.error)
+  else void loadLibraryInfo()
 })
 $('settings-button').addEventListener('click', () => runCommand('settings'))
 $('shortcuts-button').addEventListener('click', () => (shortcutsOpen() ? closePanels() : openInfoPanel('shortcuts')))

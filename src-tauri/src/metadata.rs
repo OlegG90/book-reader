@@ -57,13 +57,20 @@ pub struct Cover {
     pub ext: String,
 }
 
-#[derive(Debug, Default, Clone, PartialEq)]
-pub struct Metadata {
+/// What the library and its naming pattern know about a book.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Book {
     pub title: String,
     pub authors: Vec<Author>,
     pub series: Option<String>,
     /// As written in the book ("3", "2.5").
     pub series_index: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Metadata {
+    pub book: Book,
     pub cover: Option<Cover>,
 }
 
@@ -74,19 +81,24 @@ pub enum Format {
     Fb2Zip,
 }
 
+/// The file name endings the reader opens (case-insensitive).
+const SUFFIXES: &[(&str, Format)] =
+    &[(".epub", Format::Epub), (".fb2.zip", Format::Fb2Zip), (".fbz", Format::Fb2Zip), (".fb2", Format::Fb2)];
+
 impl Format {
+    /// Splits a file name (or path) into the part before its book extension
+    /// and the format; `None` for files the reader doesn't open.
+    pub fn split(name: &str) -> Option<(&str, Format)> {
+        SUFFIXES.iter().find_map(|&(suffix, format)| {
+            let cut = name.len().checked_sub(suffix.len())?;
+            let tail = name.get(cut..)?;
+            tail.eq_ignore_ascii_case(suffix).then(|| (&name[..cut], format))
+        })
+    }
+
     /// The format, by file name; `None` for files the reader doesn't open.
     pub fn of(path: &Path) -> Option<Format> {
-        let name = path.file_name()?.to_string_lossy().to_lowercase();
-        if name.ends_with(".epub") {
-            Some(Format::Epub)
-        } else if name.ends_with(".fb2") {
-            Some(Format::Fb2)
-        } else if name.ends_with(".fb2.zip") || name.ends_with(".fbz") {
-            Some(Format::Fb2Zip)
-        } else {
-            None
-        }
+        Format::split(&path.file_name()?.to_string_lossy()).map(|(_, format)| format)
     }
 
     /// The extension the library uses for this format.
@@ -245,10 +257,10 @@ fn fb2(bytes: &[u8]) -> io::Result<Metadata> {
             }
             let Some(path) = in_title_info(stack) else { return };
             match (path, name.as_str()) {
-                ([], "author") => meta.authors.push(Author::default()),
-                ([], "sequence") if meta.series.is_none() => {
-                    meta.series = attr(e, "name").map(|s| clean(&s)).filter(|s| !s.is_empty());
-                    meta.series_index = attr(e, "number").map(|s| clean(&s)).filter(|s| !s.is_empty() && s != "0");
+                ([], "author") => meta.book.authors.push(Author::default()),
+                ([], "sequence") if meta.book.series.is_none() => {
+                    meta.book.series = attr(e, "name").map(|s| clean(&s)).filter(|s| !s.is_empty());
+                    meta.book.series_index = attr(e, "number").map(|s| clean(&s)).filter(|s| !s.is_empty() && s != "0");
                 }
                 ([p], "image") if p == "coverpage" => {
                     cover_id = attr(e, "href").map(|h| h.trim_start_matches('#').to_string());
@@ -266,9 +278,9 @@ fn fb2(bytes: &[u8]) -> io::Result<Metadata> {
             let Some(path) = in_title_info(stack) else { return };
             let path: Vec<&str> = path.iter().map(String::as_str).collect();
             match path.as_slice() {
-                ["book-title"] => meta.title.push_str(text),
+                ["book-title"] => meta.book.title.push_str(text),
                 ["author", part] => {
-                    let Some(a) = meta.authors.last_mut() else { return };
+                    let Some(a) = meta.book.authors.last_mut() else { return };
                     match *part {
                         "first-name" | "middle-name" => a.first = join_nonempty(&[&a.first, &clean(text)]),
                         "last-name" => a.last.push_str(&clean(text)),
@@ -281,8 +293,8 @@ fn fb2(bytes: &[u8]) -> io::Result<Metadata> {
         }
     })?;
 
-    meta.authors.retain(|a| !a.first.is_empty() || !a.last.is_empty());
-    meta.title = clean(&meta.title);
+    meta.book.authors.retain(|a| !a.first.is_empty() || !a.last.is_empty());
+    meta.book.title = clean(&meta.book.title);
     if let Some((content_type, data)) = cover_id.and_then(|id| binaries.remove(&id)) {
         let data: String = data.split_whitespace().collect();
         if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) {
@@ -354,8 +366,8 @@ fn epub<R: Read + Seek>(file: R) -> io::Result<Metadata> {
                 }
                 (Some("metadata"), "meta") => {
                     match (attr(e, "name").as_deref(), attr(e, "content")) {
-                        (Some("calibre:series"), Some(v)) => meta.series = Some(clean(&v)).filter(|s| !s.is_empty()),
-                        (Some("calibre:series_index"), Some(v)) => meta.series_index = Some(series_number(&v)),
+                        (Some("calibre:series"), Some(v)) => meta.book.series = Some(clean(&v)).filter(|s| !s.is_empty()),
+                        (Some("calibre:series_index"), Some(v)) => meta.book.series_index = Some(series_number(&v)),
                         (Some("cover"), Some(v)) => cover_id = Some(v),
                         _ => {}
                     }
@@ -380,8 +392,8 @@ fn epub<R: Read + Seek>(file: R) -> io::Result<Metadata> {
         },
     })?;
 
-    meta.title = titles.first().map(|t| clean(t)).unwrap_or_default();
-    meta.authors = creators
+    meta.book.title = titles.first().map(|t| clean(t)).unwrap_or_default();
+    meta.book.authors = creators
         .iter()
         .filter(|c| c.role.as_deref().is_none_or(|r| r == "aut") && !c.name.trim().is_empty())
         .map(|c| match &c.file_as {
@@ -389,8 +401,8 @@ fn epub<R: Read + Seek>(file: R) -> io::Result<Metadata> {
             _ => Author::parse(&c.name),
         })
         .collect();
-    if meta.series.is_none() {
-        meta.series = collection.map(|c| clean(&c)).filter(|c| !c.is_empty());
+    if meta.book.series.is_none() {
+        meta.book.series = collection.map(|c| clean(&c)).filter(|c| !c.is_empty());
     }
 
     if let Some(item) = cover_item.or(cover_id).and_then(|id| manifest.remove(&id)) {
@@ -477,12 +489,12 @@ mod tests {
     #[test]
     fn reads_the_sample_books() {
         let alice = read(&samples().join("alice-in-wonderland.epub")).unwrap();
-        assert!(alice.title.contains("Alice"), "{}", alice.title);
-        assert_eq!(alice.authors[0].last, "Carroll");
+        assert!(alice.book.title.contains("Alice"), "{}", alice.book.title);
+        assert_eq!(alice.book.authors[0].last, "Carroll");
         let fb2 = read(&samples().join("sample-windows-1251.fb2")).unwrap();
-        assert!(fb2.title.chars().any(|c| ('а'..='я').contains(&c)), "{}", fb2.title);
-        assert!(!fb2.authors.is_empty());
-        assert!(!read(&samples().join("sample-utf8.fb2.zip")).unwrap().title.is_empty());
+        assert!(fb2.book.title.chars().any(|c| ('а'..='я').contains(&c)), "{}", fb2.book.title);
+        assert!(!fb2.book.authors.is_empty());
+        assert!(!read(&samples().join("sample-utf8.fb2.zip")).unwrap().book.title.is_empty());
     }
 
     const FB2: &str = r##"<?xml version="1.0" encoding="utf-8"?>
@@ -503,12 +515,12 @@ mod tests {
     #[test]
     fn fb2_title_info_authors_series_and_cover() {
         let meta = fb2(FB2.as_bytes()).unwrap();
-        assert_eq!(meta.title, "Захар Беркут & інші");
-        assert_eq!(meta.authors.len(), 2);
-        assert_eq!(meta.authors[0].sort_name(), "Франко Іван Якович");
-        assert_eq!(meta.authors[1].display(), "Anon");
-        assert_eq!(meta.series.as_deref(), Some("Повісті"));
-        assert_eq!(meta.series_index.as_deref(), Some("2"));
+        assert_eq!(meta.book.title, "Захар Беркут & інші");
+        assert_eq!(meta.book.authors.len(), 2);
+        assert_eq!(meta.book.authors[0].sort_name(), "Франко Іван Якович");
+        assert_eq!(meta.book.authors[1].display(), "Anon");
+        assert_eq!(meta.book.series.as_deref(), Some("Повісті"));
+        assert_eq!(meta.book.series_index.as_deref(), Some("2"));
         let cover = meta.cover.unwrap();
         assert_eq!(cover.ext, "png");
         assert_eq!(&cover.bytes[..4], b"\x89PNG");
@@ -548,10 +560,10 @@ mod tests {
           </metadata><manifest><item id="cov" href="images/my%20cover.jpg" media-type="image/jpeg"/></manifest></package>"#;
         let bytes = make_epub(opf, &[("OEBPS/images/my cover.jpg", b"JPEG")]);
         let meta = epub(Cursor::new(bytes)).unwrap();
-        assert_eq!(meta.title, "Book & Title");
-        assert_eq!(meta.authors, vec![Author { first: "Terry".into(), last: "Pratchett".into() }]);
-        assert_eq!(meta.series.as_deref(), Some("Discworld"));
-        assert_eq!(meta.series_index.as_deref(), Some("3"));
+        assert_eq!(meta.book.title, "Book & Title");
+        assert_eq!(meta.book.authors, vec![Author { first: "Terry".into(), last: "Pratchett".into() }]);
+        assert_eq!(meta.book.series.as_deref(), Some("Discworld"));
+        assert_eq!(meta.book.series_index.as_deref(), Some("3"));
         assert_eq!(meta.cover, Some(Cover { bytes: b"JPEG".to_vec(), ext: "jpg".into() }));
     }
 
@@ -564,7 +576,7 @@ mod tests {
           </metadata><manifest><item id="x" href="../c.png" media-type="image/png" properties="cover-image"/></manifest></package>"##;
         let bytes = make_epub(opf, &[("c.png", b"PNG")]);
         let meta = epub(Cursor::new(bytes)).unwrap();
-        assert_eq!(meta.series.as_deref(), Some("Saga"));
+        assert_eq!(meta.book.series.as_deref(), Some("Saga"));
         assert_eq!(meta.cover.unwrap().bytes, b"PNG");
     }
 
