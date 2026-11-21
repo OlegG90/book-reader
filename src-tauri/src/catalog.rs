@@ -83,6 +83,31 @@ fn fetch(source: &Source, url: &str, accept: &str) -> Result<Reply, String> {
     }
 }
 
+/// Finds the OPDS catalog behind the address the reader typed: the address
+/// itself if it is a catalog, else `/opds` under it or at the server's root
+/// (where Calibre-Web, CWA and the Calibre Content Server all keep theirs).
+/// Returns the catalog's address.
+pub fn discover(source: &Source) -> Result<String, String> {
+    let typed = check_url(&source.url)?;
+    let mut candidates = vec![typed.to_string()];
+    let under = format!("{}/opds", typed.as_str().trim_end_matches('/'));
+    let at_root = typed.join("/opds").map(String::from).unwrap_or_default();
+    for candidate in [under, at_root] {
+        if !candidates.contains(&candidate) {
+            candidates.push(candidate);
+        }
+    }
+    for candidate in &candidates {
+        let reply = net::get(candidate, login(source).as_ref(), FEED_TYPES)?;
+        match reply.status {
+            401 | 403 => return Err(format!("{} didn't accept the user name or password", typed.host_str().unwrap_or("The server"))),
+            200..=299 if opds::parse_feed(&String::from_utf8_lossy(&reply.body), candidate).is_ok() => return Ok(candidate.clone()),
+            _ => {}
+        }
+    }
+    Err(format!("No OPDS catalog found: tried {}", candidates.join(", ")))
+}
+
 /// A page of the catalog: the source's root, or `url` on its server.
 pub fn feed(source: &Source, url: Option<&str>) -> Result<Feed, String> {
     let url = url.unwrap_or(&source.url);

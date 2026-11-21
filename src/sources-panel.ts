@@ -49,7 +49,12 @@ export function createSourcesPanel(host: HTMLElement) {
 
   function edit(source: Source | undefined) {
     const name = input('Name', { value: source?.name ?? '', placeholder: 'Calibre-Web' })
-    const url = input('OPDS address', { value: source?.url ?? '', placeholder: 'https://books.example/opds', required: true, type: 'url' })
+    const url = input('Server address (its OPDS catalog is found by itself)', {
+      value: source?.url ?? '',
+      placeholder: 'http://192.168.1.10:8083',
+      required: true,
+      type: 'url',
+    })
     const user = input('User name', { value: source?.user ?? '', autocomplete: 'username' })
     const password = input('Password', {
       type: 'password',
@@ -74,7 +79,7 @@ export function createSourcesPanel(host: HTMLElement) {
     )
     form.onsubmit = async e => {
       e.preventDefault()
-      formMessage.textContent = 'Saving…'
+      formMessage.textContent = 'Looking for the catalog…'
       try {
         const saved = await invoke<{ id: string; warning: string | null }>('save_catalog_source', {
           input: {

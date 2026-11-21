@@ -601,7 +601,8 @@ struct SavedSource {
     warning: Option<String>,
 }
 
-/// Adds or changes a catalog source. One source at most syncs progress.
+/// Adds or changes a catalog source, after finding its OPDS catalog (which
+/// also checks the login). One source at most syncs progress.
 #[tauri::command(async)]
 fn save_catalog_source(
     app: AppHandle,
@@ -621,7 +622,15 @@ fn save_catalog_source(
         "" => url.host_str().unwrap_or("Catalog").to_string(),
         name => name.to_string(),
     };
-    let source = catalog::Source { id: id.clone(), name, url: url.to_string(), user: input.user.trim().to_string(), sync: input.sync };
+    let mut source = catalog::Source { id: id.clone(), name, url: url.to_string(), user: input.user.trim().to_string(), sync: input.sync };
+    // The reader types the server's address; the catalog may be under /opds.
+    let is_new = store.read(|s| !s.sources.iter().any(|other| other.id == id));
+    source.url = catalog::discover(&source).inspect_err(|_| {
+        if is_new {
+            platform::forget_password(&id);
+        }
+    })?;
+    let url = catalog::check_url(&source.url)?;
     store
         .update(|s| {
             if source.sync {
