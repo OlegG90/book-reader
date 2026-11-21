@@ -70,7 +70,7 @@ export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onC
   const libraryButtons = el(
     'div',
     { className: 'buttons' },
-    el('button', { type: 'button', textContent: 'Change…', onclick: actions.changeLibrary }),
+    el('button', { type: 'button', className: 'desktop-only', textContent: 'Change…', onclick: actions.changeLibrary }),
     el('button', { type: 'button', textContent: 'Organize…', onclick: actions.organizeLibrary }),
   )
   const offerLibrary = el('input', { type: 'checkbox' })

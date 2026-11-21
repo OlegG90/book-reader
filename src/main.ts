@@ -81,6 +81,8 @@ const SAVE_DELAY_MS = 500
 const TOP_EDGE_PX = 48
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
+// Hides what the phone can't do yet (`.desktop-only` in style.css).
+document.documentElement.classList.toggle('android', /Android/.test(navigator.userAgent))
 const appWindow = getCurrentWindow()
 const topbar = $('topbar')
 

@@ -4,7 +4,7 @@ dist/
 
 # Rust / Tauri
 target/
-src-tauri/gen/
+src-tauri/gen/schemas/
 
 # Local app data written next to the exe during development
 breader.json
