@@ -67,10 +67,11 @@ export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onC
     onclick: actions.clearHistory,
   })
   const libraryFolder = el('output', { className: 'path' })
+  const changeLibrary = el('button', { type: 'button', textContent: 'Change…', onclick: actions.changeLibrary })
   const libraryButtons = el(
     'div',
     { className: 'buttons' },
-    el('button', { type: 'button', textContent: 'Change…', onclick: actions.changeLibrary }),
+    changeLibrary,
     el('button', { type: 'button', textContent: 'Organize…', onclick: actions.organizeLibrary }),
   )
   const offerLibrary = el('input', { type: 'checkbox' })
@@ -113,9 +114,11 @@ export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onC
     fileTypesButton.textContent = registered ? 'Unregister' : 'Register'
   }
 
-  function setLibraryFolder(folder: string | null) {
+  /** Shows the library folder; `canChange` is false where no other folder can be picked (Android, for now). */
+  function setLibraryFolder(folder: string | null, canChange = true) {
     libraryFolder.textContent = folder ?? 'Not chosen yet'
     libraryFolder.title = folder ?? ''
+    changeLibrary.hidden = !canChange
   }
 
   show(initial)

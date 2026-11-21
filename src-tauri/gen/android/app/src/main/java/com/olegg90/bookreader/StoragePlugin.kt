@@ -3,7 +3,6 @@ package com.olegg90.bookreader
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.Environment
 import android.provider.Settings
 import app.tauri.annotation.Command
@@ -16,7 +15,8 @@ import app.tauri.plugin.Plugin
  * The phone's shared storage for the library (see storage.rs). With All files
  * access turned on, the library is a plain folder (Documents/Books by default)
  * that the Rust side reads and writes like any other, so the same library code
- * runs on Windows and Android.
+ * runs on Windows and Android. Android 11 (API 30) is the minimum (see
+ * app/build.gradle.kts): All files access starts there.
  */
 @TauriPlugin
 class StoragePlugin(private val activity: Activity) : Plugin(activity) {
@@ -24,7 +24,7 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
   /** Whether All files access is on, and where the shared Documents folder is. */
   @Command
   fun status(invoke: Invoke) {
-    val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+    val granted = Environment.isExternalStorageManager()
     val documents = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).absolutePath
     invoke.resolve(JSObject().put("granted", granted).put("documents", documents))
   }

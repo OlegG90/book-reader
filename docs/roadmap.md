@@ -8,7 +8,7 @@
    - First-run library folder choice, library scan and metadata cache, library screen.
    - Naming template, Copy / Move to library, "Organize library" with preview.
    - Local bookmarks.
-2. **Android spike** — done (21.11.2026). The Tauri app builds for Android from the same crate in GitHub Actions and runs on the phone; with **All files access** the library is `Documents/Books` and the Rust library code works there unchanged (books in subfolders, FB2 in windows-1251, PDFs skipped). Findings:
+2. **Android spike** — done (21.11.2026). The Tauri app builds for Android from the same crate in GitHub Actions and runs on the phone; with **All files access** (Android 11+, so `minSdk` 30) the library is `Documents/Books` and the Rust library code works there unchanged (books in subfolders, FB2 in windows-1251, PDFs skipped). Findings:
    - The Android SDK and NDK have no Windows-on-ARM64 builds, so APKs come from CI (as in PswManager); `cargo check --target aarch64-linux-android` still catches compile errors locally.
    - Folder picking: the dialog plugin can't pick folders on Android; SAF would mean a second, Kotlin library backend over `content://` URIs. All files access it is (sideload only).
    - The debug APK is ~140 MB (debug symbols); its signing key changes per CI run, so a reinstall needs `adb uninstall` first. A stable release key comes with stage 4.

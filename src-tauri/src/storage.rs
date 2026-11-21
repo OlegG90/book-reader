@@ -6,13 +6,20 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 use tauri::plugin::{Builder, PluginHandle, TauriPlugin};
-use tauri::{Manager, Runtime};
+use tauri::{AppHandle, Manager, Runtime, Wry};
 
 /// The library folder offered on first run, inside the shared Documents folder.
 const LIBRARY_FOLDER: &str = "Books";
 
+/// The handle to `StoragePlugin.kt`, kept in the app's state.
 pub struct Storage<R: Runtime>(PluginHandle<R>);
 
+/// The plugin, from anywhere with the app.
+pub fn of(app: &AppHandle) -> tauri::State<'_, Storage<Wry>> {
+    app.state()
+}
+
+/// Registers `StoragePlugin.kt` and keeps its handle in the app's state.
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("storage")
         .setup(|app, api| {
@@ -38,9 +45,17 @@ impl<R: Runtime> Storage<R> {
         Ok(self.status()?.documents.join(LIBRARY_FOLDER))
     }
 
-    /// Fails, after opening Android's setting for it, while All files access is off.
-    pub fn require_access(&self) -> Result<(), String> {
+    /// Fails while All files access is off, saying where to turn it on.
+    pub fn check_access(&self) -> Result<(), String> {
         if self.status()?.granted {
+            return Ok(());
+        }
+        Err("Book Reader can't read the library: turn on \"Allow access to manage all files\" for it in Android's settings.".into())
+    }
+
+    /// Like `check_access`, and also opens Android's setting for it.
+    pub fn require_access(&self) -> Result<(), String> {
+        if self.check_access().is_ok() {
             return Ok(());
         }
         self.0.run_mobile_plugin::<serde_json::Value>("askAllFilesAccess", ()).map_err(|e| e.to_string())?;

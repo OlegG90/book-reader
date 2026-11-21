@@ -5,6 +5,7 @@
 # repo, changed by hand from there (StoragePlugin.kt, the manifest).
 name: Android
 
+# Every push that touches the app or what it is built from, on any branch.
 on:
   push:
     paths: ['src/**', 'src-tauri/**', 'index.html', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', '.github/workflows/android.yml']
@@ -47,7 +48,6 @@ jobs:
       - run: echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
 
       - run: npm ci
-
 
       # A debug build, signed with the runner's throwaway debug key: reinstalling
       # needs `adb uninstall com.olegg90.bookreader` first. A release key comes

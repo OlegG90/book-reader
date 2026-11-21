@@ -316,6 +316,8 @@ interface RecentBook {
 interface LibraryInfo {
   folder: string | null
   suggested: string
+  /** Whether another folder can be picked (not on Android yet). */
+  canPick: boolean
 }
 
 /** The window without a book: the library, or the first-run folder choice. */
@@ -338,10 +340,11 @@ async function showLibraryScreen() {
 async function loadLibraryInfo(): Promise<LibraryInfo> {
   const info = await invoke<LibraryInfo>('library_info').catch((e): LibraryInfo => {
     console.error(e)
-    return { folder: null, suggested: '' }
+    return { folder: null, suggested: '', canPick: true }
   })
   libraryFolder = info.folder
-  settingsPanel.setLibraryFolder(info.folder)
+  settingsPanel.setLibraryFolder(info.folder, info.canPick)
+  $('setup-pick').hidden = !info.canPick
   return info
 }
 

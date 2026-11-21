@@ -1,20 +1,23 @@
-// The desktop app's command line and exe-relative data folders are unused on Android.
-#![cfg_attr(mobile, allow(dead_code))]
-
+// Android uses only `Launch`: it has no command line.
+#[cfg_attr(mobile, allow(dead_code))]
 mod cli;
-#[cfg_attr(not(windows), path = "console_other.rs")]
+#[cfg(desktop)]
+#[cfg_attr(not(windows), path = "console_stdout.rs")]
 mod console;
+// Android keeps its data in the app's storage: only `FILE_NAME` is shared.
+#[cfg_attr(mobile, allow(dead_code))]
 mod data_dir;
 mod fingerprint;
 mod library;
 mod metadata;
 mod naming;
 mod paths;
-#[cfg_attr(not(windows), path = "register_other.rs")]
+#[cfg_attr(not(windows), path = "register_unsupported.rs")]
 mod register;
 #[cfg(mobile)]
 mod storage;
 mod store;
+#[cfg(desktop)]
 mod version;
 
 #[cfg(desktop)]
@@ -35,7 +38,9 @@ use tauri::DragDropEvent;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, Window, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 
+#[cfg(desktop)]
 const DEFAULT_WIDTH: f64 = 1100.0;
+#[cfg(desktop)]
 const DEFAULT_HEIGHT: f64 = 800.0;
 
 /// What each reader window shows (its book and `--no-save`), by window label.
@@ -372,14 +377,17 @@ struct LibraryInfo {
     folder: Option<String>,
     /// What the first-run screen offers.
     suggested: String,
+    /// Whether another folder can be picked (not on Android yet).
+    can_pick: bool,
 }
 
 #[tauri::command(async)]
-fn library_info(app: AppHandle, store: State<Store>) -> LibraryInfo {
-    LibraryInfo {
+fn library_info(app: AppHandle, store: State<Store>) -> Result<LibraryInfo, String> {
+    Ok(LibraryInfo {
         folder: store.read(|s| s.library.as_ref().map(|p| p.display().to_string())),
-        suggested: default_library(&app).map(|p| p.display().to_string()).unwrap_or_default(),
-    }
+        suggested: default_library(&app)?.display().to_string(),
+        can_pick: cfg!(desktop),
+    })
 }
 
 /// The library folder the first-run screen offers: `lib` next to the exe (or
@@ -392,7 +400,7 @@ fn default_library(app: &AppHandle) -> Result<PathBuf, String> {
     }
     #[cfg(mobile)]
     {
-        app.state::<storage::Storage<tauri::Wry>>().default_library()
+        storage::of(app).default_library()
     }
 }
 
@@ -421,7 +429,7 @@ fn set_library(window: Window, store: State<Store>, books: State<LibraryBooks>, 
     } else {
         // A folder in shared storage needs All files access on Android.
         #[cfg(mobile)]
-        window.state::<storage::Storage<tauri::Wry>>().require_access()?;
+        storage::of(window.app_handle()).require_access()?;
         default_library(window.app_handle())?
     };
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
@@ -454,8 +462,14 @@ struct LibraryBook {
 
 /// Scans the library folder (cheap after the first time: see library::scan).
 #[tauri::command(async)]
-fn scan_library(store: State<Store>, books: State<LibraryBooks>) -> Result<Vec<LibraryBook>, String> {
+fn scan_library(app: AppHandle, store: State<Store>, books: State<LibraryBooks>) -> Result<Vec<LibraryBook>, String> {
     let root = library_root(&store)?;
+    // Without All files access (turned off after the library was set up) the
+    // folder can't be read: say how to turn it back on.
+    #[cfg(mobile)]
+    storage::of(&app).check_access()?;
+    #[cfg(desktop)]
+    let _ = app;
     let entries = library::scan(&root, &library_cache(&store)).map_err(|e| format!("{}: {e}", root.display()))?;
     let views = store.read(|s| {
         entries
