@@ -212,6 +212,181 @@ body.library-mode #fullscreen-button {
   border: 1px solid var(--line);
 }
 
+.library-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.library-tabs button {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 4px 10px;
+}
+
+.library-tabs button[aria-selected='true'] {
+  color: var(--fg);
+  background: var(--active);
+}
+
+/* Catalogs */
+#catalog-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#catalog-list li {
+  border-bottom: 1px solid var(--line);
+}
+
+#catalog-list .folder button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 6px;
+  text-align: start;
+}
+
+#catalog-list .book {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 6px;
+}
+
+#catalog-list .cover {
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--active);
+}
+
+#catalog-list .cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#catalog-list .about {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+#catalog-list .title {
+  font-weight: 600;
+}
+
+#catalog-list .author,
+#catalog-list .summary,
+#catalog-list .meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#catalog-list .summary:empty {
+  display: none;
+}
+
+#catalog-list .download {
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+#catalog-list .download:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+#catalog-more {
+  border: 1px solid var(--line);
+  margin-top: 12px;
+}
+
+#catalog-message {
+  margin: 16px 0;
+}
+
+/* Catalog sources in the settings */
+#settings .sources-field {
+  gap: 8px;
+}
+
+#settings .sources {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#settings .sources li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#settings .sources .url {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+#settings .sources .actions {
+  display: flex;
+  gap: 4px;
+}
+
+#settings .badge {
+  margin-inline-start: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  background: var(--active);
+}
+
+#settings .source-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#settings .stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--muted);
+}
+
+#settings .stacked input,
+#settings .sources-field button {
+  font: inherit;
+  color: var(--fg);
+}
+
+#settings .stacked input {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+#settings .sources-field button {
+  border: 1px solid var(--line);
+  justify-self: start;
+}
+
+#settings .source-form .buttons {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+}
+
 #library h2 {
   margin: 8px 0;
   font-size: 13px;

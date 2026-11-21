@@ -23,6 +23,8 @@ pub struct State {
     pub declined: BTreeSet<String>,
     /// Bookmarks keyed by book fingerprint; owned by the frontend like settings.
     pub bookmarks: HashMap<String, Value>,
+    /// OPDS catalogs (their passwords are in the OS credential store).
+    pub sources: Vec<crate::catalog::Source>,
 }
 
 /// How many books the start screen lists.

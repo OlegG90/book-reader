@@ -27,7 +27,9 @@ Settings and reading positions are stored in `breader.json` next to the exe
 
 ## Development
 
-Requires Node.js, Rust (MSVC toolchain) and Visual Studio Build Tools with the C++ workload.
+Requires Node.js, Rust (MSVC toolchain), Visual Studio Build Tools with the C++ workload and, on
+Windows on ARM64, LLVM (`winget install LLVM.LLVM`): the TLS library compiles C with clang there
+(`src-tauri/.cargo/config.toml` points at it).
 
 ```
 npm install
@@ -43,9 +45,7 @@ npm run clean            # remove build outputs (dist, src-tauri/target)
 The Android SDK and NDK have no Windows-on-ARM64 builds, so the APK is built in GitHub Actions
 ([android.yml](.github/workflows/android.yml)) on every push that touches the app: download the
 `book-reader-apk` artifact and install it with `adb install` (`adb` is in Google's platform-tools; a debug
-APK from another run needs `adb uninstall com.olegg90.bookreader` first). Locally,
-`cargo check --target aarch64-linux-android` in `src-tauri` (after `rustup target add aarch64-linux-android`)
-still catches compile errors. The Gradle project in `src-tauri/gen/android` is kept in the repo.
+APK from another run needs `adb uninstall com.olegg90.bookreader` first). The TLS library needs the NDK's clang to build for Android, so Android compile errors show up in CI. The Gradle project in `src-tauri/gen/android` is kept in the repo.
 On the phone the library is `Documents/Books`, reached with the *All files access* permission.
 
 Sample books are in [samples/](samples/): public-domain EPUBs from Project Gutenberg and FB2 files

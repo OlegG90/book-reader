@@ -34,9 +34,12 @@ encoding_rs = "0.8.35"
 base64 = "0.23.1"
 url = "2.5.9"
 md-5 = "0.10"
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
 
 # Windows only: file associations and the console for --help / --version.
 [target.'cfg(windows)'.dependencies]
+# Catalog passwords live in the Windows Credential Manager.
+keyring = { version = "3", features = ["windows-native"] }
 winreg = "0.56.0"
 windows-sys = { version = "0.61.2", features = ["Win32_System_Console", "Win32_UI_Shell"] }
 

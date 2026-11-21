@@ -1,5 +1,6 @@
 // Android uses only `Launch`: it has no command line.
 #[cfg_attr(mobile, allow(dead_code))]
+mod catalog;
 mod cli;
 #[cfg(desktop)]
 #[cfg_attr(not(windows), path = "console_stdout.rs")]
@@ -12,6 +13,7 @@ mod kosync;
 mod library;
 mod metadata;
 mod naming;
+mod net;
 mod opds;
 mod paths;
 #[cfg_attr(not(windows), path = "register_unsupported.rs")]
@@ -516,13 +518,24 @@ fn add_to_library(
     mode: AddMode,
 ) -> Result<Added, String> {
     let source = saving_window(&windows, &window)?;
-    let root = library_root(&store)?;
-    let err = |e: std::io::Error| format!("{}: {e}", paths::file_name(&source));
-    let format = metadata::Format::of(&source).ok_or("Not a book file")?;
-    let (fingerprint, meta) = library::read_book(&source).map_err(err)?;
-    // The same book may already be in the library under another name.
+    let (added, fingerprint) = put_in_library(&store, &books, &source, mode)?;
+    let target = library::join(&library_root(&store)?, &added.path);
+    windows.set_path(window.label(), target.clone());
+    repath_recent(&store, &[(fingerprint, target)])?;
+    let _ = window.emit("library-updated", ());
+    Ok(added)
+}
+
+/// Moves or copies the book file `source` into the library under the naming
+/// template. If the library already holds the same book (under any name),
+/// nothing is moved or copied. Also returns the book's fingerprint.
+fn put_in_library(store: &Store, books: &LibraryBooks, source: &Path, mode: AddMode) -> Result<(Added, String), String> {
+    let root = library_root(store)?;
+    let err = |e: std::io::Error| format!("{}: {e}", paths::file_name(source));
+    let format = metadata::Format::of(source).ok_or("Not a book file")?;
+    let (fingerprint, meta) = library::read_book(source).map_err(err)?;
     let known = books
-        .snapshot(&store, &root)
+        .snapshot(store, &root)
         .into_iter()
         .find(|e| e.fingerprint == fingerprint && e.absolute(&root).is_file())
         .map(|e| naming::Placement::Exists(e.path));
@@ -533,23 +546,156 @@ fn add_to_library(
             naming::place(&root, &wanted, &fingerprint, &Default::default()).map_err(err)?
         }
     };
-    let (rel, existed) = match placement {
+    let added = match placement {
         naming::Placement::Free(rel) => {
             let target = library::join(&root, &rel);
             match mode {
-                AddMode::Move => naming::move_file(&source, &target),
-                AddMode::Copy => naming::copy_file(&source, &target),
+                AddMode::Move => naming::move_file(source, &target),
+                AddMode::Copy => naming::copy_file(source, &target),
             }
             .map_err(err)?;
-            (rel, false)
+            Added { path: rel, existed: false }
         }
-        naming::Placement::Exists(rel) => (rel, true),
+        naming::Placement::Exists(rel) => Added { path: rel, existed: true },
     };
-    let target = library::join(&root, &rel);
-    windows.set_path(window.label(), target.clone());
-    repath_recent(&store, &[(fingerprint, target)])?;
-    let _ = window.emit("library-updated", ());
-    Ok(Added { path: rel, existed })
+    Ok((added, fingerprint))
+}
+
+// ---- Catalogs -----------------------------------------------------------------
+
+/// Search URL templates by source id, read once from each catalog.
+#[derive(Default)]
+struct SearchTemplates(Mutex<HashMap<String, String>>);
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceView {
+    #[serde(flatten)]
+    source: catalog::Source,
+    has_password: bool,
+}
+
+#[tauri::command(async)]
+fn catalog_sources(store: State<Store>) -> Vec<SourceView> {
+    let sources = store.read(|s| s.sources.clone());
+    sources.into_iter().map(|source| SourceView { has_password: platform::password(&source.id).is_some(), source }).collect()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceInput {
+    /// Missing for a new source.
+    id: Option<String>,
+    name: String,
+    url: String,
+    user: String,
+    /// A new password; missing or empty keeps the one kept already.
+    password: Option<String>,
+    sync: bool,
+}
+
+#[derive(Serialize)]
+struct SavedSource {
+    id: String,
+    /// Said when the address is plain HTTP across the internet.
+    warning: Option<String>,
+}
+
+/// Adds or changes a catalog source. One source at most syncs progress.
+#[tauri::command(async)]
+fn save_catalog_source(
+    app: AppHandle,
+    store: State<Store>,
+    templates: State<SearchTemplates>,
+    input: SourceInput,
+) -> Result<SavedSource, String> {
+    let url = catalog::check_url(&input.url)?;
+    let id = input.id.filter(|id| !id.is_empty()).unwrap_or_else(|| {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        format!("{now:x}")
+    });
+    if let Some(password) = input.password.filter(|p| !p.is_empty()) {
+        platform::save_password(&id, &password)?;
+    }
+    let name = match input.name.trim() {
+        "" => url.host_str().unwrap_or("Catalog").to_string(),
+        name => name.to_string(),
+    };
+    let source = catalog::Source { id: id.clone(), name, url: url.to_string(), user: input.user.trim().to_string(), sync: input.sync };
+    store
+        .update(|s| {
+            if source.sync {
+                s.sources.iter_mut().for_each(|other| other.sync = false);
+            }
+            match s.sources.iter_mut().find(|other| other.id == source.id) {
+                Some(existing) => *existing = source,
+                None => s.sources.push(source),
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    templates.0.lock().unwrap().remove(&id);
+    let _ = app.emit("catalogs-changed", ());
+    Ok(SavedSource { id, warning: catalog::insecure_warning(&url) })
+}
+
+#[tauri::command(async)]
+fn delete_catalog_source(app: AppHandle, store: State<Store>, id: String) -> Result<(), String> {
+    store.update(|s| s.sources.retain(|source| source.id != id)).map_err(|e| e.to_string())?;
+    platform::forget_password(&id);
+    let _ = app.emit("catalogs-changed", ());
+    Ok(())
+}
+
+fn source_by_id(store: &Store, id: &str) -> Result<catalog::Source, String> {
+    store.read(|s| s.sources.iter().find(|source| source.id == id).cloned()).ok_or_else(|| "That catalog was removed".into())
+}
+
+/// A page of a catalog: its root, or `url` on its server.
+#[tauri::command(async)]
+fn catalog_feed(store: State<Store>, id: String, url: Option<String>) -> Result<opds::Feed, String> {
+    catalog::feed(&source_by_id(&store, &id)?, url.as_deref())
+}
+
+#[tauri::command(async)]
+fn catalog_search(store: State<Store>, templates: State<SearchTemplates>, id: String, query: String) -> Result<opds::Feed, String> {
+    let source = source_by_id(&store, &id)?;
+    let known = templates.0.lock().unwrap().get(&id).cloned();
+    let template = match known {
+        Some(template) => template,
+        None => {
+            let template = catalog::search_template(&source)?;
+            templates.0.lock().unwrap().insert(id, template.clone());
+            template
+        }
+    };
+    catalog::search(&source, &template, &query)
+}
+
+#[tauri::command(async)]
+fn catalog_image(store: State<Store>, id: String, url: String) -> Result<Response, String> {
+    catalog::image(&source_by_id(&store, &id)?, &url).map(Response::new)
+}
+
+/// Downloads a book from a catalog into the library, under the naming
+/// template; a book the library already holds isn't added twice.
+#[tauri::command(async)]
+fn catalog_download(
+    app: AppHandle,
+    store: State<Store>,
+    books: State<LibraryBooks>,
+    id: String,
+    url: String,
+    format: opds::FileFormat,
+) -> Result<Added, String> {
+    let source = source_by_id(&store, &id)?;
+    let downloads = store.dir().join("breader-cache").join("downloads");
+    let file = catalog::download(&source, &url, format, &downloads)?;
+    let result = put_in_library(&store, &books, &file, AddMode::Move);
+    // Left behind when the library already had the book, or on a failure.
+    let _ = std::fs::remove_file(&file);
+    let (added, _) = result?;
+    let _ = app.emit("library-updated", ());
+    Ok(added)
 }
 
 /// Points recent-list entries at the books' new places (by fingerprint), in one write.
@@ -782,6 +928,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(ReaderWindows::default())
         .manage(LibraryBooks::default())
+        .manage(SearchTemplates::default())
         .invoke_handler(tauri::generate_handler![
             current_book,
             read_book,
@@ -805,6 +952,13 @@ pub fn run() {
             open_library_book,
             show_library,
             leave_app,
+            catalog_sources,
+            save_catalog_source,
+            delete_catalog_source,
+            catalog_feed,
+            catalog_search,
+            catalog_image,
+            catalog_download,
             add_to_library,
             decline_library,
             get_bookmarks,

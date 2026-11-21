@@ -29,6 +29,8 @@ import {
   type Status,
 } from './library'
 import { BookView, type BookStyle, type Relocation } from './reader'
+import { createCatalogView } from './catalog-view'
+import { createSourcesPanel } from './sources-panel'
 import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
 import { createSettingsPanel, type PanelValues } from './settings-panel'
 import { createTOCView } from './vendor/foliate-js/ui/tree.js'
@@ -604,6 +606,11 @@ async function handleEscape() {
  */
 function handleBack() {
   if (closeTopLayer()) return
+  // In the catalogs, Back goes up a folder, and from the top to the books.
+  if (!book && !$('catalog-view').hidden) {
+    if (!catalogView.back()) showTab('books')
+    return
+  }
   void invoke(book ? 'show_library' : 'leave_app').catch(console.error)
 }
 
@@ -727,6 +734,18 @@ const settingsPanel = createSettingsPanel(
     organizeLibrary: () => void openOrganize(),
   },
 )
+// The catalogs (OPDS servers) are edited at the end of the settings.
+const sourcesPanel = createSourcesPanel($('settings').appendChild(el('div', { className: 'field sources-field' })))
+const catalogView = createCatalogView({ library: () => libraryBooks, openSettings })
+
+/** The library window's two tabs: the books on disk, and the catalogs to get more from. */
+function showTab(tab: 'books' | 'catalogs') {
+  $('books-view').hidden = tab !== 'books'
+  $('catalog-view').hidden = tab !== 'catalogs'
+  $('tab-books').setAttribute('aria-selected', String(tab === 'books'))
+  $('tab-catalogs').setAttribute('aria-selected', String(tab === 'catalogs'))
+  if (tab === 'catalogs') void catalogView.show()
+}
 
 const resolvedTheme = (): ResolvedTheme =>
   settings.theme === 'system' ? (systemDark.matches ? 'dark' : 'light') : settings.theme
@@ -870,6 +889,12 @@ $('offer-never').addEventListener('click', () => {
 })
 $('organize-apply').addEventListener('click', () => void applyOrganize())
 $('organize-cancel').addEventListener('click', closePanels)
+$('tab-books').addEventListener('click', () => showTab('books'))
+$('tab-catalogs').addEventListener('click', () => showTab('catalogs'))
+appWindow.listen('catalogs-changed', () => {
+  void sourcesPanel.refresh()
+  if (!$('catalog-view').hidden) void catalogView.show()
+})
 appWindow.listen('library-changed', () => {
   libraryBooks = []
   if (!book) void showLibraryScreen()

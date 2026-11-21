@@ -47,7 +47,7 @@ pub struct BookFile {
 }
 
 /// The formats the reader opens; anything else the server offers is left out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FileFormat {
     Epub,
@@ -56,6 +56,15 @@ pub enum FileFormat {
 }
 
 impl FileFormat {
+    /// The file extension the library uses for it.
+    pub fn extension(self) -> &'static str {
+        match self {
+            FileFormat::Epub => "epub",
+            FileFormat::Fb2 => "fb2",
+            FileFormat::Fb2Zip => "fb2.zip",
+        }
+    }
+
     /// From a link's media type or, failing that, its file extension.
     fn of(media_type: &str, href: &str) -> Option<FileFormat> {
         let media_type = media_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
@@ -77,15 +86,6 @@ impl FileFormat {
         } else {
             None
         }
-    }
-}
-
-impl Book {
-    /// The file to download by default: EPUB if offered, else FB2.
-    pub fn preferred_file(&self) -> Option<&BookFile> {
-        [FileFormat::Epub, FileFormat::Fb2Zip, FileFormat::Fb2]
-            .iter()
-            .find_map(|wanted| self.files.iter().find(|f| f.format == *wanted))
     }
 }
 
@@ -285,7 +285,7 @@ mod tests {
         assert_eq!(book.summary, "A & B");
         assert_eq!(book.cover.as_deref(), Some("https://books.example/opds/cover_240_240/42"));
         assert_eq!(book.files.len(), 2);
-        assert_eq!(book.preferred_file().unwrap().href, "https://books.example/opds/download/42/epub/");
+        assert_eq!(book.files[1].href, "https://books.example/opds/download/42/epub/");
     }
 
     #[test]
@@ -298,15 +298,6 @@ mod tests {
         // CWA serves FB2 as text/xml: the link says which format it is.
         assert_eq!(FileFormat::of("text/xml", "/opds/download/7/fb2/"), Some(FileFormat::Fb2));
         assert_eq!(FileFormat::of("application/pdf", "/x.pdf"), None);
-    }
-
-    #[test]
-    fn fb2_is_taken_when_there_is_no_epub() {
-        let book = Book {
-            files: vec![BookFile { href: "a".into(), format: FileFormat::Fb2 }],
-            ..Default::default()
-        };
-        assert_eq!(book.preferred_file().unwrap().format, FileFormat::Fb2);
     }
 
     #[test]

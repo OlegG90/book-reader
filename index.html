@@ -19,17 +19,33 @@
         <p class="desktop-only"><button id="setup-pick" class="link">Choose another folder…</button></p>
       </section>
       <section id="library" hidden>
-        <div class="library-bar">
-          <h1>Library</h1>
-          <input id="library-search" type="search" placeholder="Search title, author, series" aria-label="Search the library" />
-          <select id="library-status" aria-label="Show"></select>
-          <select id="library-sort" aria-label="Sort by"></select>
-          <button id="open-button" title="Open a book file (Ctrl+O)">Open file…</button>
+        <div class="library-tabs" role="tablist">
+          <button id="tab-books" role="tab" aria-selected="true">Library</button>
+          <button id="tab-catalogs" role="tab" aria-selected="false">Catalogs</button>
         </div>
-        <h2 id="recent-title">Continue reading</h2>
-        <ol id="recent" aria-label="Recent books"></ol>
-        <p id="library-message" class="muted" hidden></p>
-        <ul id="library-books" aria-label="Books"></ul>
+        <div id="books-view">
+          <div class="library-bar">
+            <input id="library-search" type="search" placeholder="Search title, author, series" aria-label="Search the library" />
+            <select id="library-status" aria-label="Show"></select>
+            <select id="library-sort" aria-label="Sort by"></select>
+            <button id="open-button" title="Open a book file (Ctrl+O)">Open file…</button>
+          </div>
+          <h2 id="recent-title">Continue reading</h2>
+          <ol id="recent" aria-label="Recent books"></ol>
+          <p id="library-message" class="muted" hidden></p>
+          <ul id="library-books" aria-label="Books"></ul>
+        </div>
+        <div id="catalog-view" hidden>
+          <div class="library-bar">
+            <select id="catalog-source" aria-label="Catalog"></select>
+            <button id="catalog-back" hidden>← Back</button>
+            <input id="catalog-search" type="search" placeholder="Search the catalog" aria-label="Search the catalog" />
+          </div>
+          <h2 id="catalog-title"></h2>
+          <p id="catalog-message" class="muted" hidden></p>
+          <ul id="catalog-list" aria-label="Catalog"></ul>
+          <p><button id="catalog-more" hidden>More</button></p>
+        </div>
       </section>
     </div>
 
