@@ -160,7 +160,7 @@ async function openCurrentBook() {
     restoring = true
     const source = await loadBook(info)
     await settingsReady
-    book = await BookView.open($('stage'), $('footnote'), source, {
+    book = await BookView.open($('stage'), source, {
       flow: settings.flow,
       lastLocation: info.position?.cfi,
       style: currentBookStyle(),
@@ -694,7 +694,7 @@ async function runCommand(command: Command) {
 
 /** Closes the footnote, or else any open panel; false when there was none. */
 function closeTopLayer() {
-  if (!$('footnote').hidden) book?.hideFootnote()
+  if (book?.footnoteOpen) book.hideFootnote()
   else if (tocOpen() || organizeOpen() || scrimlessOpen()) closePanels()
   else return false
   return true
