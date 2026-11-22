@@ -54,3 +54,5 @@ Sample books are in [samples/](samples/): public-domain EPUBs from Project Guten
 ## License
 
 [MIT](LICENSE)
+
+The interface fonts, [Cormorant Garamond](https://github.com/CatharsisFonts/Cormorant) and [Lora](https://github.com/cyrealtype/Lora-Cyrillic), are bundled from the [Fontsource](https://fontsource.org) packages under the [SIL Open Font License 1.1](https://openfontlicense.org) (see `node_modules/@fontsource/*/LICENSE`).

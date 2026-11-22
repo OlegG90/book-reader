@@ -1,48 +1,79 @@
 /* Themes: main.ts sets data-theme to the resolved theme ("system" becomes light
-   or dark). The book is drawn with --fg and --link too (see appearance.ts), so
-   these variables are the one place a theme's colours are defined. */
+   or dark). The book is drawn with --fg and --link too (see reader-core's
+   appearance.ts), so these variables are the one place a theme's colours are
+   defined. The palette follows docs/design/ui-refresh.md ("Classical"): warm
+   neutrals and one gold accent, used for strokes and text rather than fills. */
 :root {
+  /* The three page colours, also drawn by the theme swatches in the settings */
+  --light-bg: #f3f2f2;
+  --light-fg: #201f1d;
+  --sepia-bg: #fff3e4;
+  --sepia-fg: #3a270d;
+  --dark-bg: #2d2b2b;
+  --dark-fg: #eae7e7;
+
   color-scheme: light;
-  --bg: #fbfbf8;
-  --fg: #1f1f1f;
-  --link: #1a5fb4;
-  --muted: #777;
-  --panel: #ffffff;
-  --line: rgba(0, 0, 0, 0.12);
-  --active: rgba(0, 0, 0, 0.07);
-  --accent: #6b6b6b;
-  --shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  --bg: var(--light-bg);
+  --fg: var(--light-fg);
+  /* Raised surfaces: covers, inputs on the page */
+  --surface: #eae9e9;
+  /* Panels, drawers and pop-ups over the page */
+  --panel: #f8f4f4;
+  --accent: #b68235;
+  /* The accent as text (darker, to read on the page) */
+  --accent-text: #7d5411;
+  --link: var(--accent-text);
+  --muted: color-mix(in srgb, var(--fg) 58%, transparent);
+  --line: color-mix(in srgb, var(--fg) 16%, transparent);
+  --active: color-mix(in srgb, var(--fg) 7%, transparent);
+  --shadow-sm: 0 1px 2px #2d2b2b24;
+  --shadow-md: 0 3px 10px #2d2b2b29;
+  --shadow: 0 12px 32px #2d2b2b38;
+
+  --font-heading: 'Cormorant Garamond', Georgia, serif;
+  --font-body: 'Lora', Georgia, serif;
+  --space-1: 4.6px;
+  --space-2: 9.2px;
+  --space-3: 13.8px;
+  --space-4: 18.4px;
+  --space-6: 27.6px;
+  --space-8: 36.8px;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 7px;
+
   /* On Android the page is drawn edge to edge, under the status and navigation
      bars; these keep controls clear of them (zero on the desktop). */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-family: var(--font-body);
   font-size: 14px;
+  font-variant-numeric: tabular-nums;
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --bg: #1b1b1c;
-  --fg: #d8d8d6;
-  --link: #8ab4f8;
-  --muted: #8a8a8a;
-  --panel: #262628;
-  --line: rgba(255, 255, 255, 0.12);
-  --active: rgba(255, 255, 255, 0.08);
-  --accent: #9a9a9a;
-  --shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  --bg: var(--dark-bg);
+  --fg: var(--dark-fg);
+  --surface: #3a3838;
+  --panel: #363434;
+  --accent: #c28d41;
+  --accent-text: #e1ad66;
+  --line: color-mix(in srgb, var(--fg) 14%, transparent);
+  --shadow-sm: 0 1px 2px #0000004d;
+  --shadow-md: 0 3px 10px #00000059;
+  --shadow: 0 0 0 1px #ffffff14, 0 12px 32px #00000080;
 }
 
 :root[data-theme='sepia'] {
-  --bg: #f4ecd8;
-  --fg: #5b4636;
-  --link: #8a4b1f;
-  --muted: #8c7b66;
-  --panel: #faf4e6;
-  --line: rgba(91, 70, 54, 0.18);
-  --active: rgba(91, 70, 54, 0.08);
-  --accent: #9c8467;
-  --shadow: 0 8px 28px rgba(91, 70, 54, 0.2);
+  --bg: var(--sepia-bg);
+  --fg: var(--sepia-fg);
+  --surface: #ffe9cc;
+  --panel: #fff8ee;
+  --accent-text: #7d5411;
+  --shadow-sm: 0 1px 2px #3a270d24;
+  --shadow-md: 0 3px 10px #3a270d29;
+  --shadow: 0 12px 32px #3a270d38;
 }
 
 * {
@@ -60,6 +91,39 @@ body {
 
 [hidden] {
   display: none !important;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  accent-color: var(--accent);
+}
+
+input[type='range'] {
+  accent-color: var(--accent);
 }
 
 .muted {
@@ -143,15 +207,19 @@ body {
   margin: 0;
 }
 
+/* The one main action in a place: the accent as a stroke, not a fill */
 button.primary {
   padding: 8px 16px;
-  color: var(--bg);
-  background: var(--fg);
+  color: var(--accent-text);
+  border: 1px solid var(--accent);
 }
 
 button.primary:hover {
-  background: var(--fg);
-  opacity: 0.85;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+button.primary:active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 #setup-suggested {
@@ -646,10 +714,13 @@ button.link:hover {
 
 button {
   font: inherit;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 15px;
   color: inherit;
   background: none;
-  border: 0;
-  border-radius: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   padding: 5px 10px;
   cursor: pointer;
 }
@@ -830,30 +901,103 @@ button:hover {
 }
 
 #settings select {
-  font: inherit;
-  color: inherit;
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
+  min-height: 34px;
   padding: 5px 8px;
+}
+
+/* Theme swatches: each page colour with "Aa" in its text colour; System is
+   split light / dark. The name sits under the swatch. */
+#settings .swatches {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+}
+
+#settings .swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#settings .swatch:hover {
+  background: none;
+}
+
+#settings .swatch::before {
+  content: 'Aa';
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 44px;
+  font-family: var(--font-heading);
+  font-size: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+#settings .swatch[data-theme='light']::before {
+  background: var(--light-bg);
+  color: var(--light-fg);
+}
+
+#settings .swatch[data-theme='sepia']::before {
+  background: var(--sepia-bg);
+  color: var(--sepia-fg);
+}
+
+#settings .swatch[data-theme='dark']::before {
+  background: var(--dark-bg);
+  color: var(--dark-fg);
+}
+
+#settings .swatch[data-theme='system']::before {
+  background: linear-gradient(135deg, var(--light-bg) 50%, var(--dark-bg) 50%);
+  color: var(--accent);
+}
+
+#settings .swatch:hover::before {
+  border-color: color-mix(in srgb, var(--fg) 45%, transparent);
+}
+
+#settings .swatch[aria-pressed='true'] {
+  color: var(--fg);
+}
+
+#settings .swatch[aria-pressed='true']::before {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 #settings .segmented {
   display: flex;
-  gap: 2px;
-  padding: 2px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }
 
 #settings .segmented button {
   flex: 1;
   padding: 5px 4px;
+  border: 0;
+  border-radius: 0;
+}
+
+#settings .segmented button + button {
+  border-left: 1px solid var(--line);
 }
 
 #settings .segmented button[aria-pressed='true'] {
-  background: var(--active);
-  font-weight: 600;
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 #settings .stepper {
@@ -868,12 +1012,12 @@ button:hover {
 }
 
 #settings .stepper button {
-  border: 1px solid var(--line);
+  border-color: var(--line);
 }
 
 /* Action buttons (history, file types) read as buttons, not labels */
 #settings .field > button {
-  border: 1px solid var(--line);
+  border-color: var(--line);
   justify-self: start;
 }
 

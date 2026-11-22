@@ -19,6 +19,13 @@ import {
   type ResolvedTheme,
 } from 'reader-core'
 import 'reader-core/book-view.css'
+// The interface fonts, bundled (offline-first): Latin and Cyrillic only.
+import '@fontsource/cormorant-garamond/latin-600.css'
+import '@fontsource/cormorant-garamond/cyrillic-600.css'
+import '@fontsource/lora/latin-400.css'
+import '@fontsource/lora/cyrillic-400.css'
+import '@fontsource/lora/latin-600.css'
+import '@fontsource/lora/cyrillic-600.css'
 import { createTOCView } from 'reader-core/foliate-js/ui/tree.js'
 import { commandFor, type Command } from './keys'
 import {

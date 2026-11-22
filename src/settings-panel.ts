@@ -41,9 +41,12 @@ function range({ min, max, step }: Range) {
 export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onChange: (changes: Partial<PanelValues>) => void, actions: PanelActions) {
   let current = initial
 
-  const themeButtons = THEMES.map(theme =>
-    el('button', { type: 'button', textContent: THEME_LABELS[theme], onclick: () => onChange({ theme }) }),
-  )
+  // Swatches: style.css draws each theme's page with "Aa" above the name.
+  const themeButtons = THEMES.map(theme => {
+    const button = el('button', { type: 'button', className: 'swatch', textContent: THEME_LABELS[theme], onclick: () => onChange({ theme }) })
+    button.dataset.theme = theme
+    return button
+  })
   const font = el('select', {}, ...FONTS.map(f => el('option', { value: f, textContent: fontLabel(f) })))
   font.onchange = () => onChange({ font: font.value as Font })
 
@@ -86,7 +89,7 @@ export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onC
 
   host.append(
     el('h2', { textContent: 'Settings' }),
-    field('Theme', el('div', { className: 'segmented' }, ...themeButtons)),
+    field('Theme', el('div', { className: 'swatches' }, ...themeButtons)),
     field('Font', font),
     field('Size', el('div', { className: 'stepper' }, sizeButton('A−', -1), size, sizeButton('A+', 1))),
     field('Line spacing', lineHeight, lineHeightValue),
