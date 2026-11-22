@@ -44,7 +44,7 @@ import {
 import { createCatalogView } from './catalog-view'
 import { createSourcesPanel } from './sources-panel'
 import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
-import { createSettingsPanel, type PanelValues } from './settings-panel'
+import { createAppearancePanel, createSettingsPage, type PanelValues, type SettingsSection } from './settings-panel'
 
 interface Position {
   cfi: string
@@ -115,7 +115,7 @@ const settingsReady = invoke<Record<string, unknown>>('get_settings')
   .then(stored => {
     settings = readSettings(stored)
     applyTheme()
-    settingsPanel.show(settings)
+    showSettings()
     showLibraryControls()
   })
 void loadLibraryInfo()
@@ -468,7 +468,7 @@ async function loadLibraryInfo(): Promise<LibraryInfo> {
     return { folder: null, suggested: '' }
   })
   libraryFolder = info.folder
-  settingsPanel.setLibraryFolder(info.folder)
+  settingsPage.setLibraryFolder(info.folder)
   return info
 }
 
@@ -641,10 +641,11 @@ function highlightToc(href: string | undefined) {
 
 const tocOpen = () => !$('toc').hidden
 const settingsOpen = () => !$('settings').hidden
+const appearanceOpen = () => !$('appearance').hidden
 const aboutOpen = () => !$('about').hidden
 const shortcutsOpen = () => !$('shortcuts').hidden
 /** Panels that open without the scrim (the contents have one, so need no outside check). */
-const scrimlessOpen = () => settingsOpen() || aboutOpen() || shortcutsOpen()
+const scrimlessOpen = () => appearanceOpen() || aboutOpen() || shortcutsOpen()
 
 /** Commands that still work while a side panel has the keyboard. */
 const PANEL_COMMANDS: Command[] = ['toc', 'settings', 'escape', 'fullscreen', 'cycleTheme', 'fontBigger', 'fontSmaller']
@@ -655,7 +656,7 @@ function panelHasKeyboard(e: KeyboardEvent, command: Command) {
   // Letters pick options in a focused list; only Escape leaves it.
   if (target?.closest('select, input')) return command !== 'escape'
   // Keys pressed in the book (its iframes) still turn pages beside the settings.
-  return !!target?.closest('#toc, #settings, #about, #shortcuts') && !PANEL_COMMANDS.includes(command)
+  return !!target?.closest('#toc, #settings, #appearance, #about, #shortcuts') && !PANEL_COMMANDS.includes(command)
 }
 
 function onKey(e: KeyboardEvent) {
@@ -674,6 +675,8 @@ async function runCommand(command: Command) {
     case 'fullscreen':
       return appWindow.setFullscreen(!(await appWindow.isFullscreen()))
     case 'settings':
+      // S / Ctrl+, and the Aa button: the appearance while reading, the settings page in the library.
+      if (book) return appearanceOpen() ? closePanels() : openAppearance()
       return settingsOpen() ? closePanels() : openSettings()
     case 'cycleTheme':
       return changeSettings({ theme: nextTheme(settings.theme) })
@@ -718,7 +721,7 @@ async function runCommand(command: Command) {
 /** Closes the footnote, or else any open panel; false when there was none. */
 function closeTopLayer() {
   if (book?.footnoteOpen) book.hideFootnote()
-  else if (tocOpen() || organizeOpen() || scrimlessOpen()) closePanels()
+  else if (tocOpen() || organizeOpen() || settingsOpen() || scrimlessOpen()) closePanels()
   else return false
   return true
 }
@@ -755,6 +758,7 @@ function updateFlowButton() {
   $('flow-button').replaceChildren(icon())
   $('flow-button').title = `${mode} — switch to ${scrolled ? 'paginated' : 'scrolled'} (M)`
   $('flow-button').setAttribute('aria-label', mode)
+  appearancePanel.show(settings, book?.flow)
   $('phone-flow').replaceChildren(icon(), el('span', { textContent: mode }))
 }
 
@@ -774,11 +778,20 @@ function openInfoPanel(id: 'about' | 'shortcuts') {
 }
 
 /** Settings open without the scrim, so changes show on the book right away. */
-function openSettings() {
+function openSettings(section?: SettingsSection) {
   closePanels()
   $('settings').hidden = false
   void refreshFileTypesStatus()
-  $('settings').querySelector<HTMLElement>('button, select, input')?.focus()
+  if (section) settingsPage.showSection(section)
+  $('settings').querySelector<HTMLElement>('button')?.focus()
+}
+
+/** Aa: opens without the scrim, so changes show on the book right away. */
+function openAppearance() {
+  closePanels()
+  $('appearance').hidden = false
+  $('settings-button').setAttribute('aria-expanded', 'true')
+  $('appearance').querySelector<HTMLElement>('button[aria-pressed="true"], button')?.focus()
 }
 
 // ---- Organize library ---------------------------------------------------------
@@ -840,6 +853,8 @@ function closePanels() {
   $('organize').hidden = true
   $('toc').hidden = true
   $('settings').hidden = true
+  $('appearance').hidden = true
+  $('settings-button').setAttribute('aria-expanded', 'false')
   $('about').hidden = true
   $('shortcuts').hidden = true
 }
@@ -848,29 +863,36 @@ function closePanels() {
 
 const systemDark = matchMedia('(prefers-color-scheme: dark)')
 let fileTypesRegistered = false
-const settingsPanel = createSettingsPanel(
-  $('settings'),
-  settings,
-  changes => void changeSettings(changes),
-  {
-    clearHistory: () => {
-      void invoke('clear_recent')
-        .then(() => {
-          if (!book) void refreshRecent()
-        })
-        .catch(console.error)
-    },
-    toggleFileTypes: () => {
-      const command = fileTypesRegistered ? 'unregister_file_types' : 'register_file_types'
-      void invoke(command).then(refreshFileTypesStatus, console.error)
-    },
-    changeLibrary: () => void chooseLibrary(true),
-    organizeLibrary: () => void openOrganize(),
+const settingsPage = createSettingsPage($('settings'), settings, changes => void changeSettings(changes), {
+  clearHistory: () => {
+    void invoke('clear_recent')
+      .then(() => {
+        if (!book) void refreshRecent()
+      })
+      .catch(console.error)
   },
-)
-// The catalogs (OPDS servers) are edited at the end of the settings.
-const sourcesPanel = createSourcesPanel($('settings').appendChild(el('div', { className: 'field sources-field' })))
-const catalogView = createCatalogView({ library: () => libraryBooks, openSettings })
+  toggleFileTypes: () => {
+    const command = fileTypesRegistered ? 'unregister_file_types' : 'register_file_types'
+    void invoke(command).then(refreshFileTypesStatus, console.error)
+  },
+  changeLibrary: () => void chooseLibrary(true),
+  organizeLibrary: () => void openOrganize(),
+  close: closePanels,
+})
+const appearancePanel = createAppearancePanel($('appearance'), settings, changes => void changeSettings(changes), {
+  flow: flow => changeSettings({ flow }),
+  allSettings: () => openSettings('reading'),
+})
+// The catalogs (OPDS servers) and the key list have their own sections on the settings page.
+const sourcesPanel = createSourcesPanel(settingsPage.catalogs)
+settingsPage.shortcuts.append($('shortcuts').querySelector('dl')!.cloneNode(true))
+
+/** Refreshes both: the settings page and Aa (with the open book's mode). */
+function showSettings() {
+  settingsPage.show(settings)
+  appearancePanel.show(settings, book?.flow)
+}
+const catalogView = createCatalogView({ library: () => libraryBooks, openSettings: () => openSettings('catalogs') })
 
 /** The library window's two tabs: the books on disk, and the catalogs to get more from. */
 function showTab(tab: 'books' | 'catalogs') {
@@ -912,7 +934,7 @@ let settingsTimer: number | undefined
 function applySettings(changes: Partial<Settings>) {
   settings = { ...settings, ...changes }
   if (Object.keys(changes).some(isAppearanceKey)) restyle()
-  settingsPanel.show(settings)
+  showSettings()
   if (book && book.flow !== settings.flow) {
     book.flow = settings.flow
     updateFlowButton()
@@ -942,7 +964,7 @@ async function refreshFileTypesStatus() {
     return false
   })
   fileTypesRegistered = registered
-  settingsPanel.setFileTypesRegistered(registered)
+  settingsPage.setFileTypesRegistered(registered)
 }
 
 // ---- Edge controls ----------------------------------------------------------
@@ -1015,7 +1037,7 @@ $('scrim').addEventListener('click', closePanels)
 document.addEventListener('pointerdown', e => {
   if (!scrimlessOpen()) return
   const target = e.target instanceof Element ? e.target : null
-  if (target?.closest('#settings, #settings-button, #about, #about-button, #shortcuts, #shortcuts-button, #more-menu, #phone-actions')) return
+  if (target?.closest('#settings, #appearance, #settings-button, #about, #about-button, #shortcuts, #shortcuts-button, #more-menu, #phone-actions')) return
   closePanels()
 })
 // The "more" menu closes on any press outside it (and its buttons).

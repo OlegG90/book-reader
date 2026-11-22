@@ -1,6 +1,6 @@
-import { FONTS, LINE_HEIGHT, LINE_LENGTH, THEMES, el, stepFontSize, type Appearance, type Font, type Range, type Theme } from 'reader-core'
+import { FONTS, LINE_HEIGHT, LINE_LENGTH, THEMES, el, stepFontSize, type Appearance, type Flow, type Font, type Range, type Theme } from 'reader-core'
 
-/** Everything the settings panel edits. */
+/** Everything the settings edit. */
 export interface PanelValues extends Appearance {
   savePositions: boolean
   /** Offer to copy or move books opened from outside the library into it. */
@@ -9,7 +9,7 @@ export interface PanelValues extends Appearance {
   volumeKeys: boolean
 }
 
-/** Buttons in the panel that act instead of changing a value. */
+/** Buttons in the settings page that act instead of changing a value. */
 export interface PanelActions {
   /** Forgets the recent books list (reading positions are kept). */
   clearHistory(): void
@@ -19,6 +19,8 @@ export interface PanelActions {
   changeLibrary(): void
   /** Renames the library's books to follow the naming pattern (after a preview). */
   organizeLibrary(): void
+  /** Closes the settings page. */
+  close(): void
 }
 
 const THEME_LABELS: Record<Theme, string> = { system: 'System', light: 'Light', dark: 'Dark', sepia: 'Sepia' }
@@ -32,13 +34,26 @@ function range({ min, max, step }: Range) {
   return el('input', { type: 'range', min: String(min), max: String(max), step: String(step) })
 }
 
+/** What the appearance controls offer besides the appearance itself. */
+interface AppearanceExtras {
+  /** Paginated / scrolled, for the open book. */
+  flow?(flow: Flow): void
+  /** Opens the settings page ("All settings…"). */
+  allSettings?(): void
+}
+
 /**
- * Builds the settings controls into `host`. Every change is reported through
- * `onChange` with just the changed values; button presses go to `actions`;
- * `show` refreshes the controls, `setFileTypesRegistered` the file-type row,
- * `setLibraryFolder` the library row.
+ * The appearance controls: theme swatches, font and size, line spacing and
+ * length, and (with `extras`) the book's flow and a way to all settings. Used
+ * in the Aa pop-up while reading and on the settings page. Every change goes
+ * to `onChange` with just the changed values; `show` refreshes the controls.
  */
-export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onChange: (changes: Partial<PanelValues>) => void, actions: PanelActions) {
+export function createAppearancePanel(
+  host: HTMLElement,
+  initial: Appearance,
+  onChange: (changes: Partial<Appearance>) => void,
+  extras: AppearanceExtras = {},
+) {
   let current = initial
 
   // Swatches: style.css draws each theme's page with "Aa" above the name.
@@ -47,12 +62,12 @@ export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onC
     button.dataset.theme = theme
     return button
   })
-  const font = el('select', {}, ...FONTS.map(f => el('option', { value: f, textContent: fontLabel(f) })))
+  const font = el('select', { ariaLabel: 'Font' }, ...FONTS.map(f => el('option', { value: f, textContent: fontLabel(f) })))
   font.onchange = () => onChange({ font: font.value as Font })
 
   const size = el('output')
-  const sizeButton = (text: string, direction: 1 | -1) =>
-    el('button', { type: 'button', textContent: text, onclick: () => onChange({ fontSize: stepFontSize(current.fontSize, direction) }) })
+  const sizeButton = (text: string, direction: 1 | -1, label: string) =>
+    el('button', { type: 'button', textContent: text, ariaLabel: label, onclick: () => onChange({ fontSize: stepFontSize(current.fontSize, direction) }) })
 
   const lineHeight = range(LINE_HEIGHT)
   const lineHeightValue = el('output')
@@ -62,62 +77,160 @@ export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onC
   const lineLengthValue = el('output')
   lineLength.oninput = () => onChange({ lineLength: Number(lineLength.value) })
 
-  const savePositions = el('input', { type: 'checkbox' })
-  savePositions.onchange = () => onChange({ savePositions: savePositions.checked })
-
-  const clearHistory = el('button', {
-    type: 'button',
-    textContent: 'Clear history',
-    onclick: actions.clearHistory,
-  })
-  const libraryFolder = el('output', { className: 'path' })
-  const libraryButtons = el(
-    'div',
-    { className: 'buttons' },
-    el('button', { type: 'button', textContent: 'Change…', onclick: actions.changeLibrary }),
-    el('button', { type: 'button', textContent: 'Organize…', onclick: actions.organizeLibrary }),
-  )
-  const offerLibrary = el('input', { type: 'checkbox' })
-  offerLibrary.onchange = () => onChange({ offerLibrary: offerLibrary.checked })
-  const volumeKeys = el('input', { type: 'checkbox' })
-  volumeKeys.onchange = () => onChange({ volumeKeys: volumeKeys.checked })
-  const fileTypesStatus = el('output')
-  const fileTypesButton = el('button', {
-    type: 'button',
-    onclick: actions.toggleFileTypes,
-  })
-
   host.append(
-    el('h2', { textContent: 'Settings' }),
     field('Theme', el('div', { className: 'swatches' }, ...themeButtons)),
-    field('Font', font),
-    field('Size', el('div', { className: 'stepper' }, sizeButton('A−', -1), size, sizeButton('A+', 1))),
+    el(
+      'div',
+      { className: 'font-row' },
+      font,
+      el('div', { className: 'stepper' }, sizeButton('A−', -1, 'Smaller'), size, sizeButton('A+', 1, 'Bigger')),
+    ),
     field('Line spacing', lineHeight, lineHeightValue),
     field('Line length', lineLength, lineLengthValue),
-    el('label', { className: 'check' }, savePositions, 'Remember reading position'),
-    el('label', { className: 'check android-only' }, volumeKeys, 'Volume keys turn pages'),
-    field('Library folder', libraryFolder, libraryButtons),
-    el('label', { className: 'check' }, offerLibrary, 'Offer to add books opened from elsewhere'),
-    field('History', clearHistory),
-    field('File types', fileTypesStatus, fileTypesButton),
   )
 
-  function show(values: PanelValues) {
+  const flowButtons = (['paginated', 'scrolled'] as const).map(flow =>
+    el('button', { type: 'button', textContent: flow === 'paginated' ? 'Paginated' : 'Scrolled', onclick: () => extras.flow?.(flow) }),
+  )
+  if (extras.flow) host.append(el('div', { className: 'segmented' }, ...flowButtons))
+  if (extras.allSettings) {
+    host.append(
+      el(
+        'p',
+        { className: 'all-settings' },
+        el('button', { type: 'button', className: 'link', textContent: 'All settings…', onclick: extras.allSettings }),
+        el('span', { className: 'muted', textContent: 'S · Ctrl+,' }),
+      ),
+    )
+  }
+
+  /** Refreshes the controls; `flow` is the open book's (none in the library). */
+  function show(values: Appearance, flow?: Flow) {
     current = values
-    offerLibrary.checked = values.offerLibrary
-    volumeKeys.checked = values.volumeKeys
     themeButtons.forEach((button, i) => button.setAttribute('aria-pressed', String(THEMES[i] === values.theme)))
     font.value = values.font
-    size.textContent = `${values.fontSize}px`
+    size.textContent = String(values.fontSize)
     lineHeight.value = String(values.lineHeight)
     lineHeightValue.textContent = values.lineHeight.toFixed(1)
     lineLength.value = String(values.lineLength)
     lineLengthValue.textContent = `≈${values.lineLength} chars`
+    flowButtons.forEach(b => b.setAttribute('aria-pressed', String(b.textContent?.toLowerCase() === flow)))
+    flowButtons.forEach(b => (b.disabled = !flow))
+  }
+
+  show(initial)
+  return { show }
+}
+
+/** A settings row: what it is (and a hint) on the left, its controls on the right. */
+function row(label: string, hint: string, ...controls: HTMLElement[]) {
+  return el(
+    'div',
+    { className: 'row' },
+    el('div', { className: 'row-text' }, el('span', { className: 'row-label', textContent: label }), el('span', { className: 'hint', textContent: hint })),
+    el('div', { className: 'row-controls' }, ...controls),
+  )
+}
+
+/** A checkbox row: the whole row toggles it. */
+function checkRow(label: string, hint: string, box: HTMLInputElement) {
+  const line = row(label, hint, box)
+  return el('label', { className: line.className }, ...line.childNodes)
+}
+
+const SECTIONS = [
+  { id: 'reading', title: 'Reading' },
+  { id: 'library', title: 'Library' },
+  { id: 'catalogs', title: 'Catalogs' },
+  { id: 'system', title: 'System' },
+  { id: 'shortcuts', title: 'Shortcuts', desktopOnly: true },
+] as const
+
+export type SettingsSection = (typeof SECTIONS)[number]['id']
+
+/**
+ * The settings page: a back button, the sections' names on the left, and the
+ * sections (Reading with the appearance, Library, Catalogs, System,
+ * Shortcuts). Every change goes to `onChange` with just the changed values;
+ * button presses go to `actions`. `catalogs` and `shortcuts` are the hosts
+ * the app fills in (the sources panel, the key list).
+ */
+export function createSettingsPage(host: HTMLElement, initial: PanelValues, onChange: (changes: Partial<PanelValues>) => void, actions: PanelActions) {
+  const appearance = el('div', { className: 'appearance' })
+  const appearancePanel = createAppearancePanel(appearance, initial, onChange)
+
+  const checkbox = (key: 'savePositions' | 'offerLibrary' | 'volumeKeys') => {
+    const box = el('input', { type: 'checkbox' })
+    box.onchange = () => onChange({ [key]: box.checked })
+    return box
+  }
+  const savePositions = checkbox('savePositions')
+  const offerLibrary = checkbox('offerLibrary')
+  const volumeKeys = checkbox('volumeKeys')
+
+  const libraryFolder = el('span', { className: 'hint path' })
+  const fileTypesStatus = el('span', { className: 'hint' })
+  const fileTypesButton = el('button', { type: 'button', onclick: actions.toggleFileTypes })
+  const catalogs = el('div', { className: 'catalogs' })
+  const shortcuts = el('div', { className: 'shortcuts' })
+
+  const libraryRow = row('Library folder', '', el('button', { type: 'button', textContent: 'Change…', onclick: actions.changeLibrary }), el('button', { type: 'button', textContent: 'Organize…', onclick: actions.organizeLibrary }))
+  libraryRow.querySelector('.hint')?.replaceWith(libraryFolder)
+  const fileTypesRow = row('File types', '', fileTypesButton)
+  fileTypesRow.querySelector('.hint')?.replaceWith(fileTypesStatus)
+
+  const content: Record<SettingsSection, HTMLElement[]> = {
+    reading: [
+      appearance,
+      checkRow('Remember reading position', 'Positions sync through the catalog marked "sync".', savePositions),
+      checkRow('Offer to add books opened from elsewhere', 'Shows Move / Copy to library when a file is outside the library folder.', offerLibrary),
+      checkRow('Volume keys turn pages', 'While a book is open.', volumeKeys),
+    ],
+    library: [libraryRow],
+    catalogs: [catalogs],
+    system: [fileTypesRow, row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory }))],
+    shortcuts: [shortcuts],
+  }
+  // The volume keys are a phone's.
+  content.reading[3].classList.add('android-only')
+
+  const sections = SECTIONS.map(({ id, title }) =>
+    el('section', { id: `settings-${id}`, className: 'section' }, el('h2', { textContent: title }), ...content[id]),
+  )
+  const nav = SECTIONS.map(({ id, title, ...rest }) =>
+    el('button', {
+      type: 'button',
+      textContent: title,
+      className: 'desktopOnly' in rest ? 'desktop-only' : '',
+      onclick: () => showSection(id),
+    }),
+  )
+
+  host.append(
+    el(
+      'header',
+      { className: 'page-header' },
+      el('button', { type: 'button', className: 'back', textContent: '← Back', onclick: actions.close }),
+      el('h1', { textContent: 'Settings' }),
+    ),
+    el('div', { className: 'page-body' }, el('nav', { className: 'sections', ariaLabel: 'Sections' }, ...nav), el('div', { className: 'page-content' }, ...sections)),
+  )
+
+  /** Scrolls to a section and marks it in the list. */
+  function showSection(id: SettingsSection) {
+    nav.forEach((button, i) => button.setAttribute('aria-current', String(SECTIONS[i].id === id)))
+    sections[SECTIONS.findIndex(s => s.id === id)].scrollIntoView({ block: 'start' })
+  }
+
+  function show(values: PanelValues) {
+    appearancePanel.show(values)
     savePositions.checked = values.savePositions
+    offerLibrary.checked = values.offerLibrary
+    volumeKeys.checked = values.volumeKeys
   }
 
   function setFileTypesRegistered(registered: boolean) {
-    fileTypesStatus.textContent = registered ? 'Registered for book files' : 'Not registered'
+    fileTypesStatus.textContent = registered ? 'Registered for .epub, .fb2 and .fbz' : 'Not registered'
     fileTypesButton.textContent = registered ? 'Unregister' : 'Register'
   }
 
@@ -129,5 +242,5 @@ export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onC
   show(initial)
   setFileTypesRegistered(false)
   setLibraryFolder(null)
-  return { show, setFileTypesRegistered, setLibraryFolder }
+  return { show, setFileTypesRegistered, setLibraryFolder, showSection, catalogs, shortcuts }
 }

@@ -1093,8 +1093,7 @@ button:hover {
   color: var(--muted);
 }
 
-/* Side panels: settings, about, shortcuts */
-#settings,
+/* Side panels: about, shortcuts */
 #about,
 #shortcuts {
   position: fixed;
@@ -1113,30 +1112,29 @@ button:hover {
   accent-color: var(--accent);
 }
 
-#settings h2,
 #about h2,
 #shortcuts h2 {
   margin: 0 0 4px;
   font-size: 16px;
 }
 
-#settings .field {
+:is(#appearance, #settings) .field {
   display: grid;
   align-items: center;
   gap: 6px 8px;
 }
 
 /* A slider with its value beside it */
-#settings .field:has(> output) {
+:is(#appearance, #settings) .field:has(> output) {
   grid-template-columns: 1fr auto;
 }
 
-#settings .label {
+:is(#appearance, #settings) .label {
   grid-column: 1 / -1;
   color: var(--muted);
 }
 
-#settings select {
+:is(#appearance, #settings) select {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -1146,13 +1144,13 @@ button:hover {
 
 /* Theme swatches: each page colour with "Aa" in its text colour; System is
    split light / dark. The name sits under the swatch. */
-#settings .swatches {
+:is(#appearance, #settings) .swatches {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: var(--space-2);
 }
 
-#settings .swatch {
+:is(#appearance, #settings) .swatch {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1164,11 +1162,11 @@ button:hover {
   color: var(--muted);
 }
 
-#settings .swatch:hover {
+:is(#appearance, #settings) .swatch:hover {
   background: none;
 }
 
-#settings .swatch::before {
+:is(#appearance, #settings) .swatch::before {
   content: 'Aa';
   display: grid;
   place-items: center;
@@ -1180,84 +1178,84 @@ button:hover {
   border-radius: var(--radius-md);
 }
 
-#settings .swatch[data-theme='light']::before {
+:is(#appearance, #settings) .swatch[data-theme='light']::before {
   background: var(--light-bg);
   color: var(--light-fg);
 }
 
-#settings .swatch[data-theme='sepia']::before {
+:is(#appearance, #settings) .swatch[data-theme='sepia']::before {
   background: var(--sepia-bg);
   color: var(--sepia-fg);
 }
 
-#settings .swatch[data-theme='dark']::before {
+:is(#appearance, #settings) .swatch[data-theme='dark']::before {
   background: var(--dark-bg);
   color: var(--dark-fg);
 }
 
-#settings .swatch[data-theme='system']::before {
+:is(#appearance, #settings) .swatch[data-theme='system']::before {
   background: linear-gradient(135deg, var(--light-bg) 50%, var(--dark-bg) 50%);
   color: var(--accent);
 }
 
-#settings .swatch:hover::before {
+:is(#appearance, #settings) .swatch:hover::before {
   border-color: color-mix(in srgb, var(--fg) 45%, transparent);
 }
 
-#settings .swatch[aria-pressed='true'] {
+:is(#appearance, #settings) .swatch[aria-pressed='true'] {
   color: var(--fg);
 }
 
-#settings .swatch[aria-pressed='true']::before {
+:is(#appearance, #settings) .swatch[aria-pressed='true']::before {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }
 
-#settings .segmented {
+:is(#appearance, #settings) .segmented {
   display: flex;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   overflow: hidden;
 }
 
-#settings .segmented button {
+:is(#appearance, #settings) .segmented button {
   flex: 1;
   padding: 5px 4px;
   border: 0;
   border-radius: 0;
 }
 
-#settings .segmented button + button {
+:is(#appearance, #settings) .segmented button + button {
   border-left: 1px solid var(--line);
 }
 
-#settings .segmented button[aria-pressed='true'] {
+:is(#appearance, #settings) .segmented button[aria-pressed='true'] {
   color: var(--accent-text);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-#settings .stepper {
+:is(#appearance, #settings) .stepper {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-#settings .stepper output {
+:is(#appearance, #settings) .stepper output {
   min-width: 48px;
   text-align: center;
 }
 
-#settings .stepper button {
+:is(#appearance, #settings) .stepper button {
   border-color: var(--line);
 }
 
 /* Action buttons (history, file types) read as buttons, not labels */
-#settings .field > button {
+:is(#appearance, #settings) .field > button {
   border-color: var(--line);
   justify-self: start;
 }
 
-#settings .check {
+:is(#appearance, #settings) .check {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1293,4 +1291,255 @@ button:hover {
   width: 0;
   background: var(--accent);
   opacity: 0.5;
+}
+
+/* Aa: a pop-up under the top bar's button */
+#appearance {
+  position: fixed;
+  top: calc(58px + var(--safe-top));
+  right: 16px;
+  z-index: 21;
+  width: min(340px, calc(100vw - 32px));
+  max-height: calc(100vh - 80px - var(--safe-top));
+  overflow-y: auto;
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+:is(#appearance, #settings) .font-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+:is(#appearance, #settings) .font-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+:is(#appearance, #settings) .stepper {
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+:is(#appearance, #settings) .stepper button {
+  border: 0;
+  border-radius: 0;
+  min-width: 36px;
+}
+
+:is(#appearance, #settings) .stepper output {
+  min-width: 32px;
+  border-inline: 1px solid var(--line);
+  line-height: 32px;
+}
+
+#appearance .all-settings {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
+#appearance .all-settings .link {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Phone: Aa is a sheet from the bottom, with a grab handle */
+.android #appearance {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  max-height: 80vh;
+  padding: 26px 20px calc(20px + var(--safe-bottom));
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.android #appearance::before {
+  content: '';
+  position: absolute;
+  top: 9px;
+  left: calc(50% - 18px);
+  width: 36px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.android #appearance .swatch::before {
+  height: 52px;
+}
+
+/* The settings page: over the whole window, the sections listed on the left */
+#settings {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--bg);
+}
+
+#settings .page-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: calc(14px + var(--safe-top)) 48px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+#settings .page-header h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+#settings .back {
+  font-size: 14px;
+}
+
+#settings .page-body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 760px);
+  gap: 48px;
+  min-height: 0;
+  padding: 0 48px;
+}
+
+#settings .sections {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding-top: 32px;
+}
+
+#settings .sections button {
+  text-align: left;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+#settings .sections button[aria-current='true'] {
+  color: var(--accent-text);
+}
+
+#settings .page-content {
+  overflow-y: auto;
+  padding: 32px 4px calc(48px + var(--safe-bottom));
+}
+
+#settings .section + .section {
+  margin-top: var(--space-8);
+}
+
+#settings .section h2 {
+  margin: 0;
+  padding-bottom: var(--space-2);
+  font-size: 26px;
+  border-bottom: 1px solid var(--line);
+}
+
+#settings .appearance {
+  display: grid;
+  gap: 18px;
+  max-width: 420px;
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+#settings .row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+#settings label.row {
+  cursor: pointer;
+}
+
+#settings .row-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+#settings .row-label {
+  font-size: 14px;
+}
+
+#settings .hint {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+#settings .row-controls {
+  display: flex;
+  gap: var(--space-2);
+  flex: none;
+}
+
+#settings .row-controls button {
+  border-color: var(--line);
+}
+
+#settings .catalogs {
+  padding-top: var(--space-3);
+}
+
+#settings .shortcuts dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 6px 12px;
+  margin: var(--space-3) 0 0;
+}
+
+#settings .shortcuts dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* Phone: one column, the section list as a row of chips */
+.android #settings .page-header {
+  padding-inline: 20px;
+}
+
+.android #settings .page-body {
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr;
+  gap: 0;
+  padding: 0 20px;
+}
+
+.android #settings .sections {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding: 12px 0;
+}
+
+.android #settings .sections button {
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.android #settings .page-content {
+  padding-top: 8px;
 }
