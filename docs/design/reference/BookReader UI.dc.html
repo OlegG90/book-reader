@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/classical-4c27952a-4ebe-4357-b464-054af75ac40a/styles.css">
+<script src="_ds/classical-4c27952a-4ebe-4357-b464-054af75ac40a/_ds_bundle.js"></script>
+<style>
+body{margin:0;background:var(--color-surface)}
+a{color:var(--color-accent-700)}a:hover{color:var(--color-accent-800)}
+</style>
+</helmet>
+<section id="1" style="padding:64px;display:flex;flex-direction:column;gap:64px;font-family:var(--font-body);color:var(--color-text)">
+
+<header style="display:flex;flex-direction:column;gap:12px;max-width:1100px">
+  <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-700);font-variant-numeric:tabular-nums">OlegG90/book-reader · main · аналіз UI</div>
+  <h1 style="font-size:56px;font-weight:400;margin:0">Book Reader: десктоп і Android</h1>
+  <p style="margin:0;font-size:16px;max-width:760px;text-wrap:pretty">Аналіз зроблено за <code>index.html</code>, <code>style.css</code>, <code>settings-panel.ts</code>, <code>catalog-view.ts</code> і <code>docs/spec.md</code>. Номери на макетах нижче відповідають пунктам аналізу. Набір функцій не змінено, змінено лише їх розміщення. Тексти інтерфейсу залишено англійською, як вимагає специфікація.</p>
+</header>
+
+<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:28px 40px;max-width:1500px;border-top:1px solid var(--color-divider);padding-top:28px">
+  <sc-for list="{{ findings }}" as="f" hint-placeholder-count="11">
+    <div style="display:grid;grid-template-columns:30px minmax(0,1fr);gap:4px 12px;align-items:start">
+      <span style="width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--color-accent-700);font-variant-numeric:tabular-nums">{{ f.n }}</span>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <h3 style="font-size:20px;margin:0">{{ f.title }}</h3>
+        <p style="margin:0;font-size:13px;line-height:1.5;text-align:justify;hyphens:auto;color:var(--color-neutral-700)"><span style="font-style:italic">Зараз:</span> {{ f.now }}</p>
+        <p style="margin:0;font-size:13px;line-height:1.5;text-align:justify;hyphens:auto"><span style="font-style:italic;color:var(--color-accent-700)">Пропозиція:</span> {{ f.fix }}</p>
+      </div>
+    </div>
+  </sc-for>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:24px">
+  <h2 style="font-size:34px;font-weight:400;margin:0;border-bottom:1px solid var(--color-divider);padding-bottom:12px">Windows · 1280 × 800</h2>
+  <div style="display:flex;flex-wrap:wrap;gap:48px">
+
+  <!-- D1 Library -->
+  <div id="D1" style="display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;gap:10px;align-items:baseline"><span class="tag tag-outline">D1</span><span style="font-family:var(--font-heading);font-size:20px">Бібліотека</span></div>
+    <div data-screen-label="D1 Library" style="position:relative;width:1280px;height:800px;overflow:hidden;background:var(--color-bg);border:1px solid var(--color-divider);box-shadow:var(--shadow-md);display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:28px;padding:14px 48px;border-bottom:1px solid var(--color-divider)">
+        <span style="font-family:var(--font-heading);font-size:22px;font-weight:600">Book Reader</span>
+        <div style="display:flex;gap:24px;font-size:14px">
+          <span style="color:var(--color-accent-700);border-bottom:1px solid var(--color-accent);padding:6px 0">Library</span>
+          <span style="padding:6px 0;color:var(--color-neutral-700)">Catalogs</span>
+        </div>
+        <span style="flex:1"></span>
+        <label style="display:flex;align-items:center;gap:8px;width:300px;border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:7px 10px;color:var(--color-neutral-600);font-size:14px">
+          <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+          Search title, author, series
+        </label>
+        <button class="btn btn-secondary" style="white-space:nowrap;flex:none"><svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="M5 12h14M12 5v14"></path></svg>Open file…</button>
+        <button class="btn btn-icon" title="Settings" style="color:var(--color-text)"><svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="M20 7h-9M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle></svg></button>
+      </div>
+      <div style="padding:32px 48px 0;display:flex;flex-direction:column;gap:28px">
+        <div style="position:relative;display:flex;flex-direction:column;gap:14px">
+          <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-700)">Continue reading</div>
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px">
+            <sc-for list="{{ recent }}" as="b" hint-placeholder-count="3">
+              <div style="display:grid;grid-template-columns:60px minmax(0,1fr);gap:16px;padding:14px;border:1px solid var(--color-divider);border-radius:var(--radius-md)" style-hover="border-color:var(--color-accent)">
+                <div style="aspect-ratio:2/3;border:1px solid var(--color-divider);background:var(--color-surface);display:flex;align-items:center;justify-content:center;padding:4px;text-align:center;font-family:var(--font-heading);font-style:italic;font-size:10px;line-height:1.1">{{ b.title }}</div>
+                <div style="display:flex;flex-direction:column;gap:3px;min-width:0">
+                  <span style="font-family:var(--font-heading);font-size:19px;font-weight:600;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ b.title }}</span>
+                  <span style="font-size:13px;color:var(--color-neutral-700)">{{ b.author }}</span>
+                  <span style="flex:1"></span>
+                  <div style="height:1px;background:var(--color-divider);position:relative"><div style="position:absolute;left:0;top:-1px;height:2px;background:var(--color-accent);width:{{ b.pctW }}"></div></div>
+                  <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--color-neutral-700);font-variant-numeric:tabular-nums;padding-top:4px"><span>{{ b.chapter }}</span><span>{{ b.pctW }}</span></div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          <sc-if value="{{ annotate }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;left:-34px;top:-4px;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">4</span></sc-if>
+        </div>
+        <div style="position:relative;display:flex;align-items:center;gap:16px;border-top:1px solid var(--color-divider);padding-top:20px">
+          <div class="seg" style="flex:none;white-space:nowrap">
+            <span class="seg-opt" style="color:var(--color-accent);box-shadow:inset 0 0 0 1px var(--color-accent)">All <span style="font-variant-numeric:tabular-nums;opacity:0.7">214</span></span>
+            <span class="seg-opt">Reading <span style="font-variant-numeric:tabular-nums;opacity:0.7">6</span></span>
+            <span class="seg-opt">Not started <span style="font-variant-numeric:tabular-nums;opacity:0.7">181</span></span>
+            <span class="seg-opt">Finished <span style="font-variant-numeric:tabular-nums;opacity:0.7">27</span></span>
+          </div>
+          <span style="flex:1"></span>
+          <span style="font-size:13px;color:var(--color-neutral-700)">Sort</span>
+          <select class="input" style="width:170px"><option>Author</option><option>Title</option><option>Recently added</option></select>
+          <sc-if value="{{ annotate }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;left:-34px;top:26px;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">5</span></sc-if>
+        </div>
+        <div style="position:relative;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:28px 24px">
+          <sc-for list="{{ books }}" as="b" hint-placeholder-count="12">
+            <div style="display:flex;flex-direction:column;gap:3px">
+              <sc-if value="{{ b.dark }}" hint-placeholder-val="{{ false }}">
+                <div style="aspect-ratio:2/3;background:var(--color-neutral-900);color:var(--color-bg);display:flex;flex-direction:column;justify-content:center;align-items:center;gap:10px;padding:14px;text-align:center;margin-bottom:6px">
+                  <span style="font-family:var(--font-heading);font-size:20px;line-height:1.1">{{ b.title }}</span><span style="width:24px;height:1px;background:var(--color-accent)"></span><span style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase">{{ b.author }}</span>
+                </div>
+              </sc-if>
+              <sc-if value="{{ b.light }}" hint-placeholder-val="{{ true }}">
+                <div style="aspect-ratio:2/3;background:var(--color-surface);border:1px solid var(--color-divider);display:flex;flex-direction:column;justify-content:center;align-items:center;gap:10px;padding:14px;text-align:center;margin-bottom:6px">
+                  <span style="font-family:var(--font-heading);font-style:italic;font-size:20px;line-height:1.1">{{ b.title }}</span><span style="width:24px;height:1px;background:var(--color-accent)"></span><span style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--color-neutral-700)">{{ b.author }}</span>
+                </div>
+              </sc-if>
+              <div style="height:1px;background:var(--color-divider);position:relative;margin-bottom:6px"><div style="position:absolute;left:0;top:-1px;height:2px;background:var(--color-accent);width:{{ b.pctW }}"></div></div>
+              <span style="font-family:var(--font-heading);font-size:17px;font-weight:600;line-height:1.15">{{ b.title }}</span>
+              <span style="font-size:12px;color:var(--color-neutral-700)">{{ b.author }}</span>
+              <span style="font-size:12px;color:var(--color-accent-700);font-variant-numeric:tabular-nums">{{ b.status }}</span>
+            </div>
+          </sc-for>
+          <sc-if value="{{ annotate }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;left:-34px;top:0;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">6</span></sc-if>
+        </div>
+      </div>
+      <sc-if value="{{ annotate }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;left:14px;top:20px;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">11</span></sc-if>
+    </div>
+  </div>
+
+  <!-- D2 Reader + Appearance -->
+  <div id="D2" style="display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;gap:10px;align-items:baseline"><span class="tag tag-outline">D2</span><span style="font-family:var(--font-heading);font-size:20px">Читання · панель «Aa»</span></div>
+    <div data-screen-label="D2 Reader" style="position:relative;width:1280px;height:800px;overflow:hidden;background:var(--color-bg);border:1px solid var(--color-divider);box-shadow:var(--shadow-md)">
+      <div style="position:absolute;left:0;right:0;top:0;display:flex;align-items:center;gap:4px;padding:10px 16px;border-bottom:1px solid var(--color-divider);background:var(--color-bg)">
+        <button class="btn" style="color:var(--color-text)" style-hover="background:color-mix(in srgb, var(--color-text) 7%, transparent)"><svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg>Library</button>
+        <button class="btn btn-icon" title="Contents (T)" style="color:var(--color-text)"><svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="M3 12h.01M3 18h.01M3 6h.01M8 12h13M8 18h13M8 6h13"></path></svg></button>
+        <div style="flex:1;text-align:center;font-family:var(--font-heading);font-size:17px"><span style="font-weight:600">Alice’s Adventures in Wonderland</span><span style="color:var(--color-neutral-700);font-style:italic"> · Lewis Carroll</span></div>
+        <button class="btn btn-icon" title="Bookmark (B)" style="color:var(--color-accent)"><svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:color-mix(in srgb, var(--color-accent) 25%, transparent);stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"></path></svg></button>
+        <button class="btn btn-icon" title="Appearance (S)" style="color:var(--color-accent);box-shadow:inset 0 0 0 1px var(--color-accent);font-family:var(--font-heading);font-size:18px">Aa</button>
+        <button class="btn btn-icon" title="Paginated / scrolled (M)" style="color:var(--color-text)"><svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg></button>
+        <button class="btn btn-icon" title="More" style="color:var(--color-text)"><svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg></button>
+      </div>
+      <article style="position:absolute;top:96px;left:50%;transform:translateX(-50%);width:640px;font-size:19px;line-height:1.5;text-align:justify;hyphens:auto">
+        <div style="text-align:center;font-family:var(--font-heading);margin-bottom:28px"><div style="font-size:14px;letter-spacing:0.12em;color:var(--color-accent-700)">CHAPTER I</div><div style="font-size:32px">Down the Rabbit-Hole</div></div>
+        <sc-for list="{{ alice }}" as="p" hint-placeholder-count="4"><p style="margin:0;text-indent:1.5em">{{ p }}</p></sc-for>
+      </article>
+      <div style="position:absolute;left:0;right:0;bottom:0;display:grid;grid-template-columns:260px minmax(0,1fr) 260px;align-items:center;gap:24px;padding:14px 32px;border-top:1px solid var(--color-divider);background:var(--color-bg);font-size:13px;color:var(--color-neutral-700);font-variant-numeric:tabular-nums">
+        <span>I · Down the Rabbit-Hole</span>
+        <div style="position:relative;height:1px;background:var(--color-divider)">
+          <div style="position:absolute;left:0;top:-1px;height:3px;width:12%;background:var(--color-accent)"></div>
+          <sc-for list="{{ ticks }}" as="t" hint-placeholder-count="11"><span style="position:absolute;top:-3px;width:1px;height:7px;background:var(--color-neutral-400);left:{{ t }}"></span></sc-for>
+          <span style="position:absolute;left:12%;top:-6px;width:13px;height:13px;margin-left:-6px;border-radius:50%;border:1px solid var(--color-accent);background:var(--color-bg)"></span>
+        </div>
+        <span style="text-align:right">p. 14 of 212 · 12%</span>
+      </div>
+      <div style="position:absolute;right:16px;top:58px;width:340px;padding:20px;display:flex;flex-direction:column;gap:18px;background:var(--color-bg);border:1px solid var(--color-divider);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg)">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <span style="font-size:12px;color:var(--color-neutral-700)">Theme</span>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+            <sc-for list="{{ themes }}" as="th" hint-placeholder-count="4">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+                <div style="width:100%;height:44px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:20px;background:{{ th.bg }};color:{{ th.fg }};box-shadow:inset 0 0 0 {{ th.ring }}"> Aa</div>
+                <span style="font-size:11px;color:var(--color-neutral-700)">{{ th.name }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center">
+          <select class="input"><option>Georgia</option><option>Cambria</option><option>Segoe UI</option><option>Calibri</option><option>Publisher default</option></select>
+          <div style="display:flex;align-items:center;border:1px solid var(--color-divider);border-radius:var(--radius-md)">
+            <span style="padding:6px 10px;font-family:var(--font-heading);font-size:14px">A−</span><span style="padding:6px 6px;font-size:13px;font-variant-numeric:tabular-nums;border-inline:1px solid var(--color-divider)">19</span><span style="padding:6px 10px;font-family:var(--font-heading);font-size:18px">A+</span>
+          </div>
+        </div>
+        <sc-for list="{{ sliders }}" as="s" hint-placeholder-count="2">
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--color-neutral-700);font-variant-numeric:tabular-nums"><span>{{ s.label }}</span><span>{{ s.value }}</span></div>
+            <div style="position:relative;height:1px;background:var(--color-divider);margin:6px 0"><div style="position:absolute;left:0;top:-1px;height:2px;background:var(--color-accent);width:{{ s.pos }}"></div><span style="position:absolute;top:-7px;width:15px;height:15px;margin-left:-7px;border-radius:50%;border:1px solid var(--color-accent);background:var(--color-bg);left:{{ s.pos }}"></span></div>
+          </div>
+        </sc-for>
+        <div class="seg" style="display:flex"><span class="seg-opt" style="flex:1;justify-content:center;color:var(--color-accent);box-shadow:inset 0 0 0 1px var(--color-accent)">Paginated</span><span class="seg-opt" style="flex:1;justify-content:center">Scrolled</span></div>
+        <div style="border-top:1px solid var(--color-divider);padding-top:12px;display:flex;justify-content:space-between;font-size:13px"><a href="#D4">All settings…</a><span style="color:var(--color-neutral-600)">S · Ctrl+,</span></div>
+      </div>
+      <div style="position:absolute;right:16px;top:58px;width:0;height:0">
+        <sc-if value="{{ annotate }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;right:350px;top:10px;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">2</span><span style="position:absolute;right:350px;top:44px;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">8</span></sc-if>
+      </div>
+      <sc-if value="{{ annotate }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;left:300px;top:16px;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">1</span><span style="position:absolute;left:300px;bottom:52px;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">3</span></sc-if>
+    </div>
+  </div>
+
+  <!-- D3 Contents + offer -->
+  <div id="D3" style="display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;gap:10px;align-items:baseline"><span class="tag tag-outline">D3</span><span style="font-family:var(--font-heading);font-size:20px">Зміст і закладки · книга поза бібліотекою</span></div>
+    <div data-screen-label="D3 Contents" style="position:relative;width:1280px;height:800px;overflow:hidden;background:var(--color-bg);border:1px solid var(--color-divider);box-shadow:var(--shadow-md)">
+      <article style="position:absolute;top:96px;left:50%;transform:translateX(-50%);width:640px;font-size:19px;line-height:1.5;text-align:justify;hyphens:auto">
+        <div style="text-align:center;font-family:var(--font-heading);margin-bottom:28px"><div style="font-size:14px;letter-spacing:0.12em;color:var(--color-accent-700)">I</div><div style="font-size:32px">Introduction</div></div>
+        <p style="margin:0;text-indent:1.5em">The Time Traveller (for so it will be convenient to speak of him) was expounding a recondite matter to us. His grey eyes shone and twinkled, and his usually pale face was flushed and animated. The fire burned brightly, and the soft radiance of the incandescent lights in the lilies of silver caught the bubbles that flashed and passed in our glasses.</p>
+      </article>
+      <div style="position:absolute;inset:0;background:color-mix(in srgb, var(--color-neutral-900) 22%, transparent)"></div>
+      <nav style="position:absolute;left:0;top:0;bottom:0;width:360px;background:var(--color-bg);border-right:1px solid var(--color-divider);box-shadow:var(--shadow-lg);display:flex;flex-direction:column">
+        <div style="padding:20px 24px 16px;display:flex;flex-direction:column;gap:2px">
+          <span style="font-family:var(--font-heading);font-size:26px;line-height:1.1">The Time Machine</span>
+          <span style="font-size:13px;color:var(--color-neutral-700)">H. G. Wells</span>
+        </div>
+        <div style="padding:0 24px 12px"><div class="seg" style="display:flex"><span class="seg-opt" style="flex:1;justify-content:center;color:var(--color-accent);box-shadow:inset 0 0 0 1px var(--color-accent)">Contents</span><span class="seg-opt" style="flex:1;justify-content:center">Bookmarks <span style="font-variant-numeric:tabular-nums;opacity:0.7">3</span></span></div></div>
+        <ol style="list-style:none;margin:0;padding:8px 12px;border-top:1px solid var(--color-divider);overflow:hidden;flex:1">
+          <sc-for list="{{ tmToc }}" as="c" hint-placeholder-count="14">
+            <li style="display:grid;grid-template-columns:36px minmax(0,1fr) 10px;align-items:center;padding:7px 12px;border-radius:var(--radius-md);font-size:14px;color:{{ c.color }}" style-hover="background:color-mix(in srgb, var(--color-text) 6%, transparent)">
+              <span style="font-family:var(--font-heading);font-size:14px;font-variant-numeric:tabular-nums;color:var(--color-neutral-600)">{{ c.num }}</span><span>{{ c.title }}</span><span style="width:6px;height:6px;border-radius:50%;background:{{ c.dot }}"></span>
+            </li>
+          </sc-for>
+        </ol>
+        <sc-if value="{{ annotate }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;right:-36px;top:72px;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">9</span></sc-if>
+      </nav>
+      <div style="position:absolute;left:calc(50% + 180px);bottom:24px;transform:translateX(-50%);display:flex;align-items:center;gap:16px;padding:10px 12px 10px 18px;background:var(--color-bg);border:1px solid var(--color-divider);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);white-space:nowrap">
+        <span style="font-size:14px">This book is not in your library.</span>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-primary">Move to library</button>
+          <button class="btn btn-secondary">Copy</button>
+          <button class="btn" style="color:var(--color-neutral-700)">Not now</button>
+          <button class="btn btn-icon" title="Never for this file" style="color:var(--color-neutral-700)"><svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg></button>
+        </div>
+        <sc-if value="{{ annotate }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;left:-34px;top:16px;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">7</span></sc-if>
+      </div>
+    </div>
+  </div>
+
+  <!-- D4 Settings -->
+  <div id="D4" style="display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;gap:10px;align-items:baseline"><span class="tag tag-outline">D4</span><span style="font-family:var(--font-heading);font-size:20px">Налаштування застосунку</span></div>
+    <div data-screen-label="D4 Settings" style="position:relative;width:1280px;height:800px;overflow:hidden;background:var(--color-bg);border:1px solid var(--color-divider);box-shadow:var(--shadow-md);display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:16px;padding:14px 48px;border-bottom:1px solid var(--color-divider)">
+        <button class="btn" style="color:var(--color-text)"><svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg>Library</button>
+        <span style="font-family:var(--font-heading);font-size:22px;font-weight:600">Settings</span>
+      </div>
+      <div style="display:grid;grid-template-columns:220px minmax(0,1fr);gap:64px;padding:40px 48px;overflow:hidden">
+        <div style="display:flex;flex-direction:column;gap:4px;font-size:14px">
+          <span style="padding:6px 0;color:var(--color-accent-700)">Reading</span>
+          <span style="padding:6px 0;color:var(--color-neutral-700)">Library</span>
+          <span style="padding:6px 0;color:var(--color-neutral-700)">Catalogs</span>
+          <span style="padding:6px 0;color:var(--color-neutral-700)">System</span>
+          <span style="padding:6px 0;color:var(--color-neutral-700)">Shortcuts</span>
+        </div>
+        <div style="position:relative;display:flex;flex-direction:column;max-width:760px">
+          <sc-for list="{{ settingsGroups }}" as="g" hint-placeholder-count="4">
+            <div style="display:flex;flex-direction:column;padding-bottom:20px">
+              <h3 style="font-size:26px;font-weight:400;margin:0 0 6px">{{ g.title }}</h3>
+              <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="2">
+                <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:24px;align-items:center;padding:12px 0;border-top:1px solid var(--color-divider)">
+                  <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+                    <span style="font-size:14px;display:flex;gap:8px;align-items:center">{{ r.label }}<sc-if value="{{ r.sync }}" hint-placeholder-val="{{ false }}"><span class="tag tag-accent">sync</span></sc-if></span>
+                    <span style="font-size:12px;color:var(--color-neutral-700);overflow-wrap:anywhere">{{ r.hint }}</span>
+                  </div>
+                  <div style="display:flex;gap:6px;align-items:center">
+                    <sc-if value="{{ r.check }}" hint-placeholder-val="{{ false }}"><span style="width:18px;height:18px;border:1px solid var(--color-accent);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;color:var(--color-accent)"><svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M20 6 9 17l-5-5"></path></svg></span></sc-if>
+                    <sc-for list="{{ r.buttons }}" as="btn" hint-placeholder-count="0"><button class="btn btn-secondary">{{ btn }}</button></sc-for>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-for>
+          <sc-if value="{{ annotate }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;left:-40px;top:6px;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">2</span></sc-if>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:24px">
+  <h2 style="font-size:34px;font-weight:400;margin:0;border-bottom:1px solid var(--color-divider);padding-bottom:12px">Android · 390 × 844</h2>
+  <div style="display:flex;flex-wrap:wrap;gap:48px">
+
+  <!-- M1 Library -->
+  <div id="M1" style="display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;gap:10px;align-items:baseline"><span class="tag tag-outline">M1</span><span style="font-family:var(--font-heading);font-size:20px">Бібліотека</span></div>
+    <div data-screen-label="M1 Library" style="position:relative;width:390px;height:844px;overflow:hidden;background:var(--color-bg);border:1px solid var(--color-divider);border-radius:28px;box-shadow:var(--shadow-md);display:flex;flex-direction:column">
+      <div style="height:36px;flex:none;display:flex;align-items:center;padding:0 24px;font-size:12px;font-variant-numeric:tabular-nums">9:41</div>
+      <div style="display:flex;align-items:center;gap:4px;padding:4px 12px 4px 20px">
+        <span style="font-family:var(--font-heading);font-size:30px;flex:1">Library</span>
+        <button class="btn btn-icon" style="width:44px;height:44px;color:var(--color-text)"><svg viewBox="0 0 24 24" style="width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg></button>
+        <button class="btn btn-icon" style="width:44px;height:44px;color:var(--color-text)"><svg viewBox="0 0 24 24" style="width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="M20 7h-9M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle></svg></button>
+      </div>
+      <div style="position:relative;margin:8px 20px 0;display:grid;grid-template-columns:64px minmax(0,1fr);gap:14px;padding:12px;border:1px solid var(--color-divider);border-radius:var(--radius-md)">
+        <div style="aspect-ratio:2/3;background:var(--color-surface);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;padding:4px;text-align:center;font-family:var(--font-heading);font-style:italic;font-size:10px;line-height:1.1">Pride and Prejudice</div>
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+          <span style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-700)">Continue reading</span>
+          <span style="font-family:var(--font-heading);font-size:19px;font-weight:600;line-height:1.15">Pride and Prejudice</span>
+          <span style="font-size:12px;color:var(--color-neutral-700)">Jane Austen · Ch. 34</span>
+          <span style="flex:1"></span>
+          <div style="height:1px;background:var(--color-divider);position:relative"><div style="position:absolute;left:0;top:-1px;height:2px;width:63%;background:var(--color-accent)"></div></div>
+          <span style="font-size:11px;color:var(--color-neutral-700);font-variant-numeric:tabular-nums;padding-top:3px">63% · from Windows, 2 h ago</span>
+        </div>
+        <sc-if value="{{ annotate }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;right:-10px;top:-10px;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">4</span></sc-if>
+      </div>
+      <div style="position:relative;display:flex;gap:8px;padding:16px 20px 12px;overflow:hidden;font-size:13px;white-space:nowrap">
+        <span style="padding:6px 12px;border:1px solid var(--color-accent);color:var(--color-accent-700);border-radius:var(--radius-md)">All 214</span>
+        <span style="padding:6px 12px;border:1px solid var(--color-divider);border-radius:var(--radius-md)">Reading 6</span>
+        <span style="padding:6px 12px;border:1px solid var(--color-divider);border-radius:var(--radius-md)">Not started</span>
+        <span style="padding:6px 12px;border:1px solid var(--color-divider);border-radius:var(--radius-md)">Finished</span>
+        <sc-if value="{{ annotate }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;right:8px;top:18px;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">5</span></sc-if>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px 14px;padding:4px 20px;flex:1;overflow:hidden">
+        <sc-for list="{{ mBooks }}" as="b" hint-placeholder-count="9">
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <sc-if value="{{ b.dark }}" hint-placeholder-val="{{ false }}"><div style="aspect-ratio:2/3;background:var(--color-neutral-900);color:var(--color-bg);display:flex;align-items:center;justify-content:center;padding:8px;text-align:center;font-family:var(--font-heading);font-size:14px;line-height:1.1;margin-bottom:5px">{{ b.title }}</div></sc-if>
+            <sc-if value="{{ b.light }}" hint-placeholder-val="{{ true }}"><div style="aspect-ratio:2/3;background:var(--color-surface);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;padding:8px;text-align:center;font-family:var(--font-heading);font-style:italic;font-size:14px;line-height:1.1;margin-bottom:5px">{{ b.title }}</div></sc-if>
+            <div style="height:1px;background:var(--color-divider);position:relative;margin-bottom:4px"><div style="position:absolute;left:0;top:-1px;height:2px;background:var(--color-accent);width:{{ b.pctW }}"></div></div>
+            <span style="font-size:12px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ b.title }}</span>
+            <span style="font-size:11px;color:var(--color-neutral-700);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ b.author }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;border-top:1px solid var(--color-divider);padding:6px 0 18px;font-size:11px;text-align:center">
+        <span style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px;color:var(--color-accent-700)"><svg viewBox="0 0 24 24" style="width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="m16 6 4 14M12 6v14M8 8v12M4 4v16"></path></svg>Library</span>
+        <span style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px;color:var(--color-neutral-700)"><svg viewBox="0 0 24 24" style="width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"></path></svg>Catalogs</span>
+        <span style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px;color:var(--color-neutral-700)"><svg viewBox="0 0 24 24" style="width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="M5 12h14M12 5v14"></path></svg>Add book</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- M2 Reader -->
+  <div id="M2" style="display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;gap:10px;align-items:baseline"><span class="tag tag-outline">M2</span><span style="font-family:var(--font-heading);font-size:20px">Читання · меню після дотику</span></div>
+    <div data-screen-label="M2 Reader" style="position:relative;width:390px;height:844px;overflow:hidden;background:var(--color-bg);border:1px solid var(--color-divider);border-radius:28px;box-shadow:var(--shadow-md)">
+      <article style="position:absolute;top:110px;left:24px;right:24px;font-size:17px;line-height:1.5;text-align:justify;hyphens:auto">
+        <sc-for list="{{ alice }}" as="p" hint-placeholder-count="4"><p style="margin:0;text-indent:1.5em">{{ p }}</p></sc-for>
+      </article>
+      <div style="position:absolute;left:0;right:0;top:0;background:var(--color-bg);border-bottom:1px solid var(--color-divider);padding:36px 8px 6px;display:flex;align-items:center;gap:2px">
+        <button class="btn btn-icon" style="width:44px;height:44px;color:var(--color-text)"><svg viewBox="0 0 24 24" style="width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg></button>
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column"><span style="font-family:var(--font-heading);font-size:17px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Alice’s Adventures in Wonderland</span><span style="font-size:11px;color:var(--color-neutral-700)">Lewis Carroll</span></div>
+        <button class="btn btn-icon" style="width:44px;height:44px;color:var(--color-text)"><svg viewBox="0 0 24 24" style="width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"></path></svg></button>
+      </div>
+      <sc-if value="{{ showSyncBar }}" hint-placeholder-val="{{ true }}">
+        <div style="position:absolute;left:16px;right:16px;bottom:172px;display:flex;flex-direction:column;gap:10px;padding:14px 16px;background:var(--color-bg);border:1px solid var(--color-divider);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg)">
+          <span style="font-size:14px">Jump to 63% <span style="color:var(--color-neutral-700)">(Windows, 2 h ago)?</span></span>
+          <div style="display:flex;gap:8px"><button class="btn btn-primary" style="flex:1;min-height:44px">Jump there</button><button class="btn btn-secondary" style="flex:1;min-height:44px">Stay here</button></div>
+        </div>
+      </sc-if>
+      <div style="position:absolute;left:0;right:0;bottom:0;background:var(--color-bg);border-top:1px solid var(--color-divider);padding:14px 20px 18px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--color-neutral-700);font-variant-numeric:tabular-nums"><span>I · Down the Rabbit-Hole</span><span>p. 14 · 12%</span></div>
+        <div style="position:relative;height:1px;background:var(--color-divider);margin:8px 0"><div style="position:absolute;left:0;top:-1px;height:3px;width:12%;background:var(--color-accent)"></div><span style="position:absolute;left:12%;top:-10px;width:21px;height:21px;margin-left:-10px;border-radius:50%;border:1px solid var(--color-accent);background:var(--color-bg)"></span></div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);font-size:11px;text-align:center;color:var(--color-neutral-700)">
+          <span style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px"><svg viewBox="0 0 24 24" style="width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="M3 12h.01M3 18h.01M3 6h.01M8 12h13M8 18h13M8 6h13"></path></svg>Contents</span>
+          <span style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px"><span style="font-family:var(--font-heading);font-size:20px;line-height:22px;color:var(--color-text)">Aa</span>Appearance</span>
+          <span style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px"><svg viewBox="0 0 24 24" style="width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>Paginated</span>
+          <span style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px"><svg viewBox="0 0 24 24" style="width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg>More</span>
+        </div>
+      </div>
+      <sc-if value="{{ annotate }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;right:56px;top:46px;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">1</span><span style="position:absolute;right:12px;bottom:126px;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">3</span></sc-if>
+    </div>
+  </div>
+
+  <!-- M3 Appearance sheet -->
+  <div id="M3" style="display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;gap:10px;align-items:baseline"><span class="tag tag-outline">M3</span><span style="font-family:var(--font-heading);font-size:20px">Вигляд · нижній лист</span></div>
+    <div data-screen-label="M3 Appearance" style="position:relative;width:390px;height:844px;overflow:hidden;background:var(--color-bg);border:1px solid var(--color-divider);border-radius:28px;box-shadow:var(--shadow-md)">
+      <article style="position:absolute;top:60px;left:24px;right:24px;font-size:17px;line-height:1.5;text-align:justify;hyphens:auto">
+        <sc-for list="{{ alice }}" as="p" hint-placeholder-count="4"><p style="margin:0;text-indent:1.5em">{{ p }}</p></sc-for>
+      </article>
+      <div style="position:absolute;left:0;right:0;bottom:0;background:var(--color-bg);border-top:1px solid var(--color-divider);border-radius:var(--radius-lg) var(--radius-lg) 0 0;box-shadow:var(--shadow-lg);padding:10px 20px 24px;display:flex;flex-direction:column;gap:18px">
+        <span style="align-self:center;width:36px;height:3px;border-radius:2px;background:var(--color-neutral-300)"></span>
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-family:var(--font-heading);font-size:22px">Appearance</span><a href="#D4" style="font-size:13px">All settings</a></div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+          <sc-for list="{{ themes }}" as="th" hint-placeholder-count="4">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+              <div style="width:100%;height:52px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:22px;background:{{ th.bg }};color:{{ th.fg }};box-shadow:inset 0 0 0 {{ th.ring }}">Aa</div>
+              <span style="font-size:11px;color:var(--color-neutral-700)">{{ th.name }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center">
+          <select class="input" style="min-height:44px"><option>Georgia</option></select>
+          <div style="display:flex;align-items:center;border:1px solid var(--color-divider);border-radius:var(--radius-md);height:44px">
+            <span style="padding:0 14px;font-family:var(--font-heading);font-size:15px">A−</span><span style="padding:0 8px;font-size:13px;font-variant-numeric:tabular-nums;border-inline:1px solid var(--color-divider);line-height:42px">19</span><span style="padding:0 14px;font-family:var(--font-heading);font-size:19px">A+</span>
+          </div>
+        </div>
+        <sc-for list="{{ sliders }}" as="s" hint-placeholder-count="2">
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--color-neutral-700);font-variant-numeric:tabular-nums"><span>{{ s.label }}</span><span>{{ s.value }}</span></div>
+            <div style="position:relative;height:1px;background:var(--color-divider);margin:8px 0"><div style="position:absolute;left:0;top:-1px;height:2px;background:var(--color-accent);width:{{ s.pos }}"></div><span style="position:absolute;top:-10px;width:21px;height:21px;margin-left:-10px;border-radius:50%;border:1px solid var(--color-accent);background:var(--color-bg);left:{{ s.pos }}"></span></div>
+          </div>
+        </sc-for>
+        <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--color-divider);padding-top:14px;font-size:14px"><span>Volume keys turn pages</span><span style="width:20px;height:20px;border:1px solid var(--color-divider);border-radius:var(--radius-sm)"></span></div>
+      </div>
+      <sc-if value="{{ annotate }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;right:10px;bottom:470px;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">8</span></sc-if>
+    </div>
+  </div>
+
+  <!-- M4 Catalog -->
+  <div id="M4" style="display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;gap:10px;align-items:baseline"><span class="tag tag-outline">M4</span><span style="font-family:var(--font-heading);font-size:20px">Каталог OPDS</span></div>
+    <div data-screen-label="M4 Catalog" style="position:relative;width:390px;height:844px;overflow:hidden;background:var(--color-bg);border:1px solid var(--color-divider);border-radius:28px;box-shadow:var(--shadow-md);display:flex;flex-direction:column">
+      <div style="height:36px;flex:none;display:flex;align-items:center;padding:0 24px;font-size:12px;font-variant-numeric:tabular-nums">9:41</div>
+      <div style="display:flex;align-items:center;gap:4px;padding:4px 12px 4px 20px">
+        <span style="font-family:var(--font-heading);font-size:30px;flex:1">Catalogs</span>
+        <select class="input" style="width:150px;min-height:40px"><option>Home CWA</option><option>Calibre Server</option></select>
+      </div>
+      <div style="padding:10px 20px"><label style="display:flex;align-items:center;gap:8px;border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:0 12px;height:44px;color:var(--color-neutral-600);font-size:14px"><svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>Search the catalog</label></div>
+      <div style="position:relative;display:flex;align-items:center;gap:6px;padding:4px 20px 12px;font-size:13px;color:var(--color-neutral-700);white-space:nowrap;overflow:hidden">
+        <span>Home CWA</span><svg viewBox="0 0 24 24" style="width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="m9 18 6-6-6-6"></path></svg><span>Authors</span><svg viewBox="0 0 24 24" style="width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="m9 18 6-6-6-6"></path></svg><span style="color:var(--color-text)">Tolstoy Leo</span>
+        <sc-if value="{{ annotate }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;right:12px;top:0;width:24px;height:24px;border:1px solid var(--color-accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--color-bg);color:var(--color-accent-700)">10</span></sc-if>
+      </div>
+      <ul style="list-style:none;margin:0;padding:0 20px;flex:1;overflow:hidden">
+        <sc-for list="{{ catalog }}" as="c" hint-placeholder-count="5">
+          <li style="display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 0;border-top:1px solid var(--color-divider)">
+            <div style="aspect-ratio:2/3;background:var(--color-surface);border:1px solid var(--color-divider)"></div>
+            <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+              <span style="font-family:var(--font-heading);font-size:17px;font-weight:600;line-height:1.15">{{ c.title }}</span>
+              <span style="font-size:12px;color:var(--color-neutral-700)">{{ c.meta }}</span>
+            </div>
+            <sc-if value="{{ c.have }}" hint-placeholder-val="{{ false }}"><span class="tag tag-accent">In library</span></sc-if>
+            <sc-if value="{{ c.get }}" hint-placeholder-val="{{ true }}"><button class="btn btn-primary" style="min-height:40px;gap:6px"><svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>{{ c.fmt }}</button></sc-if>
+          </li>
+        </sc-for>
+      </ul>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;border-top:1px solid var(--color-divider);padding:6px 0 18px;font-size:11px;text-align:center">
+        <span style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px;color:var(--color-neutral-700)"><svg viewBox="0 0 24 24" style="width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="m16 6 4 14M12 6v14M8 8v12M4 4v16"></path></svg>Library</span>
+        <span style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px;color:var(--color-accent-700)"><svg viewBox="0 0 24 24" style="width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"></path></svg>Catalogs</span>
+        <span style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px;color:var(--color-neutral-700)"><svg viewBox="0 0 24 24" style="width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="M5 12h14M12 5v14"></path></svg>Add book</span>
+      </div>
+    </div>
+  </div>
+
+  </div>
+</div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;annotate&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;showSyncBar&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const raw = [
+      ['Pride and Prejudice', 'Jane Austen', 63, 'Ch. 34'],
+      ['Alice’s Adventures in Wonderland', 'Lewis Carroll', 12, 'Ch. I'],
+      ['The Adventures of Sherlock Holmes', 'Arthur Conan Doyle', 78, 'The Copper Beeches'],
+      ['Захар Беркут', 'Іван Франко', 0],
+      ['Тіні забутих предків', 'Михайло Коцюбинський', 0],
+      ['Moby-Dick', 'Herman Melville', 0],
+      ['Frankenstein', 'Mary Shelley', 100],
+      ['Кобзар', 'Тарас Шевченко', 34, 'Катерина'],
+      ['Treasure Island', 'Robert Louis Stevenson', 0],
+      ['Dracula', 'Bram Stoker', 0],
+      ['Anna Karenina', 'Leo Tolstoy', 0],
+      ['Лісова пісня', 'Леся Українка', 100],
+    ]
+    const books = raw.map(([title, author, pct, chapter], i) => {
+      const dark = i % 4 === 1 || i % 4 === 2 && i > 4
+      return { title, author, chapter, pctW: pct + '%', dark, light: !dark,
+        status: pct === 0 ? 'New' : pct >= 98 ? 'Finished' : pct + '%' }
+    })
+    const recent = [books[0], books[1], books[7]]
+    const sorted = [...books].sort((a, b) => a.author.split(' ').pop().localeCompare(b.author.split(' ').pop()))
+    const tm = ['Introduction', 'The Machine', 'The Time Traveller Returns', 'Time Travelling', 'In the Golden Age', 'The Sunset of Mankind', 'A Sudden Shock', 'Explanation', 'The Morlocks', 'When the Night Came', 'The Palace of Green Porcelain', 'In the Darkness', 'The Trap of the White Sphinx', 'The Further Vision', 'The Time Traveller’s Return', 'After the Story']
+    const roman = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII','XIV','XV','XVI']
+    const tmToc = tm.map((title, i) => ({ num: roman[i], title,
+      color: i === 0 ? 'var(--color-accent-700)' : 'var(--color-text)',
+      dot: i === 3 || i === 8 ? 'var(--color-accent)' : 'transparent' }))
+    return {
+      annotate: this.props.annotate ?? true,
+      showSyncBar: this.props.showSyncBar ?? true,
+      books: sorted, recent, mBooks: sorted.slice(0, 9),
+      ticks: ['8%','17%','26%','34%','43%','52%','60%','69%','78%','86%','94%'],
+      tmToc,
+      themes: [
+        { name: 'System', bg: 'linear-gradient(135deg, var(--color-bg) 50%, var(--color-neutral-900) 50%)', fg: 'var(--color-accent)', ring: '1px var(--color-divider)' },
+        { name: 'Light', bg: 'var(--color-bg)', fg: 'var(--color-text)', ring: '2px var(--color-accent)' },
+        { name: 'Sepia', bg: 'var(--color-accent-100)', fg: 'var(--color-accent-900)', ring: '1px var(--color-divider)' },
+        { name: 'Dark', bg: 'var(--color-neutral-900)', fg: 'var(--color-neutral-200)', ring: '1px var(--color-divider)' },
+      ],
+      sliders: [
+        { label: 'Line spacing', value: '1.5', pos: '30%' },
+        { label: 'Line length', value: '≈70 chars', pos: '45%' },
+      ],
+      alice: [
+        'Alice was beginning to get very tired of sitting by her sister on the bank, and of having nothing to do: once or twice she had peeped into the book her sister was reading, but it had no pictures or conversations in it, “and what is the use of a book,” thought Alice “without pictures or conversations?”',
+        'So she was considering in her own mind (as well as she could, for the hot day made her feel very sleepy and stupid), whether the pleasure of making a daisy-chain would be worth the trouble of getting up and picking the daisies, when suddenly a White Rabbit with pink eyes ran close by her.',
+        'There was nothing so very remarkable in that; nor did Alice think it so very much out of the way to hear the Rabbit say to itself, “Oh dear! Oh dear! I shall be late!” (when she thought it over afterwards, it occurred to her that she ought to have wondered at this, but at the time it all seemed quite natural); but when the Rabbit actually took a watch out of its waistcoat-pocket, and looked at it, and then hurried on, Alice started to her feet.',
+        'In another moment down went Alice after it, never once considering how in the world she was to get out again.',
+      ],
+      settingsGroups: [
+        { title: 'Reading', rows: [
+          { label: 'Remember reading position', hint: 'Positions sync through the catalog marked “sync”.', check: true, buttons: [] },
+          { label: 'Offer to add books opened from elsewhere', hint: 'Shows Move / Copy to library when a file is outside the library folder.', check: true, buttons: [] },
+        ]},
+        { title: 'Library', rows: [
+          { label: 'Library folder', hint: 'D:\\Books\\lib', buttons: ['Change…', 'Organize…'] },
+        ]},
+        { title: 'Catalogs', rows: [
+          { label: 'Home CWA', hint: 'http://192.168.1.10:8083/opds', sync: true, buttons: ['Edit', 'Remove'] },
+          { label: 'Calibre Server', hint: 'http://nas.local:8080/opds', buttons: ['Edit', 'Remove'] },
+          { label: 'Add a catalog', hint: 'Type the server’s address; its OPDS catalog is found by itself.', buttons: ['Add catalog…'] },
+        ]},
+        { title: 'System', rows: [
+          { label: 'File types', hint: 'Registered for .epub, .fb2 and .fbz', buttons: ['Unregister'] },
+          { label: 'History', hint: 'Forgets the recent books; reading positions are kept.', buttons: ['Clear history'] },
+        ]},
+      ],
+      catalog: [
+        { title: 'Anna Karenina', meta: 'EPUB · FB2', have: true, get: false },
+        { title: 'War and Peace', meta: 'EPUB · FB2', get: true, fmt: 'EPUB' },
+        { title: 'The Death of Ivan Ilyich', meta: 'EPUB', get: true, fmt: 'EPUB' },
+        { title: 'Hadji Murat', meta: 'FB2', get: true, fmt: 'FB2' },
+        { title: 'Resurrection', meta: 'EPUB · FB2', get: true, fmt: 'EPUB' },
+        { title: 'The Kreutzer Sonata', meta: 'EPUB', get: true, fmt: 'EPUB' },
+      ],
+      findings: [
+        { n: 1, title: 'Верхня панель', now: 'до 8 текстових кнопок однакової ваги. На телефоні панель переноситься у два ряди (76 px) і закриває текст.', fix: 'зліва навігація, у центрі назва, справа дії з книгою. Рідкісні пункти (Shortcuts, About, Full screen) переходять у меню «⋯». На телефоні зверху лише назва й закладка, а прогрес і чотири дії внизу, під пальцем.' },
+        { n: 2, title: 'Налаштування', now: 'одна бічна панель змішує вигляд книги, папку бібліотеки, типи файлів, історію та каталоги.', fix: 'під час читання відкривається поповер «Aa» лише з виглядом книги, а налаштування застосунку стають окремою сторінкою з розділами.' },
+        { n: 3, title: 'Прогрес', now: 'смуга 3 px, підпис з’являється лише при наведенні миші, тож на дотиковому екрані його не видно.', fix: 'постійний рядок у меню: розділ, сторінка, відсоток і позначки розділів. На телефоні це повзунок із великою ручкою.' },
+        { n: 4, title: 'Continue reading', now: 'текстовий список, відсоток притиснутий праворуч, обкладинок немає.', fix: 'картки з обкладинкою, розділом і лінією прогресу. Для синхронізованого місця показано пристрій і час.' },
+        { n: 5, title: 'Фільтр і сортування', now: 'два однакові select поряд із пошуком, а стан фільтра не видно.', fix: 'статус перемикається сегментами з лічильниками, сортування — компактний select праворуч.' },
+        { n: 6, title: 'Сітка книг', now: 'у сітці не видно, яку книгу почато, а яку дочитано.', fix: 'під обкладинкою тонка лінія прогресу та статус: New, відсоток або Finished.' },
+        { n: 7, title: 'Книга поза бібліотекою', now: 'плашка з п’ятьма кнопками однакової ваги.', fix: 'основна дія (останній вибір) і Copy, Not now. Пункт «Never for this file» переходить у «⋯».' },
+        { n: 8, title: 'Вибір теми', now: 'чотири текстові кнопки System / Light / Dark / Sepia.', fix: 'зразки сторінки «Aa» у кольорах кожної теми, вибрана тема обведена акцентом.' },
+        { n: 9, title: 'Зміст і закладки', now: 'закладки йдуть під змістом і займають до 40% висоти, тому на довгому змісті їх не видно.', fix: 'перемикач Contents / Bookmarks з лічильником. Поточний розділ виділено кольором, розділи із закладками позначено точкою.' },
+        { n: 10, title: 'Каталоги', now: '«← Back» — окрема кнопка, «in library» схований у сірому рядку метаданих.', fix: 'хлібні крихти шляхом OPDS, мітка In library, кнопка завантаження з форматом.' },
+        { n: 11, title: 'Типографіка', now: 'Segoe UI 14 px, сірий акцент #6b6b6b, синій колір посилань.', fix: 'Classical: заголовки Cormorant Garamond, текст Lora, акцент лише лініями й обведенням. Теми sepia і dark беруть кольори з рамп.' },
+      ],
+    }
+  }
+}
+</script>
+</body>
+</html>

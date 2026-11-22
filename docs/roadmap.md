@@ -18,9 +18,16 @@
    - OPDS sources (Basic / Digest auth, passwords in the Windows Credential Manager), catalog browsing, search, download into the library.
    - KOSync progress sync against CWA (two profiles on one PC stood in for two devices).
    - Findings: readers type a server's address, not its `/opds` path, so saving discovers the catalog; CWA's KOSync takes the plain login over Basic and serves FB2 as `text/xml`; the TLS library (rustls/ring) needs clang on Windows ARM64 (LLVM) and the NDK's clang for Android, so Android compile errors now show up in CI only.
-4. **Full Android version** — library, volume keys, full screen, keep screen on, servers and sync with Windows (catalog passwords in the Android Keystore), choosing another library folder, adding books from outside it ("Open with", "Share", "Add book…"), a release APK signed with a personal key. Done earlier: one window and Back, tap zones, a top bar for a finger.
+4. **Full Android version** — done (22.11.2026): library, volume keys, full screen, keep screen on, servers and sync with Windows (catalog passwords in the Android Keystore), choosing another library folder, adding books from outside it ("Open with", "Share", "Add book…"), a release APK signed with a personal key. Done earlier: one window and Back, tap zones, a top bar for a finger.
 5. **Shared core** — done (22.11.2026): the reading part of the frontend (BookView with touch, appearance, layout, page labels, DOM helpers, foliate-js) is the public package [reader-core](https://github.com/OlegG90/reader-core); Book Reader and Simple Reader depend on it by tag. The Rust backends stay per app: they have diverged (fingerprint, store, data folder, command line).
-6. **Phase "e"** — read status and shelves in CWA, metadata editing through the Calibre Content Server.
+6. **UI refresh** (Windows + Android) — the design in [docs/design/ui-refresh.md](design/ui-refresh.md) (desktop D1–D4, Android M1–M4), with its decisions. Same features, regrouped and restyled:
+   - Theme: Cormorant Garamond / Lora (bundled), one gold accent, tokens in `style.css`; theme swatches.
+   - Reader chrome: a slim top bar (Library, Contents · title · Bookmark, Aa, mode, ⋯) and a progress row with chapter ticks; on Android a top bar plus a bottom bar (progress slider, Contents / Aa / Mode / More), both toggled by a centre tap.
+   - Settings split: the **Aa** popover (appearance, flow) while reading, a **Settings page** with sections (Reading, Library, Catalogs, System, Shortcuts) in the library.
+   - Library: continue-reading cards, a status switch with counts, progress under each cover; on Android bottom navigation (Library · Catalogs · Add book).
+   - Contents / Bookmarks as one drawer with a switch; the offer bar with one primary choice and ⋯; catalog breadcrumbs, an "In library" tag, outlined download buttons.
+   - Order: theme and tokens first (everything else builds on them), then reader chrome, settings split, library, the rest; each part checked on Windows and the phone.
+7. **Phase "e"** — read status and shelves in CWA, metadata editing through the Calibre Content Server.
 
 Full-text search in a book and grouping by series fit after stage 4.
 
