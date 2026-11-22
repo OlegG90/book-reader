@@ -94,6 +94,8 @@ function readSettings(stored: Record<string, unknown>): Settings {
 
 const SAVE_DELAY_MS = 500
 const TOP_EDGE_PX = 48
+/** The bottom bar shows when the mouse comes this close to the bottom edge. */
+const BOTTOM_EDGE_PX = 56
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 // Hides what only the other platform does (`.desktop-only`, `.android-only` in style.css).
@@ -195,6 +197,11 @@ async function openCurrentBook() {
   void invoke('remember_book', { fingerprint, title, author: book.author }).catch(console.error)
   $('toc-title').textContent = title
   $('toc-author').textContent = book.author
+  $('topbar-book').textContent = title
+  $('topbar-author').textContent = book.author
+  $('progress-ticks').replaceChildren(
+    ...book.chapterStarts().map(start => el('span', { style: `left: ${start * 100}%` })),
+  )
   tocView = createTOCView(book.toc, (href: string) => {
     book?.view.goTo(href).catch(console.error)
     closePanels()
@@ -203,6 +210,7 @@ async function openCurrentBook() {
   currentTocHref = undefined
   highlightToc(book.view.lastLocation?.tocItem?.href)
   $('progress').hidden = false
+  $('bottombar').hidden = false
   updateTopbarButtons()
   if (info.offer && settings.offerLibrary) showOffer(info.offer)
   bookmarks = await invoke<Bookmark[]>('get_bookmarks', { fingerprint }).catch((e): Bookmark[] => {
@@ -345,7 +353,9 @@ function renderBookmarks() {
 function updateBookmarkButton() {
   const marked = hasBookmark(bookmarks, book?.view.lastLocation?.cfi)
   $('bookmark-button').setAttribute('aria-pressed', String(marked))
-  $('bookmark-button').textContent = marked ? 'Bookmarked' : 'Bookmark'
+  // The icon fills in when the page is bookmarked (style.css).
+  $('bookmark-button').setAttribute('aria-label', marked ? 'Bookmarked' : 'Bookmark')
+  $('bookmark-button').title = marked ? 'Remove the bookmark on this page (B)' : 'Bookmark this page (B)'
 }
 
 // ---- Adding a book to the library ------------------------------------------
@@ -407,7 +417,8 @@ function closeBook() {
   document.body.classList.remove('library-mode')
   $('error').hidden = true
   $('progress').hidden = true
-  topbar.classList.remove('shown')
+  $('bottombar').hidden = true
+  setChrome(false)
 }
 
 /** Contents and the flow need an open book; the rest of the topbar works without one. */
@@ -607,7 +618,12 @@ function onRelocate(location: Relocation) {
   const { fraction, cfi, tocItem } = location
   const percent = Math.round(fraction * 100)
   $('progress-fill').style.width = `${fraction * 100}%`
-  $('progress-label').textContent = tocItem?.label ? `${percent}% · ${tocItem.label}` : `${percent}%`
+  $('progress-done').style.width = `${fraction * 100}%`
+  $('progress-knob').style.left = `${fraction * 100}%`
+  $('progress-chapter').textContent = tocItem?.label?.trim() ?? ''
+  // Pages count within the chapter (the book-wide position is the percentage).
+  const at = book?.chapterPage
+  $('progress-where').textContent = at ? `p. ${at.page} of ${at.of} · ${percent}%` : `${percent}%`
   highlightToc(tocItem?.href)
   updateBookmarkButton()
   if (restoring) return
@@ -733,7 +749,13 @@ function toggleFlow() {
 }
 
 function updateFlowButton() {
-  $('flow-button').textContent = book?.flow === 'scrolled' ? 'Paginated' : 'Scrolled'
+  const scrolled = book?.flow === 'scrolled'
+  const icon = () => el('span', { innerHTML: `<svg class="icon" aria-hidden="true"><use href="#i-${scrolled ? 'scroll' : 'book-open'}"/></svg>` })
+  const mode = scrolled ? 'Scrolled' : 'Paginated'
+  $('flow-button').replaceChildren(icon())
+  $('flow-button').title = `${mode} — switch to ${scrolled ? 'paginated' : 'scrolled'} (M)`
+  $('flow-button').setAttribute('aria-label', mode)
+  $('phone-flow').replaceChildren(icon(), el('span', { textContent: mode }))
 }
 
 function openToc() {
@@ -813,6 +835,7 @@ async function applyOrganize() {
 }
 
 function closePanels() {
+  closeMoreMenu()
   $('scrim').hidden = true
   $('organize').hidden = true
   $('toc').hidden = true
@@ -924,22 +947,59 @@ async function refreshFileTypesStatus() {
 
 // ---- Edge controls ----------------------------------------------------------
 
-let hideTopbarTimer: number | undefined
+let hideChromeTimer: number | undefined
+const bottombar = $('bottombar')
 
-/** A tap in the middle of the page (touch screens) shows or hides the top bar. */
-function toggleTopbar() {
-  clearTimeout(hideTopbarTimer)
-  topbar.classList.toggle('shown')
+/** The reading chrome: the top bar and the bottom bar come and go together. */
+function setChrome(shown: boolean) {
+  clearTimeout(hideChromeTimer)
+  topbar.classList.toggle('shown', shown)
+  bottombar.classList.toggle('shown', shown)
+  if (!shown) closeMoreMenu()
 }
 
+/** A tap in the middle of the page (touch screens) shows or hides the chrome. */
+function toggleTopbar() {
+  setChrome(!topbar.classList.contains('shown'))
+}
+
+/** The mouse near the top or bottom edge shows the chrome; elsewhere it fades after a moment. */
 function onPointer(y: number) {
-  if (y < TOP_EDGE_PX) {
-    clearTimeout(hideTopbarTimer)
-    topbar.classList.add('shown')
-  } else if (topbar.classList.contains('shown') && !topbar.matches(':hover')) {
-    clearTimeout(hideTopbarTimer)
-    hideTopbarTimer = window.setTimeout(() => topbar.classList.remove('shown'), 600)
-  }
+  if (y < TOP_EDGE_PX || (book && y > innerHeight - BOTTOM_EDGE_PX)) return setChrome(true)
+  const inUse = topbar.matches(':hover') || bottombar.matches(':hover') || !$('more-menu').hidden || trackDrag
+  if (!topbar.classList.contains('shown') || inUse) return
+  clearTimeout(hideChromeTimer)
+  hideChromeTimer = window.setTimeout(() => setChrome(false), 600)
+}
+
+// ---- The "more" menu ----------------------------------------------------------
+
+function toggleMoreMenu() {
+  const open = $('more-menu').hidden
+  closePanels()
+  $('more-menu').hidden = !open
+  $('more-button').setAttribute('aria-expanded', String(open))
+  if (open) $('more-menu').querySelector<HTMLElement>('button:not([hidden])')?.focus()
+}
+
+function closeMoreMenu() {
+  $('more-menu').hidden = true
+  $('more-button').setAttribute('aria-expanded', 'false')
+}
+
+// ---- The progress track ---------------------------------------------------------
+
+/** Dragging the knob: the book goes there when the finger or mouse lets go. */
+let trackDrag = false
+
+function trackFraction(e: PointerEvent) {
+  const rect = $('progress-track').getBoundingClientRect()
+  return Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+}
+
+function showTrackAt(fraction: number) {
+  $('progress-done').style.width = `${fraction * 100}%`
+  $('progress-knob').style.left = `${fraction * 100}%`
 }
 
 // ---- Wiring -----------------------------------------------------------------
@@ -955,8 +1015,14 @@ $('scrim').addEventListener('click', closePanels)
 document.addEventListener('pointerdown', e => {
   if (!scrimlessOpen()) return
   const target = e.target instanceof Element ? e.target : null
-  if (target?.closest('#settings, #settings-button, #about, #about-button, #shortcuts, #shortcuts-button')) return
+  if (target?.closest('#settings, #settings-button, #about, #about-button, #shortcuts, #shortcuts-button, #more-menu, #phone-actions')) return
   closePanels()
+})
+// The "more" menu closes on any press outside it (and its buttons).
+document.addEventListener('pointerdown', e => {
+  const target = e.target instanceof Element ? e.target : null
+  if ($('more-menu').hidden || target?.closest('#more-menu, #more-button, [data-command="more"]')) return
+  closeMoreMenu()
 })
 suppressContextMenu()
 $('toc-button').addEventListener('click', () => runCommand('toc'))
@@ -1024,9 +1090,29 @@ $('open-button').addEventListener('click', () => runCommand('open'))
 $('flow-button').addEventListener('click', () => runCommand('toggleFlow'))
 $('bookmark-button').addEventListener('click', () => runCommand('bookmark'))
 $('fullscreen-button').addEventListener('click', () => runCommand('fullscreen'))
-$('progress').addEventListener('click', e => {
-  book?.view.goToFraction(e.clientX / innerWidth).catch(console.error)
+$('more-button').addEventListener('click', toggleMoreMenu)
+// A chosen item closes the menu (its own handler above does the work).
+$('more-menu').addEventListener('click', e => {
+  if ((e.target as Element).closest('button')) closeMoreMenu()
 })
+// The phone's bottom bar: the same commands as the top bar's buttons.
+for (const button of document.querySelectorAll<HTMLButtonElement>('#phone-actions [data-command]')) {
+  const command = button.dataset.command
+  button.addEventListener('click', () => (command === 'more' ? toggleMoreMenu() : void runCommand(command as Command)))
+}
+$('progress-track').addEventListener('pointerdown', e => {
+  if (!book || e.button !== 0) return
+  trackDrag = true
+  $('progress-track').setPointerCapture(e.pointerId)
+  showTrackAt(trackFraction(e))
+})
+$('progress-track').addEventListener('pointermove', e => trackDrag && showTrackAt(trackFraction(e)))
+$('progress-track').addEventListener('pointerup', e => {
+  if (!trackDrag) return
+  trackDrag = false
+  book?.view.goToFraction(trackFraction(e)).catch(console.error)
+})
+$('progress-track').addEventListener('pointercancel', () => (trackDrag = false))
 
 appWindow.listen('book-changed', () => openCurrentBook())
 // Listening takes Back over from Android, which would otherwise leave the app on every press.

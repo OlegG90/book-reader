@@ -142,27 +142,12 @@ input[type='range'] {
   display: none !important;
 }
 
-/* A finger needs bigger targets than a mouse; the top bar wraps instead of
-   running off a narrow screen. It is shown by a tap in the page's middle. */
+/* A finger needs bigger targets than a mouse. */
 @media (pointer: coarse) {
-  #topbar {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  #topbar .spacer {
-    display: none;
-  }
-
-  #topbar button {
+  #topbar button,
+  #phone-actions button {
     min-height: 44px;
-    padding: 8px 12px;
-    font-size: 16px;
-  }
-
-  /* The library sits below the taller bar */
-  #start {
-    padding-top: calc(76px + var(--safe-top));
+    min-width: 44px;
   }
 }
 
@@ -232,12 +217,10 @@ body.library-mode #topbar {
   pointer-events: auto;
 }
 
-body.library-mode #bookmark-button,
-body.library-mode #toc-button,
-body.library-mode #flow-button,
-body.library-mode #library-button,
-body.library-mode #fullscreen-button {
-  display: none;
+/* Reading-only and library-only parts of the top bar */
+body.library-mode .reader-only,
+body:not(.library-mode) .library-only {
+  display: none !important;
 }
 
 .library-bar {
@@ -699,17 +682,269 @@ button.link:hover {
   pointer-events: auto;
 }
 
+/* Top bar: back and contents · the book's title · bookmark, Aa, mode, more */
 #topbar {
   top: 0;
-  display: flex;
-  gap: 4px;
-  padding: calc(6px + var(--safe-top)) 8px 6px;
-  background: var(--panel);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--space-2);
+  padding: calc(8px + var(--safe-top)) 16px 8px;
+  background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
 
-#topbar .spacer {
-  flex: 1;
+#topbar .bar-start,
+#topbar .bar-end {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+#topbar .bar-end {
+  justify-content: flex-end;
+  grid-column: 3;
+}
+
+#topbar-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-heading);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+#topbar-author {
+  font-family: var(--font-body);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+#topbar-author:not(:empty)::before {
+  content: ' · ';
+}
+
+.icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vertical-align: middle;
+}
+
+.sprite {
+  display: none;
+}
+
+#topbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+}
+
+#topbar button.icon {
+  width: 36px;
+  padding: 0;
+}
+
+#library-button {
+  font-size: 14px;
+}
+
+.aa {
+  font-family: var(--font-heading);
+  font-size: 18px;
+  line-height: 1;
+}
+
+#settings-button[aria-expanded='true'],
+#more-button[aria-expanded='true'] {
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+/* The "more" menu under its button */
+#more-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 12px;
+  z-index: 25;
+  display: grid;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+#more-menu button {
+  justify-content: space-between;
+  text-align: left;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 14px;
+}
+
+#more-menu kbd {
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Bottom bar while reading: the chapter · a track with chapter ticks · the page */
+#bottombar {
+  bottom: 0;
+  padding: 10px 24px calc(10px + var(--safe-bottom));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+
+#progress-row {
+  display: grid;
+  grid-template-columns: minmax(0, 260px) 1fr minmax(0, 260px);
+  align-items: center;
+  gap: var(--space-4);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+#progress-chapter {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#progress-where {
+  text-align: right;
+  white-space: nowrap;
+}
+
+#progress-track {
+  position: relative;
+  height: 20px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+#progress-track::before,
+#progress-done {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--line);
+}
+
+#progress-track::before {
+  right: 0;
+}
+
+#progress-done {
+  height: 2px;
+  margin-top: -0.5px;
+  background: var(--accent);
+}
+
+#progress-ticks span {
+  position: absolute;
+  top: calc(50% - 4px);
+  width: 1px;
+  height: 8px;
+  background: color-mix(in srgb, var(--fg) 25%, transparent);
+}
+
+#progress-knob {
+  position: absolute;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  margin: -6.5px 0 0 -6.5px;
+  background: var(--bg);
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+}
+
+/* Android: the top bar keeps back, title, bookmark; the rest moves to the bottom */
+.android #topbar {
+  grid-template-columns: auto 1fr auto;
+  padding-inline: 8px;
+}
+
+.android #topbar .bar-end {
+  grid-column: auto;
+}
+
+.android #topbar .on-bottom {
+  display: none;
+}
+
+.android body.library-mode #topbar .on-bottom {
+  display: inline-flex;
+}
+
+.android #topbar-title {
+  display: grid;
+  line-height: 1.2;
+}
+
+.android #topbar-author::before {
+  content: none;
+}
+
+.android #bottombar {
+  padding-inline: 20px;
+}
+
+.android #progress-row {
+  grid-template-columns: 1fr auto;
+  gap: 4px var(--space-2);
+}
+
+.android #progress-track {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  height: 32px;
+}
+
+.android #progress-knob {
+  width: 21px;
+  height: 21px;
+  margin: -10.5px 0 0 -10.5px;
+}
+
+#phone-actions {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin-top: 6px;
+}
+
+#phone-actions button {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 4px;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#phone-actions .icon,
+#phone-actions .aa {
+  width: 22px;
+  height: 22px;
+  color: var(--fg);
 }
 
 button {
@@ -820,10 +1055,11 @@ button:hover {
   display: none;
 }
 
-#topbar #bookmark-button[aria-pressed='true'] {
-  font-weight: 600;
-  background: var(--active);
+#topbar #bookmark-button[aria-pressed='true'] .icon {
+  fill: var(--accent);
+  stroke: var(--accent);
 }
+
 
 #bookmarks {
   max-height: 40%;
@@ -1041,41 +1277,20 @@ button:hover {
   color: var(--muted);
 }
 
-/* Progress bar */
+/* Progress hairline (the chrome hidden) */
 #progress {
   position: fixed;
   left: 0;
   right: 0;
   bottom: var(--safe-bottom);
-  z-index: 10;
-  height: 3px;
-  cursor: pointer;
-  transition: height 0.12s;
-}
-
-#progress:hover {
-  height: 22px;
-  background: var(--panel);
-  border-top: 1px solid var(--line);
+  z-index: 9;
+  height: 2px;
+  pointer-events: none;
 }
 
 #progress-fill {
   height: 100%;
   width: 0;
   background: var(--accent);
-  opacity: 0.45;
-}
-
-#progress-label {
-  position: absolute;
-  inset: 0;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  pointer-events: none;
-}
-
-#progress:hover #progress-label {
-  display: flex;
+  opacity: 0.5;
 }
