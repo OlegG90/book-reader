@@ -140,7 +140,6 @@ function checkRow(label: string, hint: string, box: HTMLInputElement) {
 
 const SECTIONS = [
   { id: 'reading', title: 'Reading' },
-  { id: 'library', title: 'Library' },
   { id: 'catalogs', title: 'Catalogs' },
   { id: 'system', title: 'System' },
   { id: 'shortcuts', title: 'Shortcuts', desktopOnly: true },
@@ -150,8 +149,8 @@ export type SettingsSection = (typeof SECTIONS)[number]['id']
 
 /**
  * The settings page: a back button, the sections' names on the left as tabs,
- * and one section at a time (Reading with the appearance, Library, Catalogs,
- * System, Shortcuts). Every change goes to `onChange` with just the changed values;
+ * and one section at a time (Reading with the appearance, Catalogs, System
+ * with the library folder, Shortcuts). Every change goes to `onChange` with just the changed values;
  * button presses go to `actions`. `catalogs` and `shortcuts` are the hosts
  * the app fills in (the sources panel, the key list).
  */
@@ -186,9 +185,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       checkRow('Offer to add books opened from elsewhere', 'Shows Move / Copy to library when a file is outside the library folder.', offerLibrary),
       checkRow('Volume keys turn pages', 'While a book is open.', volumeKeys),
     ],
-    library: [libraryRow],
     catalogs: [catalogs],
-    system: [fileTypesRow, row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory }))],
+    system: [libraryRow, fileTypesRow, row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory }))],
     shortcuts: [shortcuts],
   }
   // The volume keys are a phone's.
