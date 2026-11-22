@@ -70,6 +70,19 @@ pub fn chosen_library(window: &Window, pick: bool) -> Result<Option<PathBuf>, St
     Ok(Some(status.documents.join(LIBRARY_FOLDER)))
 }
 
+/// Catalog passwords on Android (the Keystore) come with the full Android version.
+pub fn save_password(_source_id: &str, _password: &str) -> Result<(), String> {
+    Err("Saving catalog passwords on Android is not available yet".into())
+}
+
+/// No catalog passwords are kept on Android yet.
+pub fn password(_source_id: &str) -> Option<String> {
+    None
+}
+
+/// Nothing to forget while none are kept.
+pub fn forget_password(_source_id: &str) {}
+
 /// Fails while All files access is off (turned off after the library was set
 /// up), saying where to turn it back on.
 pub fn check_library_access(app: &AppHandle) -> Result<(), String> {

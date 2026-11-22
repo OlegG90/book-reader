@@ -29,6 +29,8 @@ import {
   type Status,
 } from './library'
 import { BookView, type BookStyle, type Relocation } from './reader'
+import { createCatalogView } from './catalog-view'
+import { createSourcesPanel } from './sources-panel'
 import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
 import { createSettingsPanel, type PanelValues } from './settings-panel'
 import { createTOCView } from './vendor/foliate-js/ui/tree.js'
@@ -109,6 +111,8 @@ let fingerprint = ''
 /** `--no-save`: this window keeps no positions (the backend skips recent books too). */
 let noSave = false
 let tocView: { element: HTMLElement; setCurrentHref(href: string): void } | null = null
+/** The book is opening: its relocates restore the saved position, they don't move it. */
+let restoring = false
 
 // ---- Reading position -------------------------------------------------------
 
@@ -148,6 +152,7 @@ async function openCurrentBook() {
     if (!info) return await showLibraryScreen()
     fingerprint = info.fingerprint
     noSave = info.noSave
+    restoring = true
     const source = await loadBook(info)
     await settingsReady
     book = await BookView.open($('stage'), $('footnote'), source, {
@@ -170,6 +175,8 @@ async function openCurrentBook() {
     showError(info?.fileName, e)
     // The library, Ctrl+O and the recent books stay one step away.
     return showLibraryScreen()
+  } finally {
+    restoring = false
   }
   const title = book.title || info.fileName
   void appWindow.setTitle(title).catch(console.error)
@@ -191,6 +198,85 @@ async function openCurrentBook() {
     return []
   })
   renderBookmarks()
+  void pullSync()
+}
+
+// ---- Progress sync ----------------------------------------------------------
+
+/** How often a changed position goes to the sync server while reading. */
+const SYNC_EVERY_MS = 60_000
+/** Closing the window waits this long at most for the last push. */
+const SYNC_ON_CLOSE_MS = 3_000
+
+interface SyncOffer {
+  cfi: string
+  fraction: number
+  device: string
+  time: number
+}
+
+let syncOffer: SyncOffer | null = null
+/** The open book's id on the sync server; null when it doesn't sync. */
+let syncDocument: string | null = null
+/** The position moved since the last push. */
+let syncDirty = false
+
+/** Asks the sync server whether another device read on, and offers to jump there. */
+async function pullSync() {
+  const document = await invoke<string | null>('sync_document').catch(e => {
+    console.warn('sync:', e)
+    return null
+  })
+  if (!document || !book) return
+  syncDocument = document
+  const state = await invoke<{ offer: SyncOffer | null; push: boolean }>('sync_pull', { document, fingerprint }).catch(e => {
+    console.warn('sync:', e)
+    return null
+  })
+  if (!state || !book || syncDocument !== document) return
+  if (state.push) syncDirty = true
+  const offer = state.offer
+  if (!offer) return
+  syncOffer = offer
+  $('sync-text').textContent = `${offer.device || 'Another device'}, ${timeAgo(offer.time)}: ${Math.round(offer.fraction * 100)}%`
+  $('sync-bar').hidden = false
+}
+
+/** "2 h ago", "yesterday"... */
+function timeAgo(time: number) {
+  const minutes = Math.round((Date.now() - time) / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours} h ago`
+  const days = Math.round(hours / 24)
+  return days === 1 ? 'yesterday' : `${days} days ago`
+}
+
+async function jumpToSynced() {
+  const offer = syncOffer
+  hideSyncBar()
+  if (!offer || !book) return
+  // The same file on both devices, so the CFI should resolve; the share read is the fallback.
+  await book.view.goTo(offer.cfi).catch(() => book?.view.goToFraction(offer.fraction))
+}
+
+function hideSyncBar() {
+  syncOffer = null
+  $('sync-bar').hidden = true
+}
+
+/** Sends the position if it moved; failures stay quiet and are retried next time. */
+async function pushSync() {
+  const location = book?.view.lastLocation
+  const document = syncDocument
+  if (!syncDirty || !location || !document) return
+  syncDirty = false
+  await invoke('sync_push', { document, cfi: location.cfi, fraction: location.fraction }).catch(e => {
+    // Retried next time, unless another book has opened meanwhile.
+    if (syncDocument === document) syncDirty = true
+    console.warn('sync:', e)
+  })
 }
 
 // ---- Bookmarks --------------------------------------------------------------
@@ -283,6 +369,10 @@ async function addToLibrary(mode: AddMode) {
 }
 
 function closeBook() {
+  void pushSync()
+  syncDocument = null
+  syncDirty = false
+  hideSyncBar()
   hideOffer()
   book?.destroy()
   book = null
@@ -499,7 +589,9 @@ function onRelocate(location: Relocation) {
   $('progress-label').textContent = tocItem?.label ? `${percent}% · ${tocItem.label}` : `${percent}%`
   highlightToc(tocItem?.href)
   updateBookmarkButton()
+  if (restoring) return
   scheduleSave({ fingerprint, position: { cfi, fraction } })
+  if (!noSave) syncDirty = true
 }
 
 function highlightToc(href: string | undefined) {
@@ -604,6 +696,11 @@ async function handleEscape() {
  */
 function handleBack() {
   if (closeTopLayer()) return
+  // In the catalogs, Back goes up a folder, and from the top to the books.
+  if (!book && !$('catalog-view').hidden) {
+    if (!catalogView.back()) showTab('books')
+    return
+  }
   void invoke(book ? 'show_library' : 'leave_app').catch(console.error)
 }
 
@@ -727,6 +824,18 @@ const settingsPanel = createSettingsPanel(
     organizeLibrary: () => void openOrganize(),
   },
 )
+// The catalogs (OPDS servers) are edited at the end of the settings.
+const sourcesPanel = createSourcesPanel($('settings').appendChild(el('div', { className: 'field sources-field' })))
+const catalogView = createCatalogView({ library: () => libraryBooks, openSettings })
+
+/** The library window's two tabs: the books on disk, and the catalogs to get more from. */
+function showTab(tab: 'books' | 'catalogs') {
+  $('books-view').hidden = tab !== 'books'
+  $('catalog-view').hidden = tab !== 'catalogs'
+  $('tab-books').setAttribute('aria-selected', String(tab === 'books'))
+  $('tab-catalogs').setAttribute('aria-selected', String(tab === 'catalogs'))
+  if (tab === 'catalogs') void catalogView.show()
+}
 
 const resolvedTheme = (): ResolvedTheme =>
   settings.theme === 'system' ? (systemDark.matches ? 'dark' : 'light') : settings.theme
@@ -869,7 +978,18 @@ $('offer-never').addEventListener('click', () => {
   void invoke('decline_library', { fingerprint }).catch(console.error)
 })
 $('organize-apply').addEventListener('click', () => void applyOrganize())
+$('sync-jump').addEventListener('click', () => void jumpToSynced())
+$('sync-stay').addEventListener('click', hideSyncBar)
+setInterval(() => void pushSync(), SYNC_EVERY_MS)
+// Going to the background (minimising, switching apps on the phone) sends the position too.
+document.addEventListener('visibilitychange', () => document.hidden && void pushSync())
 $('organize-cancel').addEventListener('click', closePanels)
+$('tab-books').addEventListener('click', () => showTab('books'))
+$('tab-catalogs').addEventListener('click', () => showTab('catalogs'))
+appWindow.listen('catalogs-changed', () => {
+  void sourcesPanel.refresh()
+  if (!$('catalog-view').hidden) void catalogView.show()
+})
 appWindow.listen('library-changed', () => {
   libraryBooks = []
   if (!book) void showLibraryScreen()
@@ -896,7 +1016,8 @@ appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
 })
 // flushSave never throws, so a failed save cannot keep the window open.
 appWindow.onCloseRequested(async () => {
-  await Promise.all([flushSave(), flushSettings()])
+  const lastPush = Promise.race([pushSync(), new Promise(done => setTimeout(done, SYNC_ON_CLOSE_MS))])
+  await Promise.all([flushSave(), flushSettings(), lastPush])
 })
 systemDark.addEventListener('change', () => settings.theme === 'system' && restyle())
 

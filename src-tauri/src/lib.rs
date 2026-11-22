@@ -1,6 +1,8 @@
 // Android uses only `Launch`: it has no command line.
 #[cfg_attr(mobile, allow(dead_code))]
+mod catalog;
 mod cli;
+mod clock;
 #[cfg(desktop)]
 #[cfg_attr(not(windows), path = "console_stdout.rs")]
 mod console;
@@ -8,9 +10,12 @@ mod console;
 #[cfg_attr(mobile, allow(dead_code))]
 mod data_dir;
 mod fingerprint;
+mod kosync;
 mod library;
 mod metadata;
 mod naming;
+mod net;
+mod opds;
 mod paths;
 #[cfg_attr(not(windows), path = "register_unsupported.rs")]
 mod register;
@@ -21,10 +26,12 @@ mod platform;
 mod store;
 #[cfg(desktop)]
 mod version;
+mod xml;
 
 #[cfg(desktop)]
 use cli::Command;
 use cli::Launch;
+use clock::now_ms;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -191,9 +198,15 @@ fn read_book(window: Window, windows: State<ReaderWindows>) -> Result<Response, 
 /// Takes the fingerprint from the frontend so a position that is still
 /// pending when another book replaces it is saved under the right book.
 #[tauri::command(async)]
-fn save_position(store: State<Store>, fingerprint: String, position: Position) -> Result<(), String> {
+fn save_position(store: State<Store>, fingerprint: String, mut position: Position) -> Result<(), String> {
     store
         .update(|s| {
+            // The time says when the reader moved there (sync compares it), so
+            // saving the same place again (a reflow) keeps it.
+            position.time = match s.positions.get(&fingerprint) {
+                Some(old) if old.cfi == position.cfi => old.time,
+                _ => now_ms(),
+            };
             s.positions.insert(fingerprint, position);
         })
         .map_err(|e| e.to_string())
@@ -381,8 +394,11 @@ fn library_root(store: &Store) -> Result<PathBuf, String> {
     store.read(|s| s.library.clone()).ok_or_else(|| "No library folder is set".into())
 }
 
+/// The app's cache folder, next to its settings.
+const CACHE_DIR: &str = "breader-cache";
+
 fn library_cache(store: &Store) -> library::Cache {
-    library::Cache::new(store.dir().join("breader-cache"))
+    library::Cache::new(store.dir().join(CACHE_DIR))
 }
 
 #[derive(Serialize)]
@@ -513,13 +529,24 @@ fn add_to_library(
     mode: AddMode,
 ) -> Result<Added, String> {
     let source = saving_window(&windows, &window)?;
-    let root = library_root(&store)?;
-    let err = |e: std::io::Error| format!("{}: {e}", paths::file_name(&source));
-    let format = metadata::Format::of(&source).ok_or("Not a book file")?;
-    let (fingerprint, meta) = library::read_book(&source).map_err(err)?;
-    // The same book may already be in the library under another name.
+    let (added, fingerprint) = put_in_library(&store, &books, &source, mode)?;
+    let target = library::join(&library_root(&store)?, &added.path);
+    windows.set_path(window.label(), target.clone());
+    repath_recent(&store, &[(fingerprint, target)])?;
+    let _ = window.emit("library-updated", ());
+    Ok(added)
+}
+
+/// Moves or copies the book file `source` into the library under the naming
+/// template. If the library already holds the same book (under any name),
+/// nothing is moved or copied. Also returns the book's fingerprint.
+fn put_in_library(store: &Store, books: &LibraryBooks, source: &Path, mode: AddMode) -> Result<(Added, String), String> {
+    let root = library_root(store)?;
+    let err = |e: std::io::Error| format!("{}: {e}", paths::file_name(source));
+    let format = metadata::Format::of(source).ok_or("Not a book file")?;
+    let (fingerprint, meta) = library::read_book(source).map_err(err)?;
     let known = books
-        .snapshot(&store, &root)
+        .snapshot(store, &root)
         .into_iter()
         .find(|e| e.fingerprint == fingerprint && e.absolute(&root).is_file())
         .map(|e| naming::Placement::Exists(e.path));
@@ -530,23 +557,259 @@ fn add_to_library(
             naming::place(&root, &wanted, &fingerprint, &Default::default()).map_err(err)?
         }
     };
-    let (rel, existed) = match placement {
+    let added = match placement {
         naming::Placement::Free(rel) => {
             let target = library::join(&root, &rel);
             match mode {
-                AddMode::Move => naming::move_file(&source, &target),
-                AddMode::Copy => naming::copy_file(&source, &target),
+                AddMode::Move => naming::move_file(source, &target),
+                AddMode::Copy => naming::copy_file(source, &target),
             }
             .map_err(err)?;
-            (rel, false)
+            Added { path: rel, existed: false }
         }
-        naming::Placement::Exists(rel) => (rel, true),
+        naming::Placement::Exists(rel) => Added { path: rel, existed: true },
     };
-    let target = library::join(&root, &rel);
-    windows.set_path(window.label(), target.clone());
-    repath_recent(&store, &[(fingerprint, target)])?;
-    let _ = window.emit("library-updated", ());
-    Ok(Added { path: rel, existed })
+    Ok((added, fingerprint))
+}
+
+// ---- Progress sync (KOSync) -----------------------------------------------------
+
+/// The source that syncs progress, if one is set.
+fn sync_source(store: &Store) -> Option<catalog::Source> {
+    store.read(|s| s.sources.iter().find(|source| source.sync).cloned())
+}
+
+/// This install's id for the sync server, made once.
+fn device_id(store: &Store) -> Result<String, String> {
+    let id = store.read(|s| s.device_id.clone());
+    if !id.is_empty() {
+        return Ok(id);
+    }
+    let made = format!("{:016x}", now_ms() ^ u64::from(std::process::id()).rotate_left(32));
+    // Checked again under the store's lock: a pull and a push may both get here.
+    let mut id = String::new();
+    store
+        .update(|s| {
+            if s.device_id.is_empty() {
+                s.device_id = made;
+            }
+            id = s.device_id.clone();
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+const DEVICE_NAME: &str = if cfg!(mobile) {
+    "Book Reader on Android"
+} else if cfg!(windows) {
+    "Book Reader on Windows"
+} else {
+    "Book Reader"
+};
+
+/// The window's book's id on the sync server, when its progress syncs
+/// (there is a sync source, and the window keeps positions).
+#[tauri::command(async)]
+fn sync_document(window: Window, store: State<Store>) -> Result<Option<String>, String> {
+    let launch = window.state::<ReaderWindows>().get(window.label());
+    let (Some(path), false, Some(_)) = (launch.file, launch.no_save, sync_source(&store)) else { return Ok(None) };
+    kosync::document_id(&path).map(Some).map_err(|e| e.to_string())
+}
+
+/// A newer position from another device, offered when a book opens.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncOffer {
+    cfi: String,
+    fraction: f64,
+    device: String,
+    /// When the other device was there (ms since the Unix epoch).
+    time: u64,
+}
+
+/// What the sync server's position means for the book just opened.
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct SyncState {
+    /// A newer position from another device, to offer.
+    offer: Option<SyncOffer>,
+    /// The position here is newer than the server's (a push that didn't get
+    /// through, or reading while offline): send it.
+    push: bool,
+}
+
+/// Asks the sync server about a book (`document` from `sync_document`; its
+/// local position under `fingerprint`). A server position is offered only if
+/// it comes from another device, differs from the one here and is newer.
+#[tauri::command(async)]
+fn sync_pull(store: State<Store>, document: String, fingerprint: String) -> Result<SyncState, String> {
+    let Some(source) = sync_source(&store) else { return Ok(SyncState::default()) };
+    let remote = kosync::pull(&source, &document)?;
+    let local = store.read(|s| s.positions.get(&fingerprint).cloned());
+    Ok(compare_positions(local.as_ref(), remote, &device_id(&store)?))
+}
+
+/// The newer position wins: the server's is offered when it comes from
+/// another device; the local one is pushed when the server lags behind it.
+fn compare_positions(local: Option<&Position>, remote: Option<kosync::Progress>, own_device: &str) -> SyncState {
+    let Some(remote) = remote else { return SyncState { offer: None, push: local.is_some() } };
+    let time = remote.timestamp * 1000;
+    let here = local.map_or(0, |here| here.time);
+    if local.is_some_and(|here| here.cfi == remote.progress) {
+        return SyncState::default();
+    }
+    if here >= time || remote.device_id == own_device {
+        return SyncState { offer: None, push: local.is_some() && here > time };
+    }
+    SyncState { offer: Some(SyncOffer { cfi: remote.progress, fraction: remote.percentage, device: remote.device, time }), push: false }
+}
+
+/// Sends a book's position to the sync server.
+#[tauri::command(async)]
+fn sync_push(store: State<Store>, document: String, cfi: String, fraction: f64) -> Result<(), String> {
+    let Some(source) = sync_source(&store) else { return Ok(()) };
+    let device_id = device_id(&store)?;
+    kosync::push(&source, &kosync::Update { document: &document, progress: &cfi, percentage: fraction, device: DEVICE_NAME, device_id: &device_id })
+}
+
+// ---- Catalogs -----------------------------------------------------------------
+
+/// Search URL templates by source id, read once from each catalog.
+#[derive(Default)]
+struct SearchTemplates(Mutex<HashMap<String, String>>);
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceView {
+    #[serde(flatten)]
+    source: catalog::Source,
+    has_password: bool,
+}
+
+#[tauri::command(async)]
+fn catalog_sources(store: State<Store>) -> Vec<SourceView> {
+    let sources = store.read(|s| s.sources.clone());
+    sources.into_iter().map(|source| SourceView { has_password: platform::password(&source.id).is_some(), source }).collect()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceInput {
+    /// Missing for a new source.
+    id: Option<String>,
+    name: String,
+    url: String,
+    user: String,
+    /// A new password; missing or empty keeps the one kept already.
+    password: Option<String>,
+    sync: bool,
+}
+
+#[derive(Serialize)]
+struct SavedSource {
+    id: String,
+    /// Said when the address is plain HTTP across the internet.
+    warning: Option<String>,
+}
+
+/// Adds or changes a catalog source, after finding its OPDS catalog (which
+/// also checks the login). One source at most syncs progress.
+#[tauri::command(async)]
+fn save_catalog_source(
+    app: AppHandle,
+    store: State<Store>,
+    templates: State<SearchTemplates>,
+    input: SourceInput,
+) -> Result<SavedSource, String> {
+    let url = catalog::check_url(&input.url)?;
+    let id = input.id.filter(|id| !id.is_empty()).unwrap_or_else(|| format!("{:x}", clock::now_nanos()));
+    let name = match input.name.trim() {
+        "" => url.host_str().unwrap_or("Catalog").to_string(),
+        name => name.to_string(),
+    };
+    let mut source = catalog::Source { id: id.clone(), name, url: url.to_string(), user: input.user.trim().to_string(), sync: input.sync };
+    // The reader types the server's address; the catalog may be under /opds.
+    // The new password is tried first and kept only if the server takes it.
+    let password = input.password.filter(|p| !p.is_empty());
+    let url = catalog::discover(&source, catalog::login_with(&source, password.as_deref()).as_ref())?;
+    source.url = url.to_string();
+    if let Some(password) = password {
+        platform::save_password(&id, &password)?;
+    }
+    store
+        .update(|s| {
+            if source.sync {
+                s.sources.iter_mut().for_each(|other| other.sync = false);
+            }
+            match s.sources.iter_mut().find(|other| other.id == source.id) {
+                Some(existing) => *existing = source,
+                None => s.sources.push(source),
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    templates.0.lock().unwrap().remove(&id);
+    let _ = app.emit("catalogs-changed", ());
+    Ok(SavedSource { id, warning: catalog::insecure_warning(&url) })
+}
+
+#[tauri::command(async)]
+fn delete_catalog_source(app: AppHandle, store: State<Store>, id: String) -> Result<(), String> {
+    store.update(|s| s.sources.retain(|source| source.id != id)).map_err(|e| e.to_string())?;
+    platform::forget_password(&id);
+    let _ = app.emit("catalogs-changed", ());
+    Ok(())
+}
+
+fn source_by_id(store: &Store, id: &str) -> Result<catalog::Source, String> {
+    store.read(|s| s.sources.iter().find(|source| source.id == id).cloned()).ok_or_else(|| "That catalog was removed".into())
+}
+
+/// A page of a catalog: its root, or `url` on its server.
+#[tauri::command(async)]
+fn catalog_feed(store: State<Store>, id: String, url: Option<String>) -> Result<opds::Feed, String> {
+    catalog::feed(&source_by_id(&store, &id)?, url.as_deref())
+}
+
+#[tauri::command(async)]
+fn catalog_search(store: State<Store>, templates: State<SearchTemplates>, id: String, query: String) -> Result<opds::Feed, String> {
+    let source = source_by_id(&store, &id)?;
+    let known = templates.0.lock().unwrap().get(&id).cloned();
+    let template = match known {
+        Some(template) => template,
+        None => {
+            let template = catalog::search_template(&source)?;
+            templates.0.lock().unwrap().insert(id, template.clone());
+            template
+        }
+    };
+    catalog::search(&source, &template, &query)
+}
+
+#[tauri::command(async)]
+fn catalog_image(store: State<Store>, id: String, url: String) -> Result<Response, String> {
+    catalog::image(&source_by_id(&store, &id)?, &url).map(Response::new)
+}
+
+/// Downloads a book from a catalog into the library, under the naming
+/// template; a book the library already holds isn't added twice.
+#[tauri::command(async)]
+fn catalog_download(
+    app: AppHandle,
+    store: State<Store>,
+    books: State<LibraryBooks>,
+    id: String,
+    url: String,
+    format: opds::FileFormat,
+) -> Result<Added, String> {
+    let source = source_by_id(&store, &id)?;
+    let downloads = store.dir().join(CACHE_DIR).join("downloads");
+    let file = catalog::download(&source, &url, format, &downloads)?;
+    let result = put_in_library(&store, &books, &file, AddMode::Move);
+    // Left behind when the library already had the book, or on a failure.
+    let _ = std::fs::remove_file(&file);
+    let (added, _) = result?;
+    let _ = app.emit("library-updated", ());
+    Ok(added)
 }
 
 /// Points recent-list entries at the books' new places (by fingerprint), in one write.
@@ -779,6 +1042,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(ReaderWindows::default())
         .manage(LibraryBooks::default())
+        .manage(SearchTemplates::default())
         .invoke_handler(tauri::generate_handler![
             current_book,
             read_book,
@@ -802,6 +1066,16 @@ pub fn run() {
             open_library_book,
             show_library,
             leave_app,
+            catalog_sources,
+            save_catalog_source,
+            delete_catalog_source,
+            catalog_feed,
+            catalog_search,
+            catalog_image,
+            catalog_download,
+            sync_document,
+            sync_pull,
+            sync_push,
             add_to_library,
             decline_library,
             get_bookmarks,
@@ -878,7 +1152,40 @@ fn report(result: std::io::Result<()>, success: &str) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::theme_script;
+    use super::{compare_positions, kosync::Progress, theme_script, Position};
+
+    fn here(cfi: &str, time: u64) -> Position {
+        Position { cfi: cfi.into(), fraction: 0.5, time }
+    }
+
+    fn server(cfi: &str, device_id: &str, timestamp: u64) -> Progress {
+        Progress { progress: cfi.into(), percentage: 0.6, device: "phone".into(), device_id: device_id.into(), timestamp }
+    }
+
+    #[test]
+    fn a_newer_position_from_another_device_is_offered() {
+        let state = compare_positions(Some(&here("a", 1_000)), Some(server("b", "phone", 2)), "pc");
+        assert_eq!(state.offer.map(|o| o.cfi).as_deref(), Some("b"));
+        assert!(!state.push);
+        let state = compare_positions(None, Some(server("b", "phone", 2)), "pc");
+        assert!(state.offer.is_some(), "a book not read here yet");
+    }
+
+    #[test]
+    fn a_newer_local_position_is_pushed() {
+        let state = compare_positions(Some(&here("a", 3_000)), Some(server("b", "phone", 2)), "pc");
+        assert!(state.offer.is_none() && state.push);
+        let state = compare_positions(Some(&here("a", 1)), None, "pc");
+        assert!(state.offer.is_none() && state.push, "the server has nothing yet");
+    }
+
+    #[test]
+    fn the_same_place_or_this_devices_own_position_changes_nothing() {
+        let state = compare_positions(Some(&here("b", 1_000)), Some(server("b", "phone", 2)), "pc");
+        assert!(state.offer.is_none() && !state.push);
+        let state = compare_positions(Some(&here("a", 1_000)), Some(server("b", "pc", 2)), "pc");
+        assert!(state.offer.is_none() && !state.push);
+    }
 
     #[test]
     fn theme_script_uses_known_themes() {

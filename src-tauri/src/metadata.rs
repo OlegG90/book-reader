@@ -3,8 +3,7 @@
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use quick_xml::events::{BytesStart, Event};
-use quick_xml::Reader;
+use crate::xml::{attr, invalid, last_two, local_name, walk_xml, Xml};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek};
@@ -140,10 +139,6 @@ pub fn read(path: &Path) -> io::Result<Metadata> {
     }
 }
 
-fn invalid(message: impl ToString) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message.to_string())
-}
-
 fn zip_error(e: zip::result::ZipError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, e)
 }
@@ -153,69 +148,6 @@ fn read_entry<R: Read + Seek>(zip: &mut ZipArchive<R>, name: &str) -> io::Result
     let mut bytes = Vec::new();
     entry.read_to_end(&mut bytes)?;
     Ok(bytes)
-}
-
-// ---- XML --------------------------------------------------------------------
-
-enum Xml<'a> {
-    /// An element starts; the stack holds the local names of its ancestors.
-    Start(&'a [String], &'a BytesStart<'a>),
-    /// Text inside the innermost element of the stack, entities resolved.
-    Text(&'a [String], &'a str),
-}
-
-/// Walks an XML document, reporting element starts and text.
-fn walk_xml(xml: &str, mut on: impl FnMut(Xml)) -> io::Result<()> {
-    let mut reader = Reader::from_str(xml);
-    let mut stack: Vec<String> = Vec::new();
-    loop {
-        match reader.read_event().map_err(invalid)? {
-            Event::Start(e) => {
-                on(Xml::Start(&stack, &e));
-                stack.push(local_name(&e));
-            }
-            Event::Empty(e) => on(Xml::Start(&stack, &e)),
-            Event::End(_) => {
-                stack.pop();
-            }
-            Event::Text(t) => on(Xml::Text(&stack, &t.decode().map_err(invalid)?)),
-            Event::CData(t) => on(Xml::Text(&stack, &t.decode().map_err(invalid)?)),
-            Event::GeneralRef(r) => {
-                let named = r.decode().map_err(invalid)?;
-                let c = r.resolve_char_ref().ok().flatten().or(match named.as_ref() {
-                    "amp" => Some('&'),
-                    "lt" => Some('<'),
-                    "gt" => Some('>'),
-                    "quot" => Some('"'),
-                    "apos" => Some('\''),
-                    _ => None,
-                });
-                if let Some(c) = c {
-                    on(Xml::Text(&stack, c.encode_utf8(&mut [0; 4])));
-                }
-            }
-            Event::Eof => return Ok(()),
-            _ => {}
-        }
-    }
-}
-
-fn local_name(e: &BytesStart) -> String {
-    String::from_utf8_lossy(e.local_name().as_ref()).into_owned()
-}
-
-/// An attribute by local name (any namespace prefix).
-fn attr(e: &BytesStart, name: &str) -> Option<String> {
-    e.attributes()
-        .flatten()
-        .find(|a| a.key.local_name().as_ref() == name.as_bytes())
-        .and_then(|a| a.normalized_value(quick_xml::XmlVersion::Implicit1_0).ok().map(|v| v.into_owned()))
-}
-
-/// The element's parent and own name, from a text event's stack.
-fn last_two(stack: &[String]) -> (Option<&str>, Option<&str>) {
-    let parent = stack.len().checked_sub(2).map(|i| stack[i].as_str());
-    (parent, stack.last().map(String::as_str))
 }
 
 // ---- FB2 --------------------------------------------------------------------
@@ -291,6 +223,7 @@ fn fb2(bytes: &[u8]) -> io::Result<Metadata> {
                 _ => {}
             }
         }
+        Xml::End(..) => {}
     })?;
 
     meta.book.authors.retain(|a| !a.first.is_empty() || !a.last.is_empty());
@@ -390,6 +323,7 @@ fn epub<R: Read + Seek>(file: R) -> io::Result<Metadata> {
             (Some("metadata"), Some("meta")) if in_collection => collection.get_or_insert_with(String::new).push_str(text),
             _ => {}
         },
+        Xml::End(..) => {}
     })?;
 
     meta.book.title = titles.first().map(|t| clean(t)).unwrap_or_default();

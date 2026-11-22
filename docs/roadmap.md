@@ -14,10 +14,11 @@
    - The debug APK is ~140 MB (debug symbols); its signing key changes per CI run, so a reinstall needs `adb uninstall` first. A stable release key comes with stage 4.
    - The page is drawn edge to edge: safe-area insets keep it clear of the system bars.
    - Pages turn with a swipe (foliate-js's own gesture). Tapping a page edge, which turns pages with a mouse on Windows, does nothing on the phone yet: tap zones come in stage 4.
-3. **Servers** (on Windows)
-   - OPDS sources (Basic / Digest auth, credentials in the OS store), catalog browsing, search, download into the library.
-   - KOSync progress sync against CWA.
-4. **Full Android version** — library, tap zones / swipe / volume keys, full screen, keep screen on, servers and sync with Windows, signed APK.
+3. **Servers** (on Windows) — done (21.11.2026), checked against CWA and a Calibre Content Server:
+   - OPDS sources (Basic / Digest auth, passwords in the Windows Credential Manager), catalog browsing, search, download into the library.
+   - KOSync progress sync against CWA (two profiles on one PC stood in for two devices).
+   - Findings: readers type a server's address, not its `/opds` path, so saving discovers the catalog; CWA's KOSync takes the plain login over Basic and serves FB2 as `text/xml`; the TLS library (rustls/ring) needs clang on Windows ARM64 (LLVM) and the NDK's clang for Android, so Android compile errors now show up in CI only.
+4. **Full Android version** — library, volume keys, full screen, keep screen on, servers and sync with Windows (catalog passwords in the Android Keystore), choosing another library folder, adding books from outside it, signed APK. Done already: one window and Back, tap zones, a top bar for a finger.
 5. **Shared core** — extract the rendering core shared with Simple Reader once its API has survived Android.
 6. **Phase "e"** — read status and shelves in CWA, metadata editing through the Calibre Content Server.
 
