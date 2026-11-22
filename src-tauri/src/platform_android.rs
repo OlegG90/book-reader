@@ -5,10 +5,11 @@
 //!   on, the library is a plain folder and the rest of the app (scanning,
 //!   Organize) works on it as on Windows;
 //! - books from outside the library ("Open with", "Share", the book picker),
-//!   copied into the app's cache and opened from there;
+//!   copied into the app's own storage and opened from there;
 //! - catalog passwords, encrypted with a key in the Android Keystore;
 //! - reading: screen on, status bar hidden, volume keys.
 
+use crate::Outside;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -92,14 +93,6 @@ pub fn check_library_access(_app: &AppHandle) -> Result<(), String> {
 }
 
 // ---- Books from outside the library ----------------------------------------------
-
-/// A book from outside the library: a copy in the app's cache, and the
-/// document it came from (to delete when the reader moves it in).
-#[derive(Deserialize)]
-pub struct Outside {
-    pub path: PathBuf,
-    pub original: Option<String>,
-}
 
 /// What the plugin answers: the copy and its `content://` source, or nothing.
 #[derive(Deserialize)]

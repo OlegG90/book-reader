@@ -92,7 +92,7 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 - After a move the window keeps showing the book from its new path.
 - The reading position survives copying and moving: book identity is a content fingerprint, not a path (as in Simple Reader).
 - If no library folder has been chosen yet (the app was first started on a book), the bar offers **Choose library folder** instead, which opens the library's first-run choice.
-- **Android:** books come from **Open with** / **Share** (EPUB and FB2; FB2 has no settled MIME type, so `application/octet-stream` is accepted too) and from **Add book…** in the library (Android's document picker). Android hands over a `content://` document, not a path, so the book is copied into the app's cache and opened from there, with the same bar. Copy and Move both put the copy into the library; Move then also deletes the original where Android allows it (a document from another app's storage may stay).
+- **Android:** books come from **Open with** / **Share** (EPUB and FB2; FB2 has no settled MIME type, so `application/octet-stream` is accepted too) and from **Add book…** in the library (Android's document picker). Android hands over a `content://` document, not a path, so the book is copied into the app's own storage (the 20 newest copies are kept, so **Not now** and the recent books keep working) and opened from there, with the same bar. Copy and Move both put the copy into the library; Move then also deletes the original where Android allows it, and says so when it can't (a document from another app's storage may stay, and after a restart the original is no longer known). When the library already holds the book, nothing is deleted.
 
 ## Servers
 
@@ -102,7 +102,7 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 - The reader types the **server's address** (`http://host:8083`); saving finds the OPDS catalog behind it (the address itself, else `/opds`, where CWA, Calibre-Web and the Calibre Content Server keep it) and keeps that address. A refused login is reported on saving.
 - One source is marked as the **progress-sync source** (KOSync; in practice CWA).
 - Authentication: HTTP Basic sent with the first request (what CWA expects), Digest when the server answers with a Digest challenge (the Calibre Content Server).
-- Passwords are stored in the OS credential store: Windows Credential Manager now, Android Keystore with the full Android version. The config file stays portable and holds no secrets.
+- Passwords are stored in the OS credential store: the Windows Credential Manager, and on Android a key in the Android Keystore that encrypts them in the app's private storage. The config file stays portable and holds no secrets.
 - Plain `http://` is allowed. Saving a source whose host is outside private ranges, single-label home-network names, `.local` / `.lan` and Tailscale (`100.64.0.0/10`, `*.ts.net`) shows a warning.
 - The app only ever requests addresses on a source's own server (scheme, host and port), so a feed or a book can't make it fetch anything else.
 
@@ -147,7 +147,7 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 - **Removed from Simple Reader:** Markdown support with marked, Mermaid and highlight.js.
 - **Native pieces** (All files access, credential stores, keep-screen-on, volume keys) via small app-level Tauri plugins in Kotlin (`SystemPlugin.kt`) called from Rust (`platform_android.rs`).
 - **One crate for both platforms:** `src-tauri` builds the Windows exe and the Android library; desktop-only parts (file associations, the console, single-instance, the command line, window placement) are behind `cfg(desktop)` / `cfg(windows)`.
-- **Build:** Windows locally, `npm run build:win` → portable `breader.exe`. Android in GitHub Actions only (workflow *Android*): the Android SDK and NDK have no Windows-on-ARM64 builds. Each push that touches the app builds an arm64 release APK (an artifact), signed with a personal release key kept in the repository's secrets (`ANDROID_KEYSTORE`, `ANDROID_KEYSTORE_PASSWORD`; a backup copy lives outside the repo), so a new APK installs over the previous one with `adb install -r`. The Gradle project (`src-tauri/gen/android`) was made by `tauri android init` and is kept in the repo, changed by hand from there.
+- **Build:** Windows locally, `npm run build:win` → portable `breader.exe`. Android in GitHub Actions only (workflow *Android*): the Android SDK and NDK have no Windows-on-ARM64 builds. Each push that touches the app builds an arm64 release APK (an artifact), signed with a personal release key kept in the repository's secrets (`ANDROID_KEYSTORE`, `ANDROID_KEYSTORE_PASSWORD`; alias `book-reader`, one password for the store and the key; a backup copy lives outside the repo; without the secrets the build fails), so a new APK installs over the previous one with `adb install -r`. The Gradle project (`src-tauri/gen/android`) was made by `tauri android init` and is kept in the repo, changed by hand from there.
 - **Version control:** private GitHub repository `OlegG90/book-reader`.
 
 ## Testing

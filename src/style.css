@@ -76,7 +76,7 @@ body {
   inset: 0;
 }
 
-/* What the phone can't do yet (main.ts marks the page on Android) */
+/* What only the other platform does (main.ts marks the page on Android) */
 .android .desktop-only,
 :root:not(.android) .android-only {
   display: none !important;

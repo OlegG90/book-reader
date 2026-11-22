@@ -348,12 +348,20 @@ fn open_incoming(window: Window, originals: State<Originals>) -> Result<(), Stri
     Ok(())
 }
 
+/// A book from outside the library, as the platform hands it over: on the
+/// desktop the file itself, on a phone a copy in the app's storage and the
+/// document it came from (deleted when the reader moves the book in).
+pub struct Outside {
+    pub path: PathBuf,
+    pub original: Option<String>,
+}
+
 /// The documents that books from outside were copied from on a phone (the
-/// copy in the app's cache → its `content://` original), for Move.
+/// copy → its `content://` original), for Move.
 #[derive(Default)]
 struct Originals(Mutex<HashMap<PathBuf, String>>);
 
-fn open_outside(window: &Window, originals: &Originals, book: platform::Outside) {
+fn open_outside(window: &Window, originals: &Originals, book: Outside) {
     if let Some(original) = book.original {
         originals.0.lock().unwrap().insert(book.path.clone(), original);
     }
@@ -521,6 +529,8 @@ struct Added {
     path: String,
     /// The library already held this book, so nothing was copied or moved.
     existed: bool,
+    /// Moved, but the original (a phone's document) couldn't be deleted.
+    original_kept: bool,
 }
 
 #[derive(Deserialize, Clone, Copy)]
@@ -555,13 +565,10 @@ fn add_to_library(
     let source = saving_window(&windows, &window)?;
     // A phone's book from outside is the app's own copy: it moves in, and
     // Move then deletes the document it came from.
-    let original = originals.0.lock().unwrap().get(&source).cloned();
-    let (added, fingerprint) = put_in_library(&store, &books, &source, if original.is_some() { AddMode::Move } else { mode })?;
-    if let Some(original) = original {
-        originals.0.lock().unwrap().remove(&source);
-        if matches!(mode, AddMode::Move) {
-            platform::delete_original(&original);
-        }
+    let original = originals.0.lock().unwrap().remove(&source);
+    let (mut added, fingerprint) = put_in_library(&store, &books, &source, if original.is_some() { AddMode::Move } else { mode })?;
+    if let (Some(original), AddMode::Move, false) = (original, mode, added.existed) {
+        added.original_kept = !platform::delete_original(&original);
     }
     let target = library::join(&library_root(&store)?, &added.path);
     windows.set_path(window.label(), target.clone());
@@ -598,9 +605,9 @@ fn put_in_library(store: &Store, books: &LibraryBooks, source: &Path, mode: AddM
                 AddMode::Copy => naming::copy_file(source, &target),
             }
             .map_err(err)?;
-            Added { path: rel, existed: false }
+            Added { path: rel, existed: false, original_kept: false }
         }
-        naming::Placement::Exists(rel) => Added { path: rel, existed: true },
+        naming::Placement::Exists(rel) => Added { path: rel, existed: true, original_kept: false },
     };
     Ok((added, fingerprint))
 }

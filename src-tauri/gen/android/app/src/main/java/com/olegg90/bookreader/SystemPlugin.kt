@@ -58,8 +58,10 @@ class UriArgs {
  *   All files access starts there. Another folder comes from Android's folder
  *   picker, turned back into a path.
  * - Books from outside the library ("Open with", "Share", the book picker)
- *   arrive as content:// documents; they are copied into the app's cache and
- *   opened from there, and the original is remembered so Move can delete it.
+ *   arrive as content:// documents; they are copied into the app's own
+ *   storage (the newest few are kept, so "Not now" and the recent books keep
+ *   working) and opened from there, and the original is remembered so Move
+ *   can delete it.
  * - Catalog passwords, encrypted with a key kept in the Android Keystore.
  * - Reading: the screen stays on, the status bar hides, volume keys turn pages.
  */
@@ -72,14 +74,16 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
 
     private const val KEY_ALIAS = "catalog-passwords"
     private const val PREFS = "catalog-passwords"
-    private const val INCOMING = "incoming"
+    private const val OUTSIDE = "outside"
+    /** Copies of books from outside kept at once; older ones are removed. */
+    private const val KEEP_OUTSIDE = 20
   }
 
   /** Volume keys turn pages (a setting, and only while a book is open). */
   @Volatile var volumeKeys = false
 
   /** A book handed to the app ("Open with", "Share") and not yet opened. */
-  private var pending: Intent? = null
+  @Volatile private var pending: Intent? = null
 
   override fun load(webView: WebView) {
     instance = this
@@ -93,6 +97,8 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
   /** Keeps a book intent for `takeIncoming`; false for any other intent. */
   private fun takeBook(intent: Intent?): Boolean {
     if (intent == null || bookUri(intent) == null) return false
+    // Reopened from the recent apps: the book was handed over before.
+    if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return false
     pending = intent
     // Handled once: a recreated activity must not open it again.
     activity.intent = Intent(Intent.ACTION_MAIN)
@@ -106,7 +112,7 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
     else -> null
   }
 
-  /** Called by MainActivity: true when the key turned a page. */
+  /** Called by MainActivity: true when the key turns pages (one per press). */
   fun volumeKey(event: KeyEvent): Boolean {
     if (!volumeKeys) return false
     val direction = when (event.keyCode) {
@@ -114,7 +120,7 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
       KeyEvent.KEYCODE_VOLUME_UP -> "prev"
       else -> return false
     }
-    if (event.action == KeyEvent.ACTION_DOWN) trigger("volumeKey", JSObject().put("direction", direction))
+    if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) trigger("volumeKey", JSObject().put("direction", direction))
     return true
   }
 
@@ -156,11 +162,16 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
   fun folderPicked(invoke: Invoke, result: ActivityResult) {
     val uri = result.data?.data
     if (result.resultCode != Activity.RESULT_OK || uri == null) return invoke.resolve(JSObject())
-    // "primary:Documents/Books": a folder on the phone's own storage.
-    val id = DocumentsContract.getTreeDocumentId(uri)
+    // The phone's own storage: "primary:Documents/Books" from its root, or
+    // "home:Books" from the Documents shortcut.
+    val id = if (uri.authority == "com.android.externalstorage.documents") DocumentsContract.getTreeDocumentId(uri) else ""
     val (volume, path) = id.split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
-    if (volume != "primary") return invoke.reject("Choose a folder on the phone's own storage (memory cards are not supported)")
-    val folder = File(Environment.getExternalStorageDirectory(), path)
+    val root = when (volume) {
+      "primary" -> Environment.getExternalStorageDirectory()
+      "home" -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+      else -> return invoke.reject("Choose a folder in the phone's own storage (not a memory card or another app's storage)")
+    }
+    val folder = File(root, path)
     invoke.resolve(JSObject().put("path", folder.absolutePath))
   }
 
@@ -180,7 +191,7 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
     Thread { resolveCopy(invoke, uri) }.start()
   }
 
-  /** The book handed to the app, copied into the cache: `{ path, uri }`, or `{}`. */
+  /** The book handed to the app, copied in: `{ path, uri }`, or `{}`. */
   @Command
   fun takeIncoming(invoke: Invoke) {
     val intent = pending ?: return invoke.resolve(JSObject())
@@ -190,17 +201,17 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
 
   private fun resolveCopy(invoke: Invoke, uri: Uri) {
     try {
-      invoke.resolve(JSObject().put("path", copyToCache(uri).absolutePath).put("uri", uri.toString()))
+      invoke.resolve(JSObject().put("path", copyIn(uri).absolutePath).put("uri", uri.toString()))
     } catch (e: Exception) {
       invoke.reject("Can't read the book: ${e.message}")
     }
   }
 
-  /** Copies a document into `cache/incoming` (emptied first), under its own name. */
-  private fun copyToCache(uri: Uri): File {
-    val dir = File(activity.cacheDir, INCOMING)
-    dir.deleteRecursively()
-    dir.mkdirs()
+  /** Copies a document into `files/outside/<time>/`, under its own name. */
+  private fun copyIn(uri: Uri): File {
+    val all = File(activity.filesDir, OUTSIDE)
+    all.listFiles()?.sortedByDescending { it.lastModified() }?.drop(KEEP_OUTSIDE - 1)?.forEach { it.deleteRecursively() }
+    val dir = File(all, System.currentTimeMillis().toString()).apply { mkdirs() }
     val target = File(dir, displayName(uri).replace(Regex("[/\\\\]"), "_"))
     val input = activity.contentResolver.openInputStream(uri) ?: throw IllegalStateException("no data")
     input.use { from -> target.outputStream().use { from.copyTo(it) } }
@@ -218,7 +229,7 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun deleteDocument(invoke: Invoke) {
     val uri = Uri.parse(invoke.parseArgs(UriArgs::class.java).uri)
-    val deleted = try {
+    val deleted = if (uri.scheme == "file") File(uri.path ?: "").delete() else try {
       DocumentsContract.deleteDocument(activity.contentResolver, uri)
     } catch (e: Exception) {
       try {

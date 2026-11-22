@@ -367,10 +367,12 @@ async function addToLibrary(mode: AddMode) {
   changeSettings({ libraryAddMode: mode })
   $('offer-buttons').hidden = true
   try {
-    const { path, existed } = await invoke<{ path: string; existed: boolean }>('add_to_library', { mode })
+    const { path, existed, originalKept } = await invoke<{ path: string; existed: boolean; originalKept: boolean }>('add_to_library', { mode })
     $('offer-text').textContent = existed
       ? `Already in the library: ${path}`
-      : `${mode === 'move' ? 'Moved' : 'Copied'} to the library: ${path}`
+      : originalKept
+        ? `Copied to the library (the original couldn't be removed): ${path}`
+        : `${mode === 'move' ? 'Moved' : 'Copied'} to the library: ${path}`
   } catch (e) {
     $('offer-text').textContent = `Couldn't add the book: ${e}`
   }

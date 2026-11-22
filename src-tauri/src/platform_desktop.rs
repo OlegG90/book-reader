@@ -1,6 +1,6 @@
 //! Where the library lives on the desktop (see platform_android.rs for the phone).
 
-use crate::data_dir;
+use crate::{data_dir, Outside};
 use tauri_plugin_dialog::{DialogExt, FileDialogBuilder};
 use std::path::PathBuf;
 use tauri::{AppHandle, Builder, Manager, Window, Wry};
@@ -26,13 +26,6 @@ pub fn chosen_library(window: &Window, pick: bool) -> Result<Option<PathBuf>, St
         return suggested_library(window.app_handle()).map(Some);
     }
     file_dialog(window).blocking_pick_folder().map(|f| f.into_path().map_err(|e| e.to_string())).transpose()
-}
-
-/// A book from outside the library; on the desktop it is opened where it lies.
-pub struct Outside {
-    pub path: PathBuf,
-    /// The document a phone copied the book from; never on the desktop.
-    pub original: Option<String>,
 }
 
 /// Ctrl+O: a book file the reader picks (`None` when cancelled).

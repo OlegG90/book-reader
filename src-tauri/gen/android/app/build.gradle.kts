@@ -27,8 +27,9 @@ android {
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
     // The release key (the same for every version, so updates install over the
-    // previous one) comes from CI: ANDROID_KEYSTORE_FILE and its password. A
-    // release build without it is left unsigned.
+    // previous one) comes from CI: ANDROID_KEYSTORE_FILE, alias "book-reader",
+    // one password for the store and the key. A local release build without it
+    // is left unsigned.
     val releaseKeystore = System.getenv("ANDROID_KEYSTORE_FILE")
     signingConfigs {
         if (releaseKeystore != null) {
