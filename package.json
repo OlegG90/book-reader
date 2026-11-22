@@ -23,7 +23,8 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-opener": "^2.5.5"
+    "@tauri-apps/plugin-opener": "^2.5.5",
+    "reader-core": "git+https://github.com/OlegG90/reader-core.git#v0.2.0"
   },
   "engines": {
     "node": "^24.15.0 || >=26.0.0"

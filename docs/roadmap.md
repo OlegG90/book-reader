@@ -19,7 +19,7 @@
    - KOSync progress sync against CWA (two profiles on one PC stood in for two devices).
    - Findings: readers type a server's address, not its `/opds` path, so saving discovers the catalog; CWA's KOSync takes the plain login over Basic and serves FB2 as `text/xml`; the TLS library (rustls/ring) needs clang on Windows ARM64 (LLVM) and the NDK's clang for Android, so Android compile errors now show up in CI only.
 4. **Full Android version** — library, volume keys, full screen, keep screen on, servers and sync with Windows (catalog passwords in the Android Keystore), choosing another library folder, adding books from outside it ("Open with", "Share", "Add book…"), a release APK signed with a personal key. Done earlier: one window and Back, tap zones, a top bar for a finger.
-5. **Shared core** — extract the rendering core shared with Simple Reader once its API has survived Android.
+5. **Shared core** — done (22.11.2026): the reading part of the frontend (BookView with touch, appearance, layout, page labels, DOM helpers, foliate-js) is the public package [reader-core](https://github.com/OlegG90/reader-core); Book Reader and Simple Reader depend on it by tag. The Rust backends stay per app: they have diverged (fingerprint, store, data folder, command line).
 6. **Phase "e"** — read status and shelves in CWA, metadata editing through the Calibre Content Server.
 
 Full-text search in a book and grouping by series fit after stage 4.
@@ -30,5 +30,3 @@ Full-text search in a book and grouping by series fit after stage 4.
 
 - **Bookmark sync:** KOSync carries only the position; syncing bookmarks needs another mechanism.
 - **Phase "e" details:** which fields, which server, how fragile the CWA web endpoints are.
-- **Shared core with Simple Reader:** package boundary and how both repositories consume it (`file:` dependency, git submodule).
-- **Android library folder other than `Documents/Books`:** a folder browser of our own over shared storage (as PswManager has), in stage 4.

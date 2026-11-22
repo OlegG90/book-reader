@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { FORMAT_LABELS, fetchSources, inLibrary, preferredFile, type CatalogBook, type CatalogEntry, type Feed, type Source } from './catalog'
-import { el } from './dom'
+import { el } from 'reader-core'
 
 /** A page the reader went to, kept so Back shows it again without a refetch. */
 interface Page {

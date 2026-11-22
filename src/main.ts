@@ -3,18 +3,24 @@ import { onBackButtonPress } from '@tauri-apps/api/app'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import {
+  BookView,
   bookCss,
-  lineWidthPx,
+  el,
   isAppearanceKey,
+  lineWidthPx,
   nextTheme,
   oneOf,
   readAppearance,
   stepFontSize,
+  suppressContextMenu,
+  type BookStyle,
+  type Flow,
+  type Relocation,
   type ResolvedTheme,
-} from './appearance'
-import { el, suppressContextMenu } from './dom'
+} from 'reader-core'
+import 'reader-core/book-view.css'
+import { createTOCView } from 'reader-core/foliate-js/ui/tree.js'
 import { commandFor, type Command } from './keys'
-import type { Flow } from './layout'
 import {
   SORTS,
   SORT_LABELS,
@@ -28,12 +34,10 @@ import {
   type Sort,
   type Status,
 } from './library'
-import { BookView, type BookStyle, type Relocation } from './reader'
 import { createCatalogView } from './catalog-view'
 import { createSourcesPanel } from './sources-panel'
 import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
 import { createSettingsPanel, type PanelValues } from './settings-panel'
-import { createTOCView } from './vendor/foliate-js/ui/tree.js'
 
 interface Position {
   cfi: string
@@ -156,7 +160,7 @@ async function openCurrentBook() {
     restoring = true
     const source = await loadBook(info)
     await settingsReady
-    book = await BookView.open($('stage'), $('footnote'), source, {
+    book = await BookView.open($('stage'), source, {
       flow: settings.flow,
       lastLocation: info.position?.cfi,
       style: currentBookStyle(),
@@ -690,7 +694,7 @@ async function runCommand(command: Command) {
 
 /** Closes the footnote, or else any open panel; false when there was none. */
 function closeTopLayer() {
-  if (!$('footnote').hidden) book?.hideFootnote()
+  if (book?.footnoteOpen) book.hideFootnote()
   else if (tocOpen() || organizeOpen() || scrimlessOpen()) closePanels()
   else return false
   return true
