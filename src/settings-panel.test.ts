@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_APPEARANCE } from './appearance'
 import { createSettingsPanel, type PanelValues } from './settings-panel'
 
-const initial: PanelValues = { ...DEFAULT_APPEARANCE, savePositions: true, offerLibrary: true }
+const initial: PanelValues = { ...DEFAULT_APPEARANCE, savePositions: true, offerLibrary: true, volumeKeys: false }
 
 function setup() {
   const host = document.createElement('aside')

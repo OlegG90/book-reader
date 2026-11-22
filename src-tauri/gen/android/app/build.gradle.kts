@@ -17,7 +17,9 @@ android {
     compileSdk = 36
     namespace = "com.olegg90.bookreader"
     defaultConfig {
-        manifestPlaceholders["usesCleartextTraffic"] = "false"
+        // Catalog servers on the home network often speak plain HTTP (the app
+        // warns when that crosses the internet).
+        manifestPlaceholders["usesCleartextTraffic"] = "true"
         applicationId = "com.olegg90.bookreader"
         minSdk = 30
         targetSdk = 36

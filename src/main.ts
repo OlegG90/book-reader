@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { addPluginListener, invoke } from '@tauri-apps/api/core'
 import { onBackButtonPress } from '@tauri-apps/api/app'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { openUrl } from '@tauri-apps/plugin-opener'
@@ -77,6 +77,7 @@ function readSettings(stored: Record<string, unknown>): Settings {
     libraryAddMode: oneOf(stored.libraryAddMode, ['move', 'copy'] as const, 'move'),
     savePositions: stored.savePositions !== false,
     offerLibrary: stored.offerLibrary !== false,
+    volumeKeys: stored.volumeKeys === true,
   }
 }
 
@@ -84,7 +85,7 @@ const SAVE_DELAY_MS = 500
 const TOP_EDGE_PX = 48
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
-// Hides what the phone can't do yet (`.desktop-only` in style.css).
+// Hides what only the other platform does (`.desktop-only`, `.android-only` in style.css).
 const isAndroid = /Android/.test(navigator.userAgent)
 document.documentElement.classList.toggle('android', isAndroid)
 const appWindow = getCurrentWindow()
@@ -198,7 +199,15 @@ async function openCurrentBook() {
     return []
   })
   renderBookmarks()
+  setReading(true)
   void pullSync()
+}
+
+/** Android, while a book is open: screen on, status bar hidden, volume keys (if set) turn pages. */
+function setReading(on: boolean) {
+  if (!isAndroid) return
+  void invoke('set_reading', { on }).catch(console.error)
+  void invoke('set_volume_keys', { on: on && settings.volumeKeys }).catch(console.error)
 }
 
 // ---- Progress sync ----------------------------------------------------------
@@ -369,6 +378,7 @@ async function addToLibrary(mode: AddMode) {
 }
 
 function closeBook() {
+  if (book) setReading(false)
   void pushSync()
   syncDocument = null
   syncDirty = false
@@ -873,6 +883,7 @@ function applySettings(changes: Partial<Settings>) {
     book.flow = settings.flow
     updateFlowButton()
   }
+  if ('volumeKeys' in changes) setReading(!!book)
 }
 
 /** Applies changes made in this window, and saves them after a pause. */
@@ -1008,7 +1019,18 @@ $('progress').addEventListener('click', e => {
 
 appWindow.listen('book-changed', () => openCurrentBook())
 // Listening takes Back over from Android, which would otherwise leave the app on every press.
-if (isAndroid) void onBackButtonPress(handleBack).catch(console.error)
+if (isAndroid) {
+  void onBackButtonPress(handleBack).catch(console.error)
+  $('open-button').textContent = 'Add book…'
+  $('open-button').title = 'Open a book from the phone; it can then go into the library'
+  // A book handed over by "Open with" or "Share", at startup or later.
+  const openIncoming = () => void invoke('open_incoming').catch(e => showError(undefined, e))
+  openIncoming()
+  void addPluginListener('system', 'incoming', openIncoming).catch(console.error)
+  void addPluginListener<{ direction: 'next' | 'prev' }>('system', 'volumeKey', ({ direction }) => {
+    if (book) void runCommand(direction)
+  }).catch(console.error)
+}
 // Another window changed a setting: apply it here too (it is already saved).
 appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
   const valid = readSettings({ ...settings, ...payload })

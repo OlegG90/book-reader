@@ -1,27 +1,124 @@
 package com.olegg90.bookreader
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Environment
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.provider.Settings
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import android.view.KeyEvent
+import android.view.WindowManager
+import android.webkit.WebView
+import androidx.activity.result.ActivityResult
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
+import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import java.io.File
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+
+@InvokeArg
+class PasswordArgs {
+  lateinit var id: String
+  var password: String? = null
+}
+
+@InvokeArg
+class SwitchArgs {
+  var on: Boolean = false
+}
+
+@InvokeArg
+class UriArgs {
+  lateinit var uri: String
+}
 
 /**
  * What the app needs from Android (see platform_android.rs).
  *
- * The phone's shared storage for the library: with All files
- * access turned on, the library is a plain folder (Documents/Books by default)
- * that the Rust side reads and writes like any other, so the same library code
- * runs on Windows and Android. Android 11 (API 30) is the minimum (see
- * app/build.gradle.kts): All files access starts there.
+ * - The library in shared storage: with All files access turned on, the
+ *   library is a plain folder (Documents/Books by default) that the Rust side
+ *   reads and writes like any other, so the same library code runs on Windows
+ *   and Android. Android 11 (API 30) is the minimum (see app/build.gradle.kts):
+ *   All files access starts there. Another folder comes from Android's folder
+ *   picker, turned back into a path.
+ * - Books from outside the library ("Open with", "Share", the book picker)
+ *   arrive as content:// documents; they are copied into the app's cache and
+ *   opened from there, and the original is remembered so Move can delete it.
+ * - Catalog passwords, encrypted with a key kept in the Android Keystore.
+ * - Reading: the screen stays on, the status bar hides, volume keys turn pages.
  */
 @TauriPlugin
 class SystemPlugin(private val activity: Activity) : Plugin(activity) {
+
+  companion object {
+    /** The plugin, for MainActivity's key handling. */
+    var instance: SystemPlugin? = null
+
+    private const val KEY_ALIAS = "catalog-passwords"
+    private const val PREFS = "catalog-passwords"
+    private const val INCOMING = "incoming"
+  }
+
+  /** Volume keys turn pages (a setting, and only while a book is open). */
+  @Volatile var volumeKeys = false
+
+  /** A book handed to the app ("Open with", "Share") and not yet opened. */
+  private var pending: Intent? = null
+
+  override fun load(webView: WebView) {
+    instance = this
+    takeBook(activity.intent)
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    if (takeBook(intent)) trigger("incoming", JSObject())
+  }
+
+  /** Keeps a book intent for `takeIncoming`; false for any other intent. */
+  private fun takeBook(intent: Intent?): Boolean {
+    if (intent == null || bookUri(intent) == null) return false
+    pending = intent
+    // Handled once: a recreated activity must not open it again.
+    activity.intent = Intent(Intent.ACTION_MAIN)
+    return true
+  }
+
+  private fun bookUri(intent: Intent): Uri? = when (intent.action) {
+    Intent.ACTION_VIEW -> intent.data
+    @Suppress("DEPRECATION")
+    Intent.ACTION_SEND -> intent.getParcelableExtra(Intent.EXTRA_STREAM)
+    else -> null
+  }
+
+  /** Called by MainActivity: true when the key turned a page. */
+  fun volumeKey(event: KeyEvent): Boolean {
+    if (!volumeKeys) return false
+    val direction = when (event.keyCode) {
+      KeyEvent.KEYCODE_VOLUME_DOWN -> "next"
+      KeyEvent.KEYCODE_VOLUME_UP -> "prev"
+      else -> return false
+    }
+    if (event.action == KeyEvent.ACTION_DOWN) trigger("volumeKey", JSObject().put("direction", direction))
+    return true
+  }
+
+  // ---- Library ---------------------------------------------------------------
 
   /** Whether All files access is on, and where the shared Documents folder is. */
   @Command
@@ -47,5 +144,165 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
     } catch (e: Exception) {
       invoke.reject("Cannot open the setting: ${e.message}")
     }
+  }
+
+  /** Android's folder picker; resolves `{ path }`, or `{}` when cancelled. */
+  @Command
+  fun pickFolder(invoke: Invoke) {
+    startActivityForResult(invoke, Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), "folderPicked")
+  }
+
+  @ActivityCallback
+  fun folderPicked(invoke: Invoke, result: ActivityResult) {
+    val uri = result.data?.data
+    if (result.resultCode != Activity.RESULT_OK || uri == null) return invoke.resolve(JSObject())
+    // "primary:Documents/Books": a folder on the phone's own storage.
+    val id = DocumentsContract.getTreeDocumentId(uri)
+    val (volume, path) = id.split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
+    if (volume != "primary") return invoke.reject("Choose a folder on the phone's own storage (memory cards are not supported)")
+    val folder = File(Environment.getExternalStorageDirectory(), path)
+    invoke.resolve(JSObject().put("path", folder.absolutePath))
+  }
+
+  // ---- Books from outside the library ------------------------------------------
+
+  /** Android's document picker for a book; resolves like `takeIncoming`. */
+  @Command
+  fun pickBook(invoke: Invoke) {
+    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+    startActivityForResult(invoke, intent, "bookPicked")
+  }
+
+  @ActivityCallback
+  fun bookPicked(invoke: Invoke, result: ActivityResult) {
+    val uri = result.data?.data
+    if (result.resultCode != Activity.RESULT_OK || uri == null) return invoke.resolve(JSObject())
+    Thread { resolveCopy(invoke, uri) }.start()
+  }
+
+  /** The book handed to the app, copied into the cache: `{ path, uri }`, or `{}`. */
+  @Command
+  fun takeIncoming(invoke: Invoke) {
+    val intent = pending ?: return invoke.resolve(JSObject())
+    pending = null
+    resolveCopy(invoke, bookUri(intent)!!)
+  }
+
+  private fun resolveCopy(invoke: Invoke, uri: Uri) {
+    try {
+      invoke.resolve(JSObject().put("path", copyToCache(uri).absolutePath).put("uri", uri.toString()))
+    } catch (e: Exception) {
+      invoke.reject("Can't read the book: ${e.message}")
+    }
+  }
+
+  /** Copies a document into `cache/incoming` (emptied first), under its own name. */
+  private fun copyToCache(uri: Uri): File {
+    val dir = File(activity.cacheDir, INCOMING)
+    dir.deleteRecursively()
+    dir.mkdirs()
+    val target = File(dir, displayName(uri).replace(Regex("[/\\\\]"), "_"))
+    val input = activity.contentResolver.openInputStream(uri) ?: throw IllegalStateException("no data")
+    input.use { from -> target.outputStream().use { from.copyTo(it) } }
+    return target
+  }
+
+  private fun displayName(uri: Uri): String {
+    activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+      if (it.moveToFirst() && !it.isNull(0)) return it.getString(0)
+    }
+    return uri.lastPathSegment?.substringAfterLast('/') ?: "book"
+  }
+
+  /** Deletes the original of a book moved into the library, where Android allows it. */
+  @Command
+  fun deleteDocument(invoke: Invoke) {
+    val uri = Uri.parse(invoke.parseArgs(UriArgs::class.java).uri)
+    val deleted = try {
+      DocumentsContract.deleteDocument(activity.contentResolver, uri)
+    } catch (e: Exception) {
+      try {
+        activity.contentResolver.delete(uri, null, null) > 0
+      } catch (e: Exception) {
+        false
+      }
+    }
+    invoke.resolve(JSObject().put("deleted", deleted))
+  }
+
+  // ---- Reading -------------------------------------------------------------------
+
+  /** A book is open (or not): the screen stays on and the status bar hides. */
+  @Command
+  fun reading(invoke: Invoke) {
+    val on = invoke.parseArgs(SwitchArgs::class.java).on
+    activity.runOnUiThread {
+      val window = activity.window
+      if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+      else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+      val bars = WindowCompat.getInsetsController(window, window.decorView)
+      bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+      if (on) bars.hide(WindowInsetsCompat.Type.statusBars()) else bars.show(WindowInsetsCompat.Type.statusBars())
+      invoke.resolve(JSObject())
+    }
+  }
+
+  /** Whether volume keys turn pages now. */
+  @Command
+  fun setVolumeKeys(invoke: Invoke) {
+    volumeKeys = invoke.parseArgs(SwitchArgs::class.java).on
+    invoke.resolve(JSObject())
+  }
+
+  // ---- Catalog passwords ---------------------------------------------------------
+
+  private fun key(): SecretKey {
+    val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+    (store.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
+    val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+    generator.init(
+      KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+        .build()
+    )
+    return generator.generateKey()
+  }
+
+  private fun prefs() = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+  /** Keeps a catalog's password, encrypted with the Keystore key: "iv:ciphertext". */
+  @Command
+  fun savePassword(invoke: Invoke) {
+    val args = invoke.parseArgs(PasswordArgs::class.java)
+    try {
+      val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
+      val sealed = cipher.doFinal((args.password ?: "").toByteArray())
+      val text = Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(sealed, Base64.NO_WRAP)
+      prefs().edit().putString(args.id, text).apply()
+      invoke.resolve(JSObject())
+    } catch (e: Exception) {
+      invoke.reject("Can't keep the password: ${e.message}")
+    }
+  }
+
+  /** A catalog's password: `{ password }`, or `{}` when none is kept (or it can't be read). */
+  @Command
+  fun password(invoke: Invoke) {
+    val id = invoke.parseArgs(PasswordArgs::class.java).id
+    val text = prefs().getString(id, null) ?: return invoke.resolve(JSObject())
+    try {
+      val (iv, sealed) = text.split(":", limit = 2).map { Base64.decode(it, Base64.NO_WRAP) }
+      val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv)) }
+      invoke.resolve(JSObject().put("password", String(cipher.doFinal(sealed))))
+    } catch (e: Exception) {
+      invoke.resolve(JSObject())
+    }
+  }
+
+  @Command
+  fun forgetPassword(invoke: Invoke) {
+    prefs().edit().remove(invoke.parseArgs(PasswordArgs::class.java).id).apply()
+    invoke.resolve(JSObject())
   }
 }

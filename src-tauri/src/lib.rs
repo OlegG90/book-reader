@@ -45,7 +45,6 @@ use tauri::ipc::Response;
 #[cfg(desktop)]
 use tauri::DragDropEvent;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, Window, WindowEvent};
-use tauri_plugin_dialog::DialogExt;
 
 #[cfg(desktop)]
 const DEFAULT_WIDTH: f64 = 1100.0;
@@ -331,22 +330,46 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// A file dialog, modal to `window` where the platform has parent windows.
-fn file_dialog(window: &Window) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
-    let dialog = window.dialog().file();
-    #[cfg(desktop)]
-    let dialog = dialog.set_parent(window);
-    dialog
-}
-
-/// Ctrl+O: asks for a book and opens it in this window.
+/// Ctrl+O (on a phone, "Add book…"): asks for a book and opens it in this window.
 #[tauri::command(async)]
-fn pick_book(window: Window) -> Result<(), String> {
-    let picked = file_dialog(&window).add_filter("Books", &["epub", "fb2", "fb2.zip", "fbz"]).blocking_pick_file();
-    if let Some(path) = picked {
-        show_book(&window, path.into_path().map_err(|e| e.to_string())?);
+fn pick_book(window: Window, originals: State<Originals>) -> Result<(), String> {
+    if let Some(book) = platform::pick_book(&window)? {
+        open_outside(&window, &originals, book);
     }
     Ok(())
+}
+
+/// Opens a book handed to the app ("Open with", "Share" on a phone), if one waits.
+#[tauri::command(async)]
+fn open_incoming(window: Window, originals: State<Originals>) -> Result<(), String> {
+    if let Some(book) = platform::take_incoming()? {
+        open_outside(&window, &originals, book);
+    }
+    Ok(())
+}
+
+/// The documents that books from outside were copied from on a phone (the
+/// copy in the app's cache → its `content://` original), for Move.
+#[derive(Default)]
+struct Originals(Mutex<HashMap<PathBuf, String>>);
+
+fn open_outside(window: &Window, originals: &Originals, book: platform::Outside) {
+    if let Some(original) = book.original {
+        originals.0.lock().unwrap().insert(book.path.clone(), original);
+    }
+    show_book(window, book.path);
+}
+
+/// A book is open (or not): on a phone the screen stays on and the status bar hides.
+#[tauri::command(async)]
+fn set_reading(on: bool) -> Result<(), String> {
+    platform::set_reading(on)
+}
+
+/// Whether volume keys turn pages now (a phone, with a book open and the setting on).
+#[tauri::command(async)]
+fn set_volume_keys(on: bool) -> Result<(), String> {
+    platform::set_volume_keys(on)
 }
 
 /// Opens a window for `launch`, or brings forward the one already showing its
@@ -526,10 +549,20 @@ fn add_to_library(
     windows: State<ReaderWindows>,
     store: State<Store>,
     books: State<LibraryBooks>,
+    originals: State<Originals>,
     mode: AddMode,
 ) -> Result<Added, String> {
     let source = saving_window(&windows, &window)?;
-    let (added, fingerprint) = put_in_library(&store, &books, &source, mode)?;
+    // A phone's book from outside is the app's own copy: it moves in, and
+    // Move then deletes the document it came from.
+    let original = originals.0.lock().unwrap().get(&source).cloned();
+    let (added, fingerprint) = put_in_library(&store, &books, &source, if original.is_some() { AddMode::Move } else { mode })?;
+    if let Some(original) = original {
+        originals.0.lock().unwrap().remove(&source);
+        if matches!(mode, AddMode::Move) {
+            platform::delete_original(&original);
+        }
+    }
     let target = library::join(&library_root(&store)?, &added.path);
     windows.set_path(window.label(), target.clone());
     repath_recent(&store, &[(fingerprint, target)])?;
@@ -1039,10 +1072,10 @@ pub fn run() {
     }));
     platform::plugins(builder)
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
         .manage(ReaderWindows::default())
         .manage(LibraryBooks::default())
         .manage(SearchTemplates::default())
+        .manage(Originals::default())
         .invoke_handler(tauri::generate_handler![
             current_book,
             read_book,
@@ -1058,6 +1091,9 @@ pub fn run() {
             unregister_file_types,
             file_types_registered,
             app_version,
+            open_incoming,
+            set_reading,
+            set_volume_keys,
             pick_book,
             library_info,
             set_library,

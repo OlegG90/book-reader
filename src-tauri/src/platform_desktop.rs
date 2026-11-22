@@ -1,12 +1,18 @@
 //! Where the library lives on the desktop (see platform_android.rs for the phone).
 
-use crate::{data_dir, file_dialog};
+use crate::data_dir;
+use tauri_plugin_dialog::{DialogExt, FileDialogBuilder};
 use std::path::PathBuf;
 use tauri::{AppHandle, Builder, Manager, Window, Wry};
 
-/// The desktop needs no platform plugins.
+/// File dialogs (books, the library folder).
 pub fn plugins(builder: Builder<Wry>) -> Builder<Wry> {
-    builder
+    builder.plugin(tauri_plugin_dialog::init())
+}
+
+/// A file dialog, modal to `window`.
+fn file_dialog(window: &Window) -> FileDialogBuilder<Wry> {
+    window.dialog().file().set_parent(window)
 }
 
 /// What the first-run screen offers: `lib` next to the exe, or `Documents\Book Reader`.
@@ -20,6 +26,39 @@ pub fn chosen_library(window: &Window, pick: bool) -> Result<Option<PathBuf>, St
         return suggested_library(window.app_handle()).map(Some);
     }
     file_dialog(window).blocking_pick_folder().map(|f| f.into_path().map_err(|e| e.to_string())).transpose()
+}
+
+/// A book from outside the library; on the desktop it is opened where it lies.
+pub struct Outside {
+    pub path: PathBuf,
+    /// The document a phone copied the book from; never on the desktop.
+    pub original: Option<String>,
+}
+
+/// Ctrl+O: a book file the reader picks (`None` when cancelled).
+pub fn pick_book(window: &Window) -> Result<Option<Outside>, String> {
+    let picked = file_dialog(window).add_filter("Books", &["epub", "fb2", "fb2.zip", "fbz"]).blocking_pick_file();
+    picked.map(|f| f.into_path().map(|path| Outside { path, original: None }).map_err(|e| e.to_string())).transpose()
+}
+
+/// Books are handed to the desktop app on its command line instead.
+pub fn take_incoming() -> Result<Option<Outside>, String> {
+    Ok(None)
+}
+
+/// Desktop books are moved as files, so there is no original to delete.
+pub fn delete_original(_original: &str) -> bool {
+    false
+}
+
+/// The desktop has no screen timeout or status bar to manage while reading.
+pub fn set_reading(_on: bool) -> Result<(), String> {
+    Ok(())
+}
+
+/// The desktop has no volume keys to turn pages with.
+pub fn set_volume_keys(_on: bool) -> Result<(), String> {
+    Ok(())
 }
 
 /// The credential store entry for a catalog's password.
