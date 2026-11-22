@@ -118,11 +118,15 @@ describe('settings page', () => {
     expect(button('Register')).toBeDefined()
   })
 
-  it('lists its sections and marks the one shown', () => {
-    const { panel, button } = page()
-    Element.prototype.scrollIntoView = vi.fn()
+  it('shows one section at a time, as tabs', () => {
+    const { host, panel, button } = page()
+    const shown = () => [...host.querySelectorAll<HTMLElement>('.section')].filter(s => !s.hidden).map(s => s.id)
+    expect(shown()).toEqual(['settings-reading'])
     panel.showSection('catalogs')
-    expect(button('Catalogs').getAttribute('aria-current')).toBe('true')
-    expect(button('Reading').getAttribute('aria-current')).toBe('false')
+    expect(shown()).toEqual(['settings-catalogs'])
+    expect(button('Catalogs').getAttribute('aria-selected')).toBe('true')
+    button('System').click()
+    expect(shown()).toEqual(['settings-system'])
+    expect(button('Catalogs').getAttribute('aria-selected')).toBe('false')
   })
 })

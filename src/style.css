@@ -1432,17 +1432,17 @@ button:hover {
   color: var(--muted);
 }
 
-#settings .sections button[aria-current='true'] {
+#settings .sections button[aria-selected='true'] {
   color: var(--accent-text);
+}
+
+.android #settings .sections button[aria-selected='true'] {
+  border-color: var(--accent);
 }
 
 #settings .page-content {
   overflow-y: auto;
   padding: 32px 4px calc(48px + var(--safe-bottom));
-}
-
-#settings .section + .section {
-  margin-top: var(--space-8);
 }
 
 #settings .section h2 {

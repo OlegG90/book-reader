@@ -149,9 +149,9 @@ const SECTIONS = [
 export type SettingsSection = (typeof SECTIONS)[number]['id']
 
 /**
- * The settings page: a back button, the sections' names on the left, and the
- * sections (Reading with the appearance, Library, Catalogs, System,
- * Shortcuts). Every change goes to `onChange` with just the changed values;
+ * The settings page: a back button, the sections' names on the left as tabs,
+ * and one section at a time (Reading with the appearance, Library, Catalogs,
+ * System, Shortcuts). Every change goes to `onChange` with just the changed values;
  * button presses go to `actions`. `catalogs` and `shortcuts` are the hosts
  * the app fills in (the sources panel, the key list).
  */
@@ -200,11 +200,13 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const nav = SECTIONS.map(({ id, title, ...rest }) =>
     el('button', {
       type: 'button',
+      role: 'tab',
       textContent: title,
       className: 'desktopOnly' in rest ? 'desktop-only' : '',
       onclick: () => showSection(id),
     }),
   )
+  sections.forEach(section => section.setAttribute('role', 'tabpanel'))
 
   host.append(
     el(
@@ -213,13 +215,16 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       el('button', { type: 'button', className: 'back', textContent: '← Back', onclick: actions.close }),
       el('h1', { textContent: 'Settings' }),
     ),
-    el('div', { className: 'page-body' }, el('nav', { className: 'sections', ariaLabel: 'Sections' }, ...nav), el('div', { className: 'page-content' }, ...sections)),
+    el('div', { className: 'page-body' }, el('nav', { className: 'sections', ariaLabel: 'Sections', role: 'tablist' }, ...nav), el('div', { className: 'page-content' }, ...sections)),
   )
 
-  /** Scrolls to a section and marks it in the list. */
+  /** Shows one section (a tab) and marks it in the list. */
   function showSection(id: SettingsSection) {
-    nav.forEach((button, i) => button.setAttribute('aria-current', String(SECTIONS[i].id === id)))
-    sections[SECTIONS.findIndex(s => s.id === id)].scrollIntoView({ block: 'start' })
+    SECTIONS.forEach((section, i) => {
+      const current = section.id === id
+      nav[i].setAttribute('aria-selected', String(current))
+      sections[i].hidden = !current
+    })
   }
 
   function show(values: PanelValues) {
@@ -242,5 +247,6 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   show(initial)
   setFileTypesRegistered(false)
   setLibraryFolder(null)
+  showSection('reading')
   return { show, setFileTypesRegistered, setLibraryFolder, showSection, catalogs, shortcuts }
 }
