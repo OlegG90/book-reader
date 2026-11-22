@@ -30,7 +30,7 @@ pub fn chosen_library(window: &Window, pick: bool) -> Result<Option<PathBuf>, St
 
 /// Ctrl+O: a book file the reader picks (`None` when cancelled).
 pub fn pick_book(window: &Window) -> Result<Option<Outside>, String> {
-    let picked = file_dialog(window).add_filter("Books", &["epub", "fb2", "fb2.zip", "fbz"]).blocking_pick_file();
+    let picked = file_dialog(window).add_filter("Books", &crate::metadata::extensions()).blocking_pick_file();
     picked.map(|f| f.into_path().map(|path| Outside { path, original: None }).map_err(|e| e.to_string())).transpose()
 }
 
@@ -44,13 +44,8 @@ pub fn delete_original(_original: &str) -> bool {
     false
 }
 
-/// The desktop has no screen timeout or status bar to manage while reading.
-pub fn set_reading(_on: bool) -> Result<(), String> {
-    Ok(())
-}
-
-/// The desktop has no volume keys to turn pages with.
-pub fn set_volume_keys(_on: bool) -> Result<(), String> {
+/// The desktop has no screen timeout, status bar or volume keys to manage while reading.
+pub fn set_reading(_on: bool, _volume_keys: bool) -> Result<(), String> {
     Ok(())
 }
 
@@ -62,6 +57,11 @@ fn credential(source_id: &str) -> Result<keyring::Entry, String> {
 /// Keeps a catalog's password in the OS credential store (the Windows Credential Manager).
 pub fn save_password(source_id: &str, password: &str) -> Result<(), String> {
     credential(source_id)?.set_password(password).map_err(|e| e.to_string())
+}
+
+/// Whether a catalog has a password kept.
+pub fn has_password(source_id: &str) -> bool {
+    password(source_id).is_some()
 }
 
 /// A catalog's password, if one is kept.

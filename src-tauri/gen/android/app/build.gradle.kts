@@ -31,13 +31,14 @@ android {
     // one password for the store and the key. A local release build without it
     // is left unsigned.
     val releaseKeystore = System.getenv("ANDROID_KEYSTORE_FILE")
+    val releasePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
     signingConfigs {
         if (releaseKeystore != null) {
             create("release") {
                 storeFile = file(releaseKeystore)
-                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                storePassword = releasePassword
                 keyAlias = "book-reader"
-                keyPassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyPassword = releasePassword
             }
         }
     }

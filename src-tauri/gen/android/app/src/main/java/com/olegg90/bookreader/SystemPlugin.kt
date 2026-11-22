@@ -39,8 +39,9 @@ class PasswordArgs {
 }
 
 @InvokeArg
-class SwitchArgs {
+class ReadingArgs {
   var on: Boolean = false
+  var volumeKeys: Boolean = false
 }
 
 @InvokeArg
@@ -83,7 +84,7 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
   @Volatile var volumeKeys = false
 
   /** A book handed to the app ("Open with", "Share") and not yet opened. */
-  @Volatile private var pending: Intent? = null
+  @Volatile private var pending: Uri? = null
 
   override fun load(webView: WebView) {
     instance = this
@@ -96,10 +97,11 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
 
   /** Keeps a book intent for `takeIncoming`; false for any other intent. */
   private fun takeBook(intent: Intent?): Boolean {
-    if (intent == null || bookUri(intent) == null) return false
+    if (intent == null) return false
+    val uri = bookUri(intent) ?: return false
     // Reopened from the recent apps: the book was handed over before.
     if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return false
-    pending = intent
+    pending = uri
     // Handled once: a recreated activity must not open it again.
     activity.intent = Intent(Intent.ACTION_MAIN)
     return true
@@ -194,9 +196,9 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
   /** The book handed to the app, copied in: `{ path, uri }`, or `{}`. */
   @Command
   fun takeIncoming(invoke: Invoke) {
-    val intent = pending ?: return invoke.resolve(JSObject())
+    val uri = pending ?: return invoke.resolve(JSObject())
     pending = null
-    resolveCopy(invoke, bookUri(intent)!!)
+    resolveCopy(invoke, uri)
   }
 
   private fun resolveCopy(invoke: Invoke, uri: Uri) {
@@ -229,24 +231,25 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun deleteDocument(invoke: Invoke) {
     val uri = Uri.parse(invoke.parseArgs(UriArgs::class.java).uri)
-    val deleted = if (uri.scheme == "file") File(uri.path ?: "").delete() else try {
-      DocumentsContract.deleteDocument(activity.contentResolver, uri)
-    } catch (e: Exception) {
-      try {
-        activity.contentResolver.delete(uri, null, null) > 0
-      } catch (e: Exception) {
-        false
-      }
-    }
+    val resolver = activity.contentResolver
+    val deleted = if (uri.scheme == "file") File(uri.path ?: "").delete()
+    else runCatching { DocumentsContract.deleteDocument(resolver, uri) }
+      .recoverCatching { resolver.delete(uri, null, null) > 0 }
+      .getOrDefault(false)
     invoke.resolve(JSObject().put("deleted", deleted))
   }
 
   // ---- Reading -------------------------------------------------------------------
 
-  /** A book is open (or not): the screen stays on and the status bar hides. */
+  /**
+   * A book is open (or not): the screen stays on, the status bar hides, and
+   * the volume keys turn pages when `volumeKeys` (the setting) is on.
+   */
   @Command
   fun reading(invoke: Invoke) {
-    val on = invoke.parseArgs(SwitchArgs::class.java).on
+    val args = invoke.parseArgs(ReadingArgs::class.java)
+    val on = args.on
+    volumeKeys = on && args.volumeKeys
     activity.runOnUiThread {
       val window = activity.window
       if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -258,18 +261,15 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  /** Whether volume keys turn pages now. */
-  @Command
-  fun setVolumeKeys(invoke: Invoke) {
-    volumeKeys = invoke.parseArgs(SwitchArgs::class.java).on
-    invoke.resolve(JSObject())
-  }
-
   // ---- Catalog passwords ---------------------------------------------------------
 
-  private fun key(): SecretKey {
+  /** The Keystore key that encrypts the passwords, made on first use. */
+  private val key: SecretKey by lazy {
     val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-    (store.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
+    (store.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey ?: newKey()
+  }
+
+  private fun newKey(): SecretKey {
     val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
     generator.init(
       KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
@@ -287,7 +287,7 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
   fun savePassword(invoke: Invoke) {
     val args = invoke.parseArgs(PasswordArgs::class.java)
     try {
-      val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
+      val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }
       val sealed = cipher.doFinal((args.password ?: "").toByteArray())
       val text = Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(sealed, Base64.NO_WRAP)
       prefs().edit().putString(args.id, text).apply()
@@ -304,11 +304,17 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
     val text = prefs().getString(id, null) ?: return invoke.resolve(JSObject())
     try {
       val (iv, sealed) = text.split(":", limit = 2).map { Base64.decode(it, Base64.NO_WRAP) }
-      val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv)) }
+      val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv)) }
       invoke.resolve(JSObject().put("password", String(cipher.doFinal(sealed))))
     } catch (e: Exception) {
       invoke.resolve(JSObject())
     }
+  }
+
+  /** Whether a catalog has a password kept: `{ kept }` (nothing is decrypted). */
+  @Command
+  fun hasPassword(invoke: Invoke) {
+    invoke.resolve(JSObject().put("kept", prefs().contains(invoke.parseArgs(PasswordArgs::class.java).id)))
   }
 
   @Command

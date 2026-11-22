@@ -68,10 +68,6 @@ jobs:
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
 
-      - name: Forget the release key
-        if: always()
-        run: rm -f "$RUNNER_TEMP/release.jks"
-
       - uses: actions/upload-artifact@v7
         with:
           name: book-reader-apk

@@ -368,16 +368,11 @@ fn open_outside(window: &Window, originals: &Originals, book: Outside) {
     show_book(window, book.path);
 }
 
-/// A book is open (or not): on a phone the screen stays on and the status bar hides.
+/// A book is open (or not): on a phone the screen stays on, the status bar
+/// hides, and the volume keys turn pages if that setting is on.
 #[tauri::command(async)]
-fn set_reading(on: bool) -> Result<(), String> {
-    platform::set_reading(on)
-}
-
-/// Whether volume keys turn pages now (a phone, with a book open and the setting on).
-#[tauri::command(async)]
-fn set_volume_keys(on: bool) -> Result<(), String> {
-    platform::set_volume_keys(on)
+fn set_reading(on: bool, volume_keys: bool) -> Result<(), String> {
+    platform::set_reading(on, volume_keys)
 }
 
 /// Opens a window for `launch`, or brings forward the one already showing its
@@ -522,7 +517,7 @@ fn open_library_book(window: Window, store: State<Store>, books: State<LibraryBo
     Ok(())
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct Added {
     /// Where the book is now, inside the library.
@@ -605,9 +600,9 @@ fn put_in_library(store: &Store, books: &LibraryBooks, source: &Path, mode: AddM
                 AddMode::Copy => naming::copy_file(source, &target),
             }
             .map_err(err)?;
-            Added { path: rel, existed: false, original_kept: false }
+            Added { path: rel, ..Default::default() }
         }
-        naming::Placement::Exists(rel) => Added { path: rel, existed: true, original_kept: false },
+        naming::Placement::Exists(rel) => Added { path: rel, existed: true, ..Default::default() },
     };
     Ok((added, fingerprint))
 }
@@ -729,7 +724,7 @@ struct SourceView {
 #[tauri::command(async)]
 fn catalog_sources(store: State<Store>) -> Vec<SourceView> {
     let sources = store.read(|s| s.sources.clone());
-    sources.into_iter().map(|source| SourceView { has_password: platform::password(&source.id).is_some(), source }).collect()
+    sources.into_iter().map(|source| SourceView { has_password: platform::has_password(&source.id), source }).collect()
 }
 
 #[derive(Deserialize)]
@@ -1100,7 +1095,6 @@ pub fn run() {
             app_version,
             open_incoming,
             set_reading,
-            set_volume_keys,
             pick_book,
             library_info,
             set_library,

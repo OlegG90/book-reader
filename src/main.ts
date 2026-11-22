@@ -205,9 +205,7 @@ async function openCurrentBook() {
 
 /** Android, while a book is open: screen on, status bar hidden, volume keys (if set) turn pages. */
 function setReading(on: boolean) {
-  if (!isAndroid) return
-  void invoke('set_reading', { on }).catch(console.error)
-  void invoke('set_volume_keys', { on: on && settings.volumeKeys }).catch(console.error)
+  if (isAndroid) void invoke('set_reading', { on, volumeKeys: settings.volumeKeys }).catch(console.error)
 }
 
 // ---- Progress sync ----------------------------------------------------------
@@ -1023,8 +1021,6 @@ appWindow.listen('book-changed', () => openCurrentBook())
 // Listening takes Back over from Android, which would otherwise leave the app on every press.
 if (isAndroid) {
   void onBackButtonPress(handleBack).catch(console.error)
-  $('open-button').textContent = 'Add book…'
-  $('open-button').title = 'Open a book from the phone; it can then go into the library'
   // A book handed over by "Open with" or "Share", at startup or later.
   const openIncoming = () => void invoke('open_incoming').catch(e => showError(undefined, e))
   openIncoming()
