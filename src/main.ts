@@ -3,18 +3,23 @@ import { onBackButtonPress } from '@tauri-apps/api/app'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import {
+  BookView,
   bookCss,
-  lineWidthPx,
+  el,
   isAppearanceKey,
+  lineWidthPx,
   nextTheme,
   oneOf,
   readAppearance,
   stepFontSize,
+  suppressContextMenu,
+  type BookStyle,
+  type Flow,
+  type Relocation,
   type ResolvedTheme,
-} from './appearance'
-import { el, suppressContextMenu } from './dom'
+} from 'reader-core'
+import { createTOCView } from 'reader-core/foliate-js/ui/tree.js'
 import { commandFor, type Command } from './keys'
-import type { Flow } from './layout'
 import {
   SORTS,
   SORT_LABELS,
@@ -28,12 +33,10 @@ import {
   type Sort,
   type Status,
 } from './library'
-import { BookView, type BookStyle, type Relocation } from './reader'
 import { createCatalogView } from './catalog-view'
 import { createSourcesPanel } from './sources-panel'
 import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
 import { createSettingsPanel, type PanelValues } from './settings-panel'
-import { createTOCView } from './vendor/foliate-js/ui/tree.js'
 
 interface Position {
   cfi: string

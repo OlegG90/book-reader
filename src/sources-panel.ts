@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { fetchSources, type Source } from './catalog'
-import { el } from './dom'
+import { el } from 'reader-core'
 
 /**
  * The Catalogs part of the settings: the OPDS servers, with a form to add or

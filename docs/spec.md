@@ -143,7 +143,7 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 
 - **Shell:** Tauri 2 (Rust) on both platforms; WebView2 on Windows, system WebView on Android.
 - **Frontend:** plain TypeScript, no framework.
-- **Rendering:** [foliate-js](https://github.com/johnfactotum/foliate-js) (MIT), vendored; modules not needed (PDF, MOBI, comics, TTS) are removed.
+- **Rendering:** the shared [reader-core](https://github.com/OlegG90/reader-core) package (public, MIT), also used by Simple Reader: `BookView` over [foliate-js](https://github.com/johnfactotum/foliate-js) (vendored there, without PDF, MOBI, comics and TTS), appearance, page layout, touch. An npm git dependency pinned to a tag (`git+https://github.com/OlegG90/reader-core.git#vX.Y.Z`; `.npmrc` allows this one git dependency, which npm 12 refuses by default). Key bindings, settings, the library and everything else stay in the app.
 - **Removed from Simple Reader:** Markdown support with marked, Mermaid and highlight.js.
 - **Native pieces** (All files access, credential stores, keep-screen-on, volume keys) via small app-level Tauri plugins in Kotlin (`SystemPlugin.kt`) called from Rust (`platform_android.rs`).
 - **One crate for both platforms:** `src-tauri` builds the Windows exe and the Android library; desktop-only parts (file associations, the console, single-instance, the command line, window placement) are behind `cfg(desktop)` / `cfg(windows)`.

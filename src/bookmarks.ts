@@ -1,4 +1,4 @@
-import * as CFI from './vendor/foliate-js/epubcfi.js'
+import * as CFI from 'reader-core/foliate-js/epubcfi.js'
 
 /** A place in a book the reader marked (kept per book, on this device only). */
 export interface Bookmark {
