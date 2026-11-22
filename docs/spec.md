@@ -41,8 +41,8 @@ Inherited from Simple Reader unless noted:
 
 - Tap zones: left third — previous page, right third — next page, centre — menu.
 - Swipe to turn pages.
-- Volume keys turn pages (a setting, off by default).
-- Full screen with the status bar hidden while reading.
+- Volume keys turn pages while a book is open (a setting, off by default).
+- Full screen with the status bar hidden while reading (a swipe from the top shows it for a moment).
 - The screen stays on while a book is open.
 - Orientation follows the system; no orientation lock in the first version.
 - One window: a book opens in place of the library, and the library comes back in its place (the desktop keeps a window per book).
@@ -55,7 +55,7 @@ Inherited from Simple Reader unless noted:
 - **One** library folder, stored in the config.
 - **First run** asks which folder to use as the library:
   - Desktop: default is `lib` next to the exe. If the exe's folder is not writable, the default becomes `%USERPROFILE%\Documents\Book Reader`.
-  - Android: `Documents/Books` in shared storage, through the **All files access** permission (`MANAGE_EXTERNAL_STORAGE`; fine for a sideloaded app, not allowed on Google Play). Android 11 (API 30) is the minimum: All files access starts there. The first-run button opens Android's setting for it; after turning it on the reader comes back and taps the button again. With it on, the library is a plain folder that the same Rust code scans and organizes as on Windows; if the access is later turned off, the library screen says how to turn it back on. Adding books from outside the library (Copy / Move) and choosing another folder come with the full Android version: Android's file picker hands over `content://` documents, not paths. The Storage Access Framework was not chosen: every file operation would have to go through `content://` URIs in Kotlin, a second library backend.
+  - Android: `Documents/Books` in shared storage, through the **All files access** permission (`MANAGE_EXTERNAL_STORAGE`; fine for a sideloaded app, not allowed on Google Play). Android 11 (API 30) is the minimum: All files access starts there. The first-run button opens Android's setting for it; after turning it on the reader comes back and taps the button again. With it on, the library is a plain folder that the same Rust code scans and organizes as on Windows; if the access is later turned off, the library screen says how to turn it back on. **Change…** (in the settings, and on the first-run screen) opens Android's folder picker; the folder must be on the phone's own storage (not a memory card) and is then used as a plain path. The Storage Access Framework was not chosen as the library's backend: every file operation would have to go through `content://` URIs in Kotlin, a second library backend.
 - The folder is scanned recursively for supported formats; metadata (title, author, series, cover) is cached.
 
 ### Library screen
@@ -83,7 +83,7 @@ Unknown Author/{original file name}            # no metadata
 - **Collision:** if a file with the same name but different content exists, ` (2)`, ` (3)`… is appended. If the library already holds the same book (same fingerprint, under any name), nothing is copied or moved and the window switches to the library copy. A file is never overwritten; a move that can't remove the original undoes its copy.
 - **Existing files** in the chosen folder are never renamed automatically. A manual "Organize library" command shows a preview of all renames and applies them only after confirmation.
 
-### Files outside the library (desktop)
+### Files outside the library
 
 Opening a file that is not inside the library folder shows an unobtrusive bar: **Copy to library**, **Move to library**, **Not now**, **Never for this file**.
 
@@ -92,6 +92,7 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 - After a move the window keeps showing the book from its new path.
 - The reading position survives copying and moving: book identity is a content fingerprint, not a path (as in Simple Reader).
 - If no library folder has been chosen yet (the app was first started on a book), the bar offers **Choose library folder** instead, which opens the library's first-run choice.
+- **Android:** books come from **Open with** / **Share** (EPUB and FB2; FB2 has no settled MIME type, so `application/octet-stream` is accepted too) and from **Add book…** in the library (Android's document picker). Android hands over a `content://` document, not a path, so the book is copied into the app's cache and opened from there, with the same bar. Copy and Move both put the copy into the library; Move then also deletes the original where Android allows it (a document from another app's storage may stay).
 
 ## Servers
 
@@ -134,7 +135,7 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 ## State
 
 - **Desktop:** one JSON config next to the exe (`breader.json`), falling back to `%APPDATA%\book-reader` when the folder is not writable (as in Simple Reader). It holds settings, the library folder, sources (without passwords), reading positions, bookmarks, window geometry.
-- **Android:** the same data in the app's private storage.
+- **Android:** the same data in the app's private storage. Catalog passwords are encrypted with a key kept in the Android Keystore.
 - **Book identity:** content fingerprint (from Simple Reader); the KOSync hash is computed separately for sync.
 - **Library cache:** metadata and covers, rebuilt by rescanning.
 
@@ -146,7 +147,7 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 - **Removed from Simple Reader:** Markdown support with marked, Mermaid and highlight.js.
 - **Native pieces** (All files access, credential stores, keep-screen-on, volume keys) via small app-level Tauri plugins in Kotlin (`SystemPlugin.kt`) called from Rust (`platform_android.rs`).
 - **One crate for both platforms:** `src-tauri` builds the Windows exe and the Android library; desktop-only parts (file associations, the console, single-instance, the command line, window placement) are behind `cfg(desktop)` / `cfg(windows)`.
-- **Build:** Windows locally, `npm run build:win` → portable `breader.exe`. Android in GitHub Actions only (workflow *Android*): the Android SDK and NDK have no Windows-on-ARM64 builds. Each push that touches the app builds an arm64 APK (an artifact), installed with `adb install`. The Gradle project (`src-tauri/gen/android`) was made by `tauri android init` and is kept in the repo, changed by hand from there.
+- **Build:** Windows locally, `npm run build:win` → portable `breader.exe`. Android in GitHub Actions only (workflow *Android*): the Android SDK and NDK have no Windows-on-ARM64 builds. Each push that touches the app builds an arm64 release APK (an artifact), signed with a personal release key kept in the repository's secrets (`ANDROID_KEYSTORE`, `ANDROID_KEYSTORE_PASSWORD`; a backup copy lives outside the repo), so a new APK installs over the previous one with `adb install -r`. The Gradle project (`src-tauri/gen/android`) was made by `tauri android init` and is kept in the repo, changed by hand from there.
 - **Version control:** private GitHub repository `OlegG90/book-reader`.
 
 ## Testing
