@@ -2,9 +2,9 @@
 //! HTTP Basic (Calibre-Web-Automated) or Digest (the Calibre Content Server).
 
 use md5::{Digest, Md5};
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use ureq::config::RedirectAuthHeaders;
 use ureq::{Agent, ResponseExt};
@@ -28,105 +28,93 @@ pub enum Auth {
 }
 
 /// Servers (origins) that asked for Basic: they get it without asking again.
-static BASIC_SERVERS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
-
-fn asks_for_basic(origin: &str) -> bool {
-    BASIC_SERVERS.lock().unwrap().as_ref().is_some_and(|servers| servers.contains(origin))
-}
+static BASIC_SERVERS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
 /// What a request brought back.
 #[derive(Debug)]
 pub struct Reply {
     pub status: u16,
     pub body: Vec<u8>,
+    /// The `WWW-Authenticate` header, on a 401.
+    challenge: Option<String>,
 }
 
 /// The largest download accepted: a big illustrated book, with room to spare.
 const MAX_BODY: u64 = 300 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(60);
 
-fn agent() -> Agent {
-    Agent::config_builder()
-        // 401 is an answer to act on (Digest), not an error.
-        .http_status_as_error(false)
-        .timeout_global(Some(TIMEOUT))
-        .user_agent(concat!("BookReader/", env!("CARGO_PKG_VERSION")))
-        .redirect_auth_headers(RedirectAuthHeaders::SameHost)
-        .build()
-        .into()
+/// One client for the app, so connections to a server are reused.
+fn agent() -> &'static Agent {
+    static AGENT: OnceLock<Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        Agent::config_builder()
+            // 401 is an answer to act on (Digest), not an error.
+            .http_status_as_error(false)
+            .timeout_global(Some(TIMEOUT))
+            .user_agent(concat!("BookReader/", env!("CARGO_PKG_VERSION")))
+            .redirect_auth_headers(RedirectAuthHeaders::SameHost)
+            .build()
+            .into()
+    })
 }
 
 /// GET `url`, with the login if there is one.
 pub fn get(url: &str, login: Option<&Login>, auth: Auth, accept: &str) -> Result<Reply, String> {
-    send("GET", url, login, auth, accept, None)
+    send(url, login, auth, accept, None)
 }
 
 /// PUT a JSON body to `url`.
 pub fn put_json(url: &str, login: Option<&Login>, auth: Auth, accept: &str, body: &str) -> Result<Reply, String> {
-    send("PUT", url, login, auth, accept, Some(body))
+    send(url, login, auth, accept, Some(body))
 }
 
-fn send(method: &str, url: &str, login: Option<&Login>, auth: Auth, accept: &str, body: Option<&str>) -> Result<Reply, String> {
-    let agent = agent();
+/// A GET, or with a body a PUT.
+fn send(url: &str, login: Option<&Login>, auth: Auth, accept: &str, body: Option<&str>) -> Result<Reply, String> {
     let origin = origin_of(url);
-    let basic_first = login.is_some() && (auth == Auth::Basic || asks_for_basic(&origin));
+    let basic_first = login.is_some() && (auth == Auth::Basic || BASIC_SERVERS.lock().unwrap().contains(&origin));
     let first = if basic_first { login.map(basic_header) } else { None };
-    let mut reply = request(&agent, method, url, accept, first.as_deref(), body)?;
-    let Some(login) = login.filter(|_| reply.status == 401 && !basic_first) else { return Ok(reply.reply) };
-    let challenge = reply.challenge.clone().unwrap_or_default();
-    let header = match DigestChallenge::parse(&challenge) {
-        Some(digest) => digest.header(login, method, &request_uri(url), &new_cnonce()),
+    let reply = request(url, accept, first.as_deref(), body)?;
+    let Some(login) = login.filter(|_| reply.status == 401 && !basic_first) else { return Ok(reply) };
+    let challenge = reply.challenge.as_deref().unwrap_or_default();
+    let header = match DigestChallenge::parse(challenge) {
+        Some(digest) => {
+            let method = if body.is_some() { "PUT" } else { "GET" };
+            digest.header(login, method, &request_uri(url), &new_cnonce())
+        }
         None if challenge.trim_start().to_ascii_lowercase().starts_with("basic") => basic_header(login),
-        None => return Ok(reply.reply),
+        None => return Ok(reply),
     };
-    reply = request(&agent, method, url, accept, Some(&header), body)?;
+    let reply = request(url, accept, Some(&header), body)?;
     if reply.status != 401 && header.starts_with("Basic") {
-        BASIC_SERVERS.lock().unwrap().get_or_insert_with(HashSet::new).insert(origin);
+        BASIC_SERVERS.lock().unwrap().insert(origin);
     }
-    Ok(reply.reply)
+    Ok(reply)
 }
 
-struct Answer {
-    reply: Reply,
-    /// The `WWW-Authenticate` header, on a 401.
-    challenge: Option<String>,
-}
-
-impl std::ops::Deref for Answer {
-    type Target = Reply;
-    fn deref(&self) -> &Reply {
-        &self.reply
+/// The headers every request carries.
+fn headers<B>(req: ureq::RequestBuilder<B>, accept: &str, auth: Option<&str>) -> ureq::RequestBuilder<B> {
+    let req = req.header("Accept", accept);
+    match auth {
+        Some(auth) => req.header("Authorization", auth),
+        None => req,
     }
 }
 
-fn request(agent: &Agent, method: &str, url: &str, accept: &str, auth: Option<&str>, body: Option<&str>) -> Result<Answer, String> {
+fn request(url: &str, accept: &str, auth: Option<&str>, body: Option<&str>) -> Result<Reply, String> {
     let failed = |e: ureq::Error| format!("{}: {e}", host_of(url));
-    let response = match (method, body) {
-        ("PUT", Some(body)) => {
-            let mut req = agent.put(url).header("Accept", accept).header("Content-Type", "application/json");
-            if let Some(auth) = auth {
-                req = req.header("Authorization", auth);
-            }
-            req.send(body).map_err(failed)?
-        }
-        _ => {
-            let mut req = agent.get(url).header("Accept", accept);
-            if let Some(auth) = auth {
-                req = req.header("Authorization", auth);
-            }
-            req.call().map_err(failed)?
-        }
-    };
+    let mut response = match body {
+        Some(body) => headers(agent().put(url), accept, auth).header("Content-Type", "application/json").send(body),
+        None => headers(agent().get(url), accept, auth).call(),
+    }
+    .map_err(failed)?;
     // A redirect may not lead off the server the request was meant for.
     if origin_of(&response.get_uri().to_string()) != origin_of(url) {
         return Err(format!("{} sent the request on to another server", host_of(url)));
     }
     let status = response.status().as_u16();
-    let header = |name: &str| response.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string);
-    let challenge = header("www-authenticate");
-    let mut response = response;
+    let challenge = response.headers().get("www-authenticate").and_then(|v| v.to_str().ok()).map(str::to_string);
     let body = response.body_mut().with_config().limit(MAX_BODY).read_to_vec().map_err(failed)?;
-    Ok(Answer { reply: Reply { status, body }, challenge })
+    Ok(Reply { status, body, challenge })
 }
 
 /// Scheme, host and port of a URL ("" if it isn't one).
@@ -141,13 +129,8 @@ fn host_of(url: &str) -> String {
 
 /// The path and query a Digest response is computed over.
 fn request_uri(url: &str) -> String {
-    match url::Url::parse(url) {
-        Ok(u) => match u.query() {
-            Some(q) => format!("{}?{q}", u.path()),
-            None => u.path().to_string(),
-        },
-        Err(_) => url.to_string(),
-    }
+    use url::Position;
+    url::Url::parse(url).map_or_else(|_| url.to_string(), |u| u[Position::BeforePath..Position::AfterQuery].to_string())
 }
 
 fn basic_header(login: &Login) -> String {
@@ -157,14 +140,13 @@ fn basic_header(login: &Login) -> String {
 }
 
 fn md5_hex(text: &str) -> String {
-    Md5::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+    format!("{:x}", Md5::digest(text.as_bytes()))
 }
 
 /// A client nonce: unique per request, needn't be secret.
 fn new_cnonce() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    md5_hex(&format!("{now}-{}", COUNTER.fetch_add(1, Ordering::Relaxed)))[..16].to_string()
+    md5_hex(&format!("{}-{}", crate::clock::now_nanos(), COUNTER.fetch_add(1, Ordering::Relaxed)))[..16].to_string()
 }
 
 /// A `WWW-Authenticate: Digest ...` challenge (RFC 2617, MD5).

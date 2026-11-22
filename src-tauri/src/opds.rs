@@ -2,7 +2,7 @@
 //! their Atom feeds and OpenSearch descriptions. Fetching is elsewhere; this
 //! only turns text into what the catalog screen shows.
 
-use crate::xml::{attr, last_two, local_name, walk_xml, Xml};
+use crate::xml::{attr, invalid, last_two, local_name, walk_xml, Xml};
 use serde::Serialize;
 use std::io;
 use url::Url;
@@ -87,10 +87,6 @@ impl FileFormat {
             None
         }
     }
-}
-
-fn invalid(message: impl ToString) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message.to_string())
 }
 
 /// `href` made absolute against the feed's own address.

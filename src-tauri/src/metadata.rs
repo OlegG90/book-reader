@@ -3,7 +3,7 @@
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use crate::xml::{attr, last_two, local_name, walk_xml, Xml};
+use crate::xml::{attr, invalid, last_two, local_name, walk_xml, Xml};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek};
@@ -137,10 +137,6 @@ pub fn read(path: &Path) -> io::Result<Metadata> {
             fb2(&read_entry(&mut zip, &name)?)
         }
     }
-}
-
-fn invalid(message: impl ToString) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message.to_string())
 }
 
 fn zip_error(e: zip::result::ZipError) -> io::Error {

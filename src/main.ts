@@ -171,12 +171,12 @@ async function openCurrentBook() {
       },
       externalLink: href => void openUrl(href).catch(console.error),
     })
-    restoring = false
   } catch (e) {
-    restoring = false
     showError(info?.fileName, e)
     // The library, Ctrl+O and the recent books stay one step away.
     return showLibraryScreen()
+  } finally {
+    restoring = false
   }
   const title = book.title || info.fileName
   void appWindow.setTitle(title).catch(console.error)

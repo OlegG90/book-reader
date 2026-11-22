@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { Source } from './catalog'
+import { fetchSources, type Source } from './catalog'
 import { el } from './dom'
 
 /**
@@ -20,10 +20,7 @@ export function createSourcesPanel(host: HTMLElement) {
   }
 
   async function refresh() {
-    const sources = await invoke<Source[]>('catalog_sources').catch((e): Source[] => {
-      console.error(e)
-      return []
-    })
+    const sources = await fetchSources()
     list.replaceChildren(
       ...sources.map(source =>
         el(
@@ -91,9 +88,9 @@ export function createSourcesPanel(host: HTMLElement) {
             sync: sync.checked,
           },
         })
+        // The list follows through catalogs-changed.
         close()
         status.textContent = saved.warning ?? ''
-        await refresh()
       } catch (err) {
         formMessage.textContent = String(err)
       }
@@ -112,7 +109,6 @@ export function createSourcesPanel(host: HTMLElement) {
 
   async function remove(source: Source) {
     await invoke('delete_catalog_source', { id: source.id }).catch(e => (status.textContent = String(e)))
-    await refresh()
   }
 
   void refresh()

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import { FORMAT_LABELS, inLibrary, preferredFile, type CatalogBook, type CatalogEntry, type Feed, type Source } from './catalog'
+import { FORMAT_LABELS, fetchSources, inLibrary, preferredFile, type CatalogBook, type CatalogEntry, type Feed, type Source } from './catalog'
 import { el } from './dom'
 
 /** A page the reader went to, kept so Back shows it again without a refetch. */
@@ -37,13 +37,9 @@ export function createCatalogView(deps: CatalogViewDeps) {
   }
 
   async function loadSources() {
-    sources = await invoke<Source[]>('catalog_sources').catch((e): Source[] => {
-      console.error(e)
-      return []
-    })
+    sources = await fetchSources()
     sourceSelect.replaceChildren(...sources.map(s => el('option', { value: s.id, textContent: s.name })))
     sourceSelect.hidden = sources.length < 2
-    const kept = sources.find(s => s.id === source?.id)
     if (!sources.length) {
       source = undefined
       pages = []
@@ -54,16 +50,11 @@ export function createCatalogView(deps: CatalogViewDeps) {
       )
       return
     }
-    if (kept) {
-      source = kept
-      sourceSelect.value = kept.id
-      if (!pages.length) await open(null)
-      return
-    }
-    source = sources[0]
+    const kept = sources.find(s => s.id === source?.id)
+    source = kept ?? sources[0]
+    if (!kept) pages = []
     sourceSelect.value = source.id
-    pages = []
-    await open(null)
+    if (!pages.length) await open(null)
   }
 
   /** Opens a feed: the catalog's root (null), a folder, or a search. */
@@ -137,7 +128,8 @@ export function createCatalogView(deps: CatalogViewDeps) {
     // Only a hint (same title and author): downloading checks the content.
     const known = inLibrary(book, deps.library())
     if (file) {
-      action.textContent = `Download ${FORMAT_LABELS[file.format]}`
+      const label = `Download ${FORMAT_LABELS[file.format]}`
+      action.textContent = label
       action.onclick = async () => {
         if (!source) return
         action.disabled = true
@@ -152,7 +144,7 @@ export function createCatalogView(deps: CatalogViewDeps) {
           action.title = added.path
         } catch (e) {
           action.disabled = false
-          action.textContent = `Download ${FORMAT_LABELS[file.format]}`
+          action.textContent = label
           action.title = String(e)
           message(String(e))
         }
@@ -206,12 +198,14 @@ export function createCatalogView(deps: CatalogViewDeps) {
     pages = []
     void open(null)
   })
-  back.addEventListener('click', () => {
+  function goBack() {
     request++
     pages.pop()
     message('')
     render()
-  })
+  }
+
+  back.addEventListener('click', goBack)
   more.addEventListener('click', () => void loadMore())
   search.addEventListener('keydown', e => {
     if (e.key !== 'Enter' || !search.value.trim()) return
@@ -224,7 +218,7 @@ export function createCatalogView(deps: CatalogViewDeps) {
     /** Back inside the catalog: true when there was a page to go back to. */
     back(): boolean {
       if (pages.length < 2) return false
-      back.click()
+      goBack()
       return true
     },
   }

@@ -21,17 +21,18 @@ const SAMPLES: u32 = 12;
 pub fn document_id(path: &Path) -> io::Result<String> {
     let mut file = File::open(path)?;
     let mut md5 = Md5::new();
-    let mut buffer = [0u8; SAMPLE as usize];
+    let mut buffer = Vec::with_capacity(SAMPLE as usize);
     for i in 0..SAMPLES {
         let offset = if i == 0 { 0 } else { SAMPLE << (2 * (i - 1)) };
         file.seek(SeekFrom::Start(offset))?;
-        let read = read_up_to(&mut file, &mut buffer)?;
-        if read == 0 {
+        buffer.clear();
+        (&mut file).take(SAMPLE).read_to_end(&mut buffer)?;
+        if buffer.is_empty() {
             break;
         }
-        md5.update(&buffer[..read]);
+        md5.update(&buffer);
     }
-    Ok(md5.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    Ok(format!("{:x}", md5.finalize()))
 }
 
 const ACCEPT: &str = "application/vnd.koreader.v1+json";
@@ -95,31 +96,22 @@ pub fn pull(source: &Source, document: &str) -> Result<Option<Progress>, String>
     }))
 }
 
-/// Sends a book's position to the server (which stamps the time itself).
-pub fn push(source: &Source, document: &str, progress: &str, percentage: f64, device: &str, device_id: &str) -> Result<(), String> {
-    #[derive(Serialize)]
-    struct Update<'a> {
-        document: &'a str,
-        progress: &'a str,
-        percentage: f64,
-        device: &'a str,
-        device_id: &'a str,
-    }
-    let body = serde_json::to_string(&Update { document, progress, percentage, device, device_id }).map_err(|e| e.to_string())?;
-    let url = format!("{}/syncs/progress", base(source)?);
-    check(source, net::put_json(&url, catalog::login(source).as_ref(), Auth::Basic, ACCEPT, &body)?).map(|_| ())
+/// A book's position, as it goes to the server (which stamps the time itself).
+#[derive(Serialize)]
+pub struct Update<'a> {
+    /// The book's `document_id`.
+    pub document: &'a str,
+    pub progress: &'a str,
+    pub percentage: f64,
+    pub device: &'a str,
+    pub device_id: &'a str,
 }
 
-/// Reads until `buffer` is full or the file ends.
-fn read_up_to(file: &mut File, buffer: &mut [u8]) -> io::Result<usize> {
-    let mut filled = 0;
-    while filled < buffer.len() {
-        match file.read(&mut buffer[filled..])? {
-            0 => break,
-            n => filled += n,
-        }
-    }
-    Ok(filled)
+/// Sends a book's position to the server.
+pub fn push(source: &Source, update: &Update) -> Result<(), String> {
+    let body = serde_json::to_string(update).map_err(|e| e.to_string())?;
+    let url = format!("{}/syncs/progress", base(source)?);
+    check(source, net::put_json(&url, catalog::login(source).as_ref(), Auth::Basic, ACCEPT, &body)?).map(|_| ())
 }
 
 #[cfg(test)]
@@ -136,7 +128,7 @@ mod tests {
             }
             md5.update(&bytes[offset..(offset + 1024).min(bytes.len())]);
         }
-        md5.finalize().iter().map(|b| format!("{b:02x}")).collect()
+        format!("{:x}", md5.finalize())
     }
 
     #[test]

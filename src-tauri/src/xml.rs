@@ -5,7 +5,8 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 use std::io;
 
-fn invalid(message: impl ToString) -> io::Error {
+/// An error for data that isn't what it should be.
+pub fn invalid(message: impl ToString) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.to_string())
 }
 

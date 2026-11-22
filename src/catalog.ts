@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core'
 /** What the backend reports about OPDS catalogs (see catalog.rs / opds.rs). */
 
 export interface Source {
@@ -73,4 +74,12 @@ export function inLibrary(book: { title: string; authors: string[] }, library: {
   const title = fold(book.title)
   const author = surname(book.authors[0] ?? '')
   return library.some(b => fold(b.title) === title && surname(b.authors[0] ?? '') === author)
+}
+
+/** The catalog sources, or none when they can't be read. */
+export async function fetchSources(): Promise<Source[]> {
+  return invoke<Source[]>('catalog_sources').catch((e): Source[] => {
+    console.error(e)
+    return []
+  })
 }

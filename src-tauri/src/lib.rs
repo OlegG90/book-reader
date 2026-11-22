@@ -2,6 +2,7 @@
 #[cfg_attr(mobile, allow(dead_code))]
 mod catalog;
 mod cli;
+mod clock;
 #[cfg(desktop)]
 #[cfg_attr(not(windows), path = "console_stdout.rs")]
 mod console;
@@ -30,6 +31,7 @@ mod xml;
 #[cfg(desktop)]
 use cli::Command;
 use cli::Launch;
+use clock::now_ms;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -392,8 +394,11 @@ fn library_root(store: &Store) -> Result<PathBuf, String> {
     store.read(|s| s.library.clone()).ok_or_else(|| "No library folder is set".into())
 }
 
+/// The app's cache folder, next to its settings.
+const CACHE_DIR: &str = "breader-cache";
+
 fn library_cache(store: &Store) -> library::Cache {
-    library::Cache::new(store.dir().join("breader-cache"))
+    library::Cache::new(store.dir().join(CACHE_DIR))
 }
 
 #[derive(Serialize)]
@@ -567,10 +572,6 @@ fn put_in_library(store: &Store, books: &LibraryBooks, source: &Path, mode: AddM
     Ok((added, fingerprint))
 }
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
-}
-
 // ---- Progress sync (KOSync) -----------------------------------------------------
 
 /// The source that syncs progress, if one is set.
@@ -627,7 +628,7 @@ struct SyncOffer {
 }
 
 /// What the sync server's position means for the book just opened.
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct SyncState {
     /// A newer position from another device, to offer.
@@ -642,27 +643,33 @@ struct SyncState {
 /// it comes from another device, differs from the one here and is newer.
 #[tauri::command(async)]
 fn sync_pull(store: State<Store>, document: String, fingerprint: String) -> Result<SyncState, String> {
-    let Some(source) = sync_source(&store) else { return Ok(SyncState { offer: None, push: false }) };
+    let Some(source) = sync_source(&store) else { return Ok(SyncState::default()) };
     let remote = kosync::pull(&source, &document)?;
     let local = store.read(|s| s.positions.get(&fingerprint).cloned());
-    let Some(remote) = remote else { return Ok(SyncState { offer: None, push: local.is_some() }) };
+    Ok(compare_positions(local.as_ref(), remote, &device_id(&store)?))
+}
+
+/// The newer position wins: the server's is offered when it comes from
+/// another device; the local one is pushed when the server lags behind it.
+fn compare_positions(local: Option<&Position>, remote: Option<kosync::Progress>, own_device: &str) -> SyncState {
+    let Some(remote) = remote else { return SyncState { offer: None, push: local.is_some() } };
     let time = remote.timestamp * 1000;
-    let here = local.as_ref().map_or(0, |here| here.time);
-    if local.as_ref().is_some_and(|here| here.cfi == remote.progress) {
-        return Ok(SyncState { offer: None, push: false });
+    let here = local.map_or(0, |here| here.time);
+    if local.is_some_and(|here| here.cfi == remote.progress) {
+        return SyncState::default();
     }
-    if here >= time || remote.device_id == device_id(&store)? {
-        return Ok(SyncState { offer: None, push: local.is_some() && here > time });
+    if here >= time || remote.device_id == own_device {
+        return SyncState { offer: None, push: local.is_some() && here > time };
     }
-    let offer = SyncOffer { cfi: remote.progress, fraction: remote.percentage, device: remote.device, time };
-    Ok(SyncState { offer: Some(offer), push: false })
+    SyncState { offer: Some(SyncOffer { cfi: remote.progress, fraction: remote.percentage, device: remote.device, time }), push: false }
 }
 
 /// Sends a book's position to the sync server.
 #[tauri::command(async)]
 fn sync_push(store: State<Store>, document: String, cfi: String, fraction: f64) -> Result<(), String> {
     let Some(source) = sync_source(&store) else { return Ok(()) };
-    kosync::push(&source, &document, &cfi, fraction, DEVICE_NAME, &device_id(&store)?)
+    let device_id = device_id(&store)?;
+    kosync::push(&source, &kosync::Update { document: &document, progress: &cfi, percentage: fraction, device: DEVICE_NAME, device_id: &device_id })
 }
 
 // ---- Catalogs -----------------------------------------------------------------
@@ -715,10 +722,7 @@ fn save_catalog_source(
     input: SourceInput,
 ) -> Result<SavedSource, String> {
     let url = catalog::check_url(&input.url)?;
-    let id = input.id.filter(|id| !id.is_empty()).unwrap_or_else(|| {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-        format!("{now:x}")
-    });
+    let id = input.id.filter(|id| !id.is_empty()).unwrap_or_else(|| format!("{:x}", clock::now_nanos()));
     let name = match input.name.trim() {
         "" => url.host_str().unwrap_or("Catalog").to_string(),
         name => name.to_string(),
@@ -727,15 +731,11 @@ fn save_catalog_source(
     // The reader types the server's address; the catalog may be under /opds.
     // The new password is tried first and kept only if the server takes it.
     let password = input.password.filter(|p| !p.is_empty());
-    let login = match &password {
-        Some(password) => (!source.user.is_empty()).then(|| net::Login { user: source.user.clone(), password: password.clone() }),
-        None => catalog::login(&source),
-    };
-    source.url = catalog::discover(&source, login.as_ref())?;
+    let url = catalog::discover(&source, catalog::login_with(&source, password.as_deref()).as_ref())?;
+    source.url = url.to_string();
     if let Some(password) = password {
         platform::save_password(&id, &password)?;
     }
-    let url = catalog::check_url(&source.url)?;
     store
         .update(|s| {
             if source.sync {
@@ -802,7 +802,7 @@ fn catalog_download(
     format: opds::FileFormat,
 ) -> Result<Added, String> {
     let source = source_by_id(&store, &id)?;
-    let downloads = store.dir().join("breader-cache").join("downloads");
+    let downloads = store.dir().join(CACHE_DIR).join("downloads");
     let file = catalog::download(&source, &url, format, &downloads)?;
     let result = put_in_library(&store, &books, &file, AddMode::Move);
     // Left behind when the library already had the book, or on a failure.
@@ -1152,7 +1152,40 @@ fn report(result: std::io::Result<()>, success: &str) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::theme_script;
+    use super::{compare_positions, kosync::Progress, theme_script, Position};
+
+    fn here(cfi: &str, time: u64) -> Position {
+        Position { cfi: cfi.into(), fraction: 0.5, time }
+    }
+
+    fn server(cfi: &str, device_id: &str, timestamp: u64) -> Progress {
+        Progress { progress: cfi.into(), percentage: 0.6, device: "phone".into(), device_id: device_id.into(), timestamp }
+    }
+
+    #[test]
+    fn a_newer_position_from_another_device_is_offered() {
+        let state = compare_positions(Some(&here("a", 1_000)), Some(server("b", "phone", 2)), "pc");
+        assert_eq!(state.offer.map(|o| o.cfi).as_deref(), Some("b"));
+        assert!(!state.push);
+        let state = compare_positions(None, Some(server("b", "phone", 2)), "pc");
+        assert!(state.offer.is_some(), "a book not read here yet");
+    }
+
+    #[test]
+    fn a_newer_local_position_is_pushed() {
+        let state = compare_positions(Some(&here("a", 3_000)), Some(server("b", "phone", 2)), "pc");
+        assert!(state.offer.is_none() && state.push);
+        let state = compare_positions(Some(&here("a", 1)), None, "pc");
+        assert!(state.offer.is_none() && state.push, "the server has nothing yet");
+    }
+
+    #[test]
+    fn the_same_place_or_this_devices_own_position_changes_nothing() {
+        let state = compare_positions(Some(&here("b", 1_000)), Some(server("b", "phone", 2)), "pc");
+        assert!(state.offer.is_none() && !state.push);
+        let state = compare_positions(Some(&here("a", 1_000)), Some(server("b", "pc", 2)), "pc");
+        assert!(state.offer.is_none() && !state.push);
+    }
 
     #[test]
     fn theme_script_uses_known_themes() {

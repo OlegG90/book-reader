@@ -67,7 +67,15 @@ fn on_server(source: &Source, url: &str) -> bool {
 
 /// The source's login, with the password from the credential store.
 pub fn login(source: &Source) -> Option<Login> {
-    (!source.user.is_empty()).then(|| Login { user: source.user.clone(), password: platform::password(&source.id).unwrap_or_default() })
+    login_with(source, None)
+}
+
+/// The source's login with `password`, or the kept one when that is None.
+pub fn login_with(source: &Source, password: Option<&str>) -> Option<Login> {
+    (!source.user.is_empty()).then(|| Login {
+        user: source.user.clone(),
+        password: password.map(str::to_string).or_else(|| platform::password(&source.id)).unwrap_or_default(),
+    })
 }
 
 /// What a refused login reads as.
@@ -94,25 +102,25 @@ fn fetch(source: &Source, url: &str, accept: &str) -> Result<Reply, String> {
 /// (where Calibre-Web, CWA and the Calibre Content Server all keep theirs).
 /// Returns the catalog's address. `login` is the one being saved, so a
 /// refused password never replaces a working one.
-pub fn discover(source: &Source, login: Option<&Login>) -> Result<String, String> {
+pub fn discover(source: &Source, login: Option<&Login>) -> Result<Url, String> {
     let typed = check_url(&source.url)?;
-    let mut candidates = vec![typed.to_string()];
-    let under = format!("{}/opds", typed.as_str().trim_end_matches('/'));
-    let at_root = typed.join("/opds").map(String::from).unwrap_or_default();
-    for candidate in [under, at_root] {
+    let mut candidates = vec![typed.clone()];
+    let under = Url::parse(&format!("{}/opds", typed.as_str().trim_end_matches('/')));
+    for candidate in [under, typed.join("/opds")].into_iter().flatten() {
         if !candidates.contains(&candidate) {
             candidates.push(candidate);
         }
     }
     for candidate in &candidates {
-        let reply = net::get(candidate, login, Auth::OnChallenge, FEED_TYPES)?;
+        let reply = net::get(candidate.as_str(), login, Auth::OnChallenge, FEED_TYPES)?;
         match reply.status {
             401 | 403 => return Err(refused(typed.host_str().unwrap_or("The server"))),
-            200..=299 if opds::parse_feed(&String::from_utf8_lossy(&reply.body), candidate).is_ok() => return Ok(candidate.clone()),
+            200..=299 if opds::parse_feed(&String::from_utf8_lossy(&reply.body), candidate.as_str()).is_ok() => return Ok(candidate.clone()),
             _ => {}
         }
     }
-    Err(format!("No OPDS catalog found: tried {}", candidates.join(", ")))
+    let tried: Vec<&str> = candidates.iter().map(Url::as_str).collect();
+    Err(format!("No OPDS catalog found: tried {}", tried.join(", ")))
 }
 
 /// A page of the catalog: the source's root, or `url` on its server.
@@ -143,10 +151,8 @@ pub fn image(source: &Source, url: &str) -> Result<Vec<u8>, String> {
 /// A book file, saved under `dir` with its format's extension; returns its path.
 pub fn download(source: &Source, url: &str, format: FileFormat, dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
     let reply = fetch(source, url, "*/*")?;
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    let path = dir.join(format!("download-{stamp}.{}", format.extension()));
-    std::fs::write(&path, &reply.body).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("download-{}.{}", crate::clock::now_nanos(), format.extension()));
+    crate::store::write_atomically(&path, &reply.body).map_err(|e| e.to_string())?;
     Ok(path)
 }
 
