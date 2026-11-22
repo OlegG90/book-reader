@@ -19,3 +19,8 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# SystemPlugin.kt is found by name (platform_android.rs), its commands by
+# annotation, and the argument classes are filled in by reflection.
+-keep class com.olegg90.bookreader.SystemPlugin { *; }
+-keep @app.tauri.annotation.InvokeArg class * { *; }
