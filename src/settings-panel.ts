@@ -6,6 +6,8 @@ export interface PanelValues extends Appearance {
   savePositions: boolean
   /** Offer to copy or move books opened from outside the library into it. */
   offerLibrary: boolean
+  /** Android: the volume keys turn pages. */
+  volumeKeys: boolean
 }
 
 /** Buttons in the panel that act instead of changing a value. */
@@ -70,11 +72,13 @@ export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onC
   const libraryButtons = el(
     'div',
     { className: 'buttons' },
-    el('button', { type: 'button', className: 'desktop-only', textContent: 'Change…', onclick: actions.changeLibrary }),
+    el('button', { type: 'button', textContent: 'Change…', onclick: actions.changeLibrary }),
     el('button', { type: 'button', textContent: 'Organize…', onclick: actions.organizeLibrary }),
   )
   const offerLibrary = el('input', { type: 'checkbox' })
   offerLibrary.onchange = () => onChange({ offerLibrary: offerLibrary.checked })
+  const volumeKeys = el('input', { type: 'checkbox' })
+  volumeKeys.onchange = () => onChange({ volumeKeys: volumeKeys.checked })
   const fileTypesStatus = el('output')
   const fileTypesButton = el('button', {
     type: 'button',
@@ -89,6 +93,7 @@ export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onC
     field('Line spacing', lineHeight, lineHeightValue),
     field('Line length', lineLength, lineLengthValue),
     el('label', { className: 'check' }, savePositions, 'Remember reading position'),
+    el('label', { className: 'check android-only' }, volumeKeys, 'Volume keys turn pages'),
     field('Library folder', libraryFolder, libraryButtons),
     el('label', { className: 'check' }, offerLibrary, 'Offer to add books opened from elsewhere'),
     field('History', clearHistory),
@@ -98,6 +103,7 @@ export function createSettingsPanel(host: HTMLElement, initial: PanelValues, onC
   function show(values: PanelValues) {
     current = values
     offerLibrary.checked = values.offerLibrary
+    volumeKeys.checked = values.volumeKeys
     themeButtons.forEach((button, i) => button.setAttribute('aria-pressed', String(THEMES[i] === values.theme)))
     font.value = values.font
     size.textContent = `${values.fontSize}px`

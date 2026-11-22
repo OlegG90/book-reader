@@ -16,7 +16,7 @@
         <h1>Welcome to Book Reader</h1>
         <p>Choose the folder for your library. Books you add to the library are kept there.</p>
         <p><button id="setup-default" class="primary">Use <span id="setup-suggested"></span></button></p>
-        <p class="desktop-only"><button id="setup-pick" class="link">Choose another folder…</button></p>
+        <p><button id="setup-pick" class="link">Choose another folder…</button></p>
       </section>
       <section id="library" hidden>
         <div class="library-tabs" role="tablist">
@@ -28,7 +28,7 @@
             <input id="library-search" type="search" placeholder="Search title, author, series" aria-label="Search the library" />
             <select id="library-status" aria-label="Show"></select>
             <select id="library-sort" aria-label="Sort by"></select>
-            <button id="open-button" title="Open a book file (Ctrl+O)">Open file…</button>
+            <button id="open-button" title="Open a book file (Ctrl+O)"><span class="desktop-only">Open file…</span><span class="android-only">Add book…</span></button>
           </div>
           <h2 id="recent-title">Continue reading</h2>
           <ol id="recent" aria-label="Recent books"></ol>

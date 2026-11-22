@@ -27,7 +27,6 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-tauri-plugin-dialog = "2.7.3"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 quick-xml = "0.41.0"
 encoding_rs = "0.8.35"
@@ -44,6 +43,8 @@ windows-sys = { version = "0.61.2", features = ["Win32_System_Console", "Win32_U
 # Desktop only: a second launch hands its file to the running app.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2.4.5"
+# File dialogs (books, the library folder); a phone uses SystemPlugin.kt.
+tauri-plugin-dialog = "2.7.3"
 # Catalog passwords live in the OS credential store (the Windows Credential Manager...).
 keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }
 

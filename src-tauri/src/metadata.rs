@@ -84,6 +84,12 @@ pub enum Format {
 const SUFFIXES: &[(&str, Format)] =
     &[(".epub", Format::Epub), (".fb2.zip", Format::Fb2Zip), (".fbz", Format::Fb2Zip), (".fb2", Format::Fb2)];
 
+/// The same endings without the dot, for a file dialog's filter.
+#[cfg_attr(mobile, allow(dead_code))]
+pub fn extensions() -> Vec<&'static str> {
+    SUFFIXES.iter().map(|(suffix, _)| &suffix[1..]).collect()
+}
+
 impl Format {
     /// Splits a file name (or path) into the part before its book extension
     /// and the format; `None` for files the reader doesn't open.

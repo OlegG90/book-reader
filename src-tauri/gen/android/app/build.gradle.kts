@@ -17,12 +17,30 @@ android {
     compileSdk = 36
     namespace = "com.olegg90.bookreader"
     defaultConfig {
-        manifestPlaceholders["usesCleartextTraffic"] = "false"
+        // Catalog servers on the home network often speak plain HTTP (the app
+        // warns when that crosses the internet).
+        manifestPlaceholders["usesCleartextTraffic"] = "true"
         applicationId = "com.olegg90.bookreader"
         minSdk = 30
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    // The release key (the same for every version, so updates install over the
+    // previous one) comes from CI: ANDROID_KEYSTORE_FILE, alias "book-reader",
+    // one password for the store and the key. A local release build without it
+    // is left unsigned.
+    val releaseKeystore = System.getenv("ANDROID_KEYSTORE_FILE")
+    val releasePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = releasePassword
+                keyAlias = "book-reader"
+                keyPassword = releasePassword
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -37,6 +55,7 @@ android {
             }
         }
         getByName("release") {
+            if (releaseKeystore != null) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
