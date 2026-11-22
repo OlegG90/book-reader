@@ -197,9 +197,14 @@ fn read_book(window: Window, windows: State<ReaderWindows>) -> Result<Response, 
 /// pending when another book replaces it is saved under the right book.
 #[tauri::command(async)]
 fn save_position(store: State<Store>, fingerprint: String, mut position: Position) -> Result<(), String> {
-    position.time = now_ms();
     store
         .update(|s| {
+            // The time says when the reader moved there (sync compares it), so
+            // saving the same place again (a reflow) keeps it.
+            position.time = match s.positions.get(&fingerprint) {
+                Some(old) if old.cfi == position.cfi => old.time,
+                _ => now_ms(),
+            };
             s.positions.insert(fingerprint, position);
         })
         .map_err(|e| e.to_string())
@@ -579,20 +584,35 @@ fn device_id(store: &Store) -> Result<String, String> {
     if !id.is_empty() {
         return Ok(id);
     }
-    let id = format!("{:016x}", now_ms() ^ u64::from(std::process::id()).rotate_left(32));
-    store.update(|s| s.device_id = id.clone()).map_err(|e| e.to_string())?;
+    let made = format!("{:016x}", now_ms() ^ u64::from(std::process::id()).rotate_left(32));
+    // Checked again under the store's lock: a pull and a push may both get here.
+    let mut id = String::new();
+    store
+        .update(|s| {
+            if s.device_id.is_empty() {
+                s.device_id = made;
+            }
+            id = s.device_id.clone();
+        })
+        .map_err(|e| e.to_string())?;
     Ok(id)
 }
 
-const DEVICE_NAME: &str = if cfg!(mobile) { "Book Reader on Android" } else { "Book Reader on Windows" };
+const DEVICE_NAME: &str = if cfg!(mobile) {
+    "Book Reader on Android"
+} else if cfg!(windows) {
+    "Book Reader on Windows"
+} else {
+    "Book Reader"
+};
 
-/// The window's book, when its progress may be synced.
-fn sync_book(window: &Window) -> Option<PathBuf> {
+/// The window's book's id on the sync server, when its progress syncs
+/// (there is a sync source, and the window keeps positions).
+#[tauri::command(async)]
+fn sync_document(window: Window, store: State<Store>) -> Result<Option<String>, String> {
     let launch = window.state::<ReaderWindows>().get(window.label());
-    if launch.no_save {
-        return None;
-    }
-    launch.file
+    let (Some(path), false, Some(_)) = (launch.file, launch.no_save, sync_source(&store)) else { return Ok(None) };
+    kosync::document_id(&path).map(Some).map_err(|e| e.to_string())
 }
 
 /// A newer position from another device, offered when a book opens.
@@ -606,30 +626,42 @@ struct SyncOffer {
     time: u64,
 }
 
-/// Asks the sync server for the window's book. Offers its position only if
-/// it comes from another device, differs from the one here and is newer.
-#[tauri::command(async)]
-fn sync_pull(window: Window, store: State<Store>) -> Result<Option<SyncOffer>, String> {
-    let (Some(source), Some(path)) = (sync_source(&store), sync_book(&window)) else { return Ok(None) };
-    let document = kosync::document_id(&path).map_err(|e| e.to_string())?;
-    let Some(remote) = kosync::pull(&source, &document)? else { return Ok(None) };
-    if remote.device_id == device_id(&store)? {
-        return Ok(None);
-    }
-    let fingerprint = fingerprint::fingerprint(&path).map_err(|e| e.to_string())?;
-    let time = remote.timestamp * 1000;
-    let local = store.read(|s| s.positions.get(&fingerprint).cloned());
-    if local.is_some_and(|here| here.cfi == remote.progress || here.time >= time) {
-        return Ok(None);
-    }
-    Ok(Some(SyncOffer { cfi: remote.progress, fraction: remote.percentage, device: remote.device, time }))
+/// What the sync server's position means for the book just opened.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncState {
+    /// A newer position from another device, to offer.
+    offer: Option<SyncOffer>,
+    /// The position here is newer than the server's (a push that didn't get
+    /// through, or reading while offline): send it.
+    push: bool,
 }
 
-/// Sends the window's book's position to the sync server.
+/// Asks the sync server about a book (`document` from `sync_document`; its
+/// local position under `fingerprint`). A server position is offered only if
+/// it comes from another device, differs from the one here and is newer.
 #[tauri::command(async)]
-fn sync_push(window: Window, store: State<Store>, cfi: String, fraction: f64) -> Result<(), String> {
-    let (Some(source), Some(path)) = (sync_source(&store), sync_book(&window)) else { return Ok(()) };
-    let document = kosync::document_id(&path).map_err(|e| e.to_string())?;
+fn sync_pull(store: State<Store>, document: String, fingerprint: String) -> Result<SyncState, String> {
+    let Some(source) = sync_source(&store) else { return Ok(SyncState { offer: None, push: false }) };
+    let remote = kosync::pull(&source, &document)?;
+    let local = store.read(|s| s.positions.get(&fingerprint).cloned());
+    let Some(remote) = remote else { return Ok(SyncState { offer: None, push: local.is_some() }) };
+    let time = remote.timestamp * 1000;
+    let here = local.as_ref().map_or(0, |here| here.time);
+    if local.as_ref().is_some_and(|here| here.cfi == remote.progress) {
+        return Ok(SyncState { offer: None, push: false });
+    }
+    if here >= time || remote.device_id == device_id(&store)? {
+        return Ok(SyncState { offer: None, push: local.is_some() && here > time });
+    }
+    let offer = SyncOffer { cfi: remote.progress, fraction: remote.percentage, device: remote.device, time };
+    Ok(SyncState { offer: Some(offer), push: false })
+}
+
+/// Sends a book's position to the sync server.
+#[tauri::command(async)]
+fn sync_push(store: State<Store>, document: String, cfi: String, fraction: f64) -> Result<(), String> {
+    let Some(source) = sync_source(&store) else { return Ok(()) };
     kosync::push(&source, &document, &cfi, fraction, DEVICE_NAME, &device_id(&store)?)
 }
 
@@ -687,21 +719,22 @@ fn save_catalog_source(
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
         format!("{now:x}")
     });
-    if let Some(password) = input.password.filter(|p| !p.is_empty()) {
-        platform::save_password(&id, &password)?;
-    }
     let name = match input.name.trim() {
         "" => url.host_str().unwrap_or("Catalog").to_string(),
         name => name.to_string(),
     };
     let mut source = catalog::Source { id: id.clone(), name, url: url.to_string(), user: input.user.trim().to_string(), sync: input.sync };
     // The reader types the server's address; the catalog may be under /opds.
-    let is_new = store.read(|s| !s.sources.iter().any(|other| other.id == id));
-    source.url = catalog::discover(&source).inspect_err(|_| {
-        if is_new {
-            platform::forget_password(&id);
-        }
-    })?;
+    // The new password is tried first and kept only if the server takes it.
+    let password = input.password.filter(|p| !p.is_empty());
+    let login = match &password {
+        Some(password) => (!source.user.is_empty()).then(|| net::Login { user: source.user.clone(), password: password.clone() }),
+        None => catalog::login(&source),
+    };
+    source.url = catalog::discover(&source, login.as_ref())?;
+    if let Some(password) = password {
+        platform::save_password(&id, &password)?;
+    }
     let url = catalog::check_url(&source.url)?;
     store
         .update(|s| {
@@ -1040,6 +1073,7 @@ pub fn run() {
             catalog_search,
             catalog_image,
             catalog_download,
+            sync_document,
             sync_pull,
             sync_push,
             add_to_library,

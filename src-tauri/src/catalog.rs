@@ -2,7 +2,7 @@
 //! a feed, a search, a cover, a book file. Every request goes to a source's
 //! own server, so a feed or a book can't make the app fetch anything else.
 
-use crate::net::{self, Login, Reply};
+use crate::net::{self, Auth, Login, Reply};
 use crate::opds::{self, Feed, FileFormat};
 use crate::platform;
 use serde::{Deserialize, Serialize};
@@ -43,16 +43,16 @@ pub fn insecure_warning(url: &Url) -> Option<String> {
         return None;
     }
     let host = url.host_str().unwrap_or_default().trim_matches(['[', ']']);
-    let local_name = host == "localhost" || host.ends_with(".local") || host.ends_with(".lan") || host.ends_with(".ts.net") || !host.contains('.');
-    let private_ip = match host.parse::<IpAddr>() {
+    let local = match host.parse::<IpAddr>() {
         Ok(IpAddr::V4(ip)) => {
             let [a, b, ..] = ip.octets();
             ip.is_private() || ip.is_loopback() || ip.is_link_local() || (a == 100 && (64..128).contains(&b))
         }
-        Ok(IpAddr::V6(ip)) => ip.is_loopback() || (ip.segments()[0] & 0xfe00) == 0xfc00,
-        Err(_) => false,
+        // Loopback, unique local (fc00::/7) and link-local (fe80::/10).
+        Ok(IpAddr::V6(ip)) => ip.is_loopback() || (ip.segments()[0] & 0xfe00) == 0xfc00 || (ip.segments()[0] & 0xffc0) == 0xfe80,
+        Err(_) => host == "localhost" || host.ends_with(".local") || host.ends_with(".lan") || host.ends_with(".ts.net") || !host.contains('.'),
     };
-    (!local_name && !private_ip).then(|| {
+    (!local).then(|| {
         format!("{host} is reached over plain HTTP: the password and the books travel unencrypted. Use https:// if the server has it.")
     })
 }
@@ -65,8 +65,14 @@ fn on_server(source: &Source, url: &str) -> bool {
     }
 }
 
+/// The source's login, with the password from the credential store.
 pub fn login(source: &Source) -> Option<Login> {
     (!source.user.is_empty()).then(|| Login { user: source.user.clone(), password: platform::password(&source.id).unwrap_or_default() })
+}
+
+/// What a refused login reads as.
+pub fn refused(server: &str) -> String {
+    format!("{server} didn't accept the user name or password")
 }
 
 /// GET from the source's server, with its login; failures read as sentences.
@@ -74,10 +80,10 @@ fn fetch(source: &Source, url: &str, accept: &str) -> Result<Reply, String> {
     if !on_server(source, url) {
         return Err(format!("{url} is not on {}", source.name));
     }
-    let reply = net::get(url, login(source).as_ref(), accept)?;
+    let reply = net::get(url, login(source).as_ref(), Auth::OnChallenge, accept)?;
     match reply.status {
         200..=299 => Ok(reply),
-        401 | 403 => Err(format!("{} didn't accept the user name or password", source.name)),
+        401 | 403 => Err(refused(&source.name)),
         404 => Err(format!("{} has nothing at {url}", source.name)),
         status => Err(format!("{} answered with an error ({status})", source.name)),
     }
@@ -86,8 +92,9 @@ fn fetch(source: &Source, url: &str, accept: &str) -> Result<Reply, String> {
 /// Finds the OPDS catalog behind the address the reader typed: the address
 /// itself if it is a catalog, else `/opds` under it or at the server's root
 /// (where Calibre-Web, CWA and the Calibre Content Server all keep theirs).
-/// Returns the catalog's address.
-pub fn discover(source: &Source) -> Result<String, String> {
+/// Returns the catalog's address. `login` is the one being saved, so a
+/// refused password never replaces a working one.
+pub fn discover(source: &Source, login: Option<&Login>) -> Result<String, String> {
     let typed = check_url(&source.url)?;
     let mut candidates = vec![typed.to_string()];
     let under = format!("{}/opds", typed.as_str().trim_end_matches('/'));
@@ -98,9 +105,9 @@ pub fn discover(source: &Source) -> Result<String, String> {
         }
     }
     for candidate in &candidates {
-        let reply = net::get(candidate, login(source).as_ref(), FEED_TYPES)?;
+        let reply = net::get(candidate, login, Auth::OnChallenge, FEED_TYPES)?;
         match reply.status {
-            401 | 403 => return Err(format!("{} didn't accept the user name or password", typed.host_str().unwrap_or("The server"))),
+            401 | 403 => return Err(refused(typed.host_str().unwrap_or("The server"))),
             200..=299 if opds::parse_feed(&String::from_utf8_lossy(&reply.body), candidate).is_ok() => return Ok(candidate.clone()),
             _ => {}
         }
@@ -171,6 +178,8 @@ mod tests {
         assert!(warn("http://nas/opds").is_none(), "a name on the home network");
         assert!(warn("http://books.example/opds").is_some());
         assert!(warn("http://8.8.8.8/opds").is_some());
+        assert!(warn("http://[fd00::5]:8083/opds").is_none(), "unique local IPv6");
+        assert!(warn("http://[2001:4860::8888]/opds").is_some(), "public IPv6");
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //! `/kosync` on the server, with the CWA login over HTTP Basic.
 
 use crate::catalog::{self, Source};
-use crate::net;
+use crate::net::{self, Auth};
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -73,10 +73,8 @@ fn check(source: &Source, reply: net::Reply) -> Result<net::Reply, String> {
         200..=299 => Ok(reply),
         503 => Err(format!("Progress sync is turned off on {}", source.name)),
         // CWA answers a refused login with 400 and error 2001.
-        400 if String::from_utf8_lossy(&reply.body).contains("2001") => {
-            Err(format!("{} didn't accept the user name or password", source.name))
-        }
-        401 | 403 => Err(format!("{} didn't accept the user name or password", source.name)),
+        400 if String::from_utf8_lossy(&reply.body).contains("2001") => Err(catalog::refused(&source.name)),
+        401 | 403 => Err(catalog::refused(&source.name)),
         status => Err(format!("{} answered with an error ({status})", source.name)),
     }
 }
@@ -84,7 +82,7 @@ fn check(source: &Source, reply: net::Reply) -> Result<net::Reply, String> {
 /// The position the server has for a book, if any.
 pub fn pull(source: &Source, document: &str) -> Result<Option<Progress>, String> {
     let url = format!("{}/syncs/progress/{document}", base(source)?);
-    let reply = check(source, net::get(&url, catalog::login(source).as_ref(), ACCEPT)?)?;
+    let reply = check(source, net::get(&url, catalog::login(source).as_ref(), Auth::Basic, ACCEPT)?)?;
     let stored: Stored = serde_json::from_slice(&reply.body).map_err(|e| e.to_string())?;
     let (Some(progress), Some(percentage)) = (stored.progress, stored.percentage) else { return Ok(None) };
     Ok(Some(Progress {
@@ -109,7 +107,7 @@ pub fn push(source: &Source, document: &str, progress: &str, percentage: f64, de
     }
     let body = serde_json::to_string(&Update { document, progress, percentage, device, device_id }).map_err(|e| e.to_string())?;
     let url = format!("{}/syncs/progress", base(source)?);
-    check(source, net::put_json(&url, catalog::login(source).as_ref(), ACCEPT, &body)?).map(|_| ())
+    check(source, net::put_json(&url, catalog::login(source).as_ref(), Auth::Basic, ACCEPT, &body)?).map(|_| ())
 }
 
 /// Reads until `buffer` is full or the file ends.

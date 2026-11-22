@@ -99,7 +99,7 @@ export function createCatalogView(deps: CatalogViewDeps) {
       page.next = feed.next
       render()
     } catch (e) {
-      message(String(e))
+      if (mine === request) message(String(e))
     } finally {
       more.disabled = false
     }
@@ -134,10 +134,9 @@ export function createCatalogView(deps: CatalogViewDeps) {
     const cover = el('div', { className: 'cover' })
     if (book.cover) loadCover(cover, book.cover)
     const action = el('button', { className: 'download' })
-    if (inLibrary(book, deps.library())) {
-      action.textContent = 'In library'
-      action.disabled = true
-    } else if (file) {
+    // Only a hint (same title and author): downloading checks the content.
+    const known = inLibrary(book, deps.library())
+    if (file) {
       action.textContent = `Download ${FORMAT_LABELS[file.format]}`
       action.onclick = async () => {
         if (!source) return
@@ -168,7 +167,10 @@ export function createCatalogView(deps: CatalogViewDeps) {
         { className: 'about' },
         el('span', { className: 'title', textContent: book.title }),
         el('span', { className: 'author', textContent: book.authors.join(', ') }),
-        el('span', { className: 'meta', textContent: [...new Set(book.files.map(f => FORMAT_LABELS[f.format]))].join(' · ') }),
+        el('span', {
+          className: 'meta',
+          textContent: [...new Set(book.files.map(f => FORMAT_LABELS[f.format]))].join(' · ') + (known ? ' · in library' : ''),
+        }),
       ),
       action,
     )
@@ -178,11 +180,14 @@ export function createCatalogView(deps: CatalogViewDeps) {
   const covers = new IntersectionObserver(
     entries => {
       for (const entry of entries) {
-        if (!entry.isIntersecting || !source) continue
+        if (!entry.isIntersecting) continue
         const host = entry.target as HTMLElement
         covers.unobserve(host)
-        invoke<ArrayBuffer>('catalog_image', { id: source.id, url: host.dataset.url })
-          .then(bytes => host.replaceChildren(el('img', { src: URL.createObjectURL(new Blob([bytes])), alt: '' })))
+        invoke<ArrayBuffer>('catalog_image', { id: host.dataset.source, url: host.dataset.url })
+          .then(bytes => {
+            const src = URL.createObjectURL(new Blob([bytes]))
+            host.replaceChildren(el('img', { src, alt: '', onload: () => URL.revokeObjectURL(src) }))
+          })
           .catch(() => {})
       }
     },
@@ -190,6 +195,8 @@ export function createCatalogView(deps: CatalogViewDeps) {
   )
 
   function loadCover(host: HTMLElement, url: string) {
+    if (!source) return
+    host.dataset.source = source.id
     host.dataset.url = url
     covers.observe(host)
   }

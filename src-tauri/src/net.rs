@@ -2,15 +2,36 @@
 //! HTTP Basic (Calibre-Web-Automated) or Digest (the Calibre Content Server).
 
 use md5::{Digest, Md5};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
-use ureq::Agent;
+use ureq::config::RedirectAuthHeaders;
+use ureq::{Agent, ResponseExt};
 
 /// A server login.
 #[derive(Clone)]
 pub struct Login {
     pub user: String,
     pub password: String,
+}
+
+/// How a request offers the login.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Auth {
+    /// When the server asks for it, the way it asks: a Digest server never
+    /// sees the password itself. A server that asked for Basic once gets it
+    /// with the first request from then on.
+    OnChallenge,
+    /// Basic with the first request, for a service that never asks (CWA's KOSync).
+    Basic,
+}
+
+/// Servers (origins) that asked for Basic: they get it without asking again.
+static BASIC_SERVERS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+fn asks_for_basic(origin: &str) -> bool {
+    BASIC_SERVERS.lock().unwrap().as_ref().is_some_and(|servers| servers.contains(origin))
 }
 
 /// What a request brought back.
@@ -30,31 +51,37 @@ fn agent() -> Agent {
         .http_status_as_error(false)
         .timeout_global(Some(TIMEOUT))
         .user_agent(concat!("BookReader/", env!("CARGO_PKG_VERSION")))
+        .redirect_auth_headers(RedirectAuthHeaders::SameHost)
         .build()
         .into()
 }
 
 /// GET `url`, with the login if there is one.
-pub fn get(url: &str, login: Option<&Login>, accept: &str) -> Result<Reply, String> {
-    send("GET", url, login, accept, None)
+pub fn get(url: &str, login: Option<&Login>, auth: Auth, accept: &str) -> Result<Reply, String> {
+    send("GET", url, login, auth, accept, None)
 }
 
 /// PUT a JSON body to `url`.
-pub fn put_json(url: &str, login: Option<&Login>, accept: &str, body: &str) -> Result<Reply, String> {
-    send("PUT", url, login, accept, Some(body))
+pub fn put_json(url: &str, login: Option<&Login>, auth: Auth, accept: &str, body: &str) -> Result<Reply, String> {
+    send("PUT", url, login, auth, accept, Some(body))
 }
 
-fn send(method: &str, url: &str, login: Option<&Login>, accept: &str, body: Option<&str>) -> Result<Reply, String> {
+fn send(method: &str, url: &str, login: Option<&Login>, auth: Auth, accept: &str, body: Option<&str>) -> Result<Reply, String> {
     let agent = agent();
-    // Basic goes along with the first request (CWA expects it); a Digest
-    // challenge in the answer gets a second request.
-    let mut reply = request(&agent, method, url, accept, login.map(basic_header).as_deref(), body)?;
-    if reply.status == 401 {
-        if let (Some(login), Some(challenge)) = (login, reply.challenge.as_deref().and_then(DigestChallenge::parse)) {
-            let uri = request_uri(url);
-            let header = challenge.header(login, method, &uri, &new_cnonce());
-            reply = request(&agent, method, url, accept, Some(&header), body)?;
-        }
+    let origin = origin_of(url);
+    let basic_first = login.is_some() && (auth == Auth::Basic || asks_for_basic(&origin));
+    let first = if basic_first { login.map(basic_header) } else { None };
+    let mut reply = request(&agent, method, url, accept, first.as_deref(), body)?;
+    let Some(login) = login.filter(|_| reply.status == 401 && !basic_first) else { return Ok(reply.reply) };
+    let challenge = reply.challenge.clone().unwrap_or_default();
+    let header = match DigestChallenge::parse(&challenge) {
+        Some(digest) => digest.header(login, method, &request_uri(url), &new_cnonce()),
+        None if challenge.trim_start().to_ascii_lowercase().starts_with("basic") => basic_header(login),
+        None => return Ok(reply.reply),
+    };
+    reply = request(&agent, method, url, accept, Some(&header), body)?;
+    if reply.status != 401 && header.starts_with("Basic") {
+        BASIC_SERVERS.lock().unwrap().get_or_insert_with(HashSet::new).insert(origin);
     }
     Ok(reply.reply)
 }
@@ -90,12 +117,21 @@ fn request(agent: &Agent, method: &str, url: &str, accept: &str, auth: Option<&s
             req.call().map_err(failed)?
         }
     };
+    // A redirect may not lead off the server the request was meant for.
+    if origin_of(&response.get_uri().to_string()) != origin_of(url) {
+        return Err(format!("{} sent the request on to another server", host_of(url)));
+    }
     let status = response.status().as_u16();
     let header = |name: &str| response.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string);
     let challenge = header("www-authenticate");
     let mut response = response;
     let body = response.body_mut().with_config().limit(MAX_BODY).read_to_vec().map_err(failed)?;
     Ok(Answer { reply: Reply { status, body }, challenge })
+}
+
+/// Scheme, host and port of a URL ("" if it isn't one).
+fn origin_of(url: &str) -> String {
+    url::Url::parse(url).map(|u| u.origin().ascii_serialization()).unwrap_or_default()
 }
 
 /// "host" of a URL, for messages.

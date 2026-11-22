@@ -22,12 +22,12 @@ pub fn chosen_library(window: &Window, pick: bool) -> Result<Option<PathBuf>, St
     file_dialog(window).blocking_pick_folder().map(|f| f.into_path().map_err(|e| e.to_string())).transpose()
 }
 
-/// The Credential Manager entry for a catalog's password.
+/// The credential store entry for a catalog's password.
 fn credential(source_id: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new("Book Reader", &format!("catalog:{source_id}")).map_err(|e| e.to_string())
 }
 
-/// Keeps a catalog's password in the Windows Credential Manager.
+/// Keeps a catalog's password in the OS credential store (the Windows Credential Manager).
 pub fn save_password(source_id: &str, password: &str) -> Result<(), String> {
     credential(source_id)?.set_password(password).map_err(|e| e.to_string())
 }
@@ -37,6 +37,7 @@ pub fn password(source_id: &str) -> Option<String> {
     credential(source_id).ok()?.get_password().ok()
 }
 
+/// Removes a catalog's password from the credential store.
 pub fn forget_password(source_id: &str) {
     if let Ok(entry) = credential(source_id) {
         let _ = entry.delete_credential();

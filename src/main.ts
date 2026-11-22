@@ -111,6 +111,8 @@ let fingerprint = ''
 /** `--no-save`: this window keeps no positions (the backend skips recent books too). */
 let noSave = false
 let tocView: { element: HTMLElement; setCurrentHref(href: string): void } | null = null
+/** The book is opening: its relocates restore the saved position, they don't move it. */
+let restoring = false
 
 // ---- Reading position -------------------------------------------------------
 
@@ -150,6 +152,7 @@ async function openCurrentBook() {
     if (!info) return await showLibraryScreen()
     fingerprint = info.fingerprint
     noSave = info.noSave
+    restoring = true
     const source = await loadBook(info)
     await settingsReady
     book = await BookView.open($('stage'), $('footnote'), source, {
@@ -168,7 +171,9 @@ async function openCurrentBook() {
       },
       externalLink: href => void openUrl(href).catch(console.error),
     })
+    restoring = false
   } catch (e) {
+    restoring = false
     showError(info?.fileName, e)
     // The library, Ctrl+O and the recent books stay one step away.
     return showLibraryScreen()
@@ -211,16 +216,27 @@ interface SyncOffer {
 }
 
 let syncOffer: SyncOffer | null = null
+/** The open book's id on the sync server; null when it doesn't sync. */
+let syncDocument: string | null = null
 /** The position moved since the last push. */
 let syncDirty = false
 
 /** Asks the sync server whether another device read on, and offers to jump there. */
 async function pullSync() {
-  const offer = await invoke<SyncOffer | null>('sync_pull').catch(e => {
+  const document = await invoke<string | null>('sync_document').catch(e => {
     console.warn('sync:', e)
     return null
   })
-  if (!offer || !book) return
+  if (!document || !book) return
+  syncDocument = document
+  const state = await invoke<{ offer: SyncOffer | null; push: boolean }>('sync_pull', { document, fingerprint }).catch(e => {
+    console.warn('sync:', e)
+    return null
+  })
+  if (!state || !book || syncDocument !== document) return
+  if (state.push) syncDirty = true
+  const offer = state.offer
+  if (!offer) return
   syncOffer = offer
   $('sync-text').textContent = `${offer.device || 'Another device'}, ${timeAgo(offer.time)}: ${Math.round(offer.fraction * 100)}%`
   $('sync-bar').hidden = false
@@ -253,10 +269,12 @@ function hideSyncBar() {
 /** Sends the position if it moved; failures stay quiet and are retried next time. */
 async function pushSync() {
   const location = book?.view.lastLocation
-  if (!syncDirty || !location) return
+  const document = syncDocument
+  if (!syncDirty || !location || !document) return
   syncDirty = false
-  await invoke('sync_push', { cfi: location.cfi, fraction: location.fraction }).catch(e => {
-    syncDirty = true
+  await invoke('sync_push', { document, cfi: location.cfi, fraction: location.fraction }).catch(e => {
+    // Retried next time, unless another book has opened meanwhile.
+    if (syncDocument === document) syncDirty = true
     console.warn('sync:', e)
   })
 }
@@ -352,6 +370,8 @@ async function addToLibrary(mode: AddMode) {
 
 function closeBook() {
   void pushSync()
+  syncDocument = null
+  syncDirty = false
   hideSyncBar()
   hideOffer()
   book?.destroy()
@@ -569,6 +589,7 @@ function onRelocate(location: Relocation) {
   $('progress-label').textContent = tocItem?.label ? `${percent}% · ${tocItem.label}` : `${percent}%`
   highlightToc(tocItem?.href)
   updateBookmarkButton()
+  if (restoring) return
   scheduleSave({ fingerprint, position: { cfi, fraction } })
   if (!noSave) syncDirty = true
 }

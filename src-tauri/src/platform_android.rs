@@ -75,10 +75,12 @@ pub fn save_password(_source_id: &str, _password: &str) -> Result<(), String> {
     Err("Saving catalog passwords on Android is not available yet".into())
 }
 
+/// No catalog passwords are kept on Android yet.
 pub fn password(_source_id: &str) -> Option<String> {
     None
 }
 
+/// Nothing to forget while none are kept.
 pub fn forget_password(_source_id: &str) {}
 
 /// Fails while All files access is off (turned off after the library was set

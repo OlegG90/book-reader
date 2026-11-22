@@ -18,7 +18,8 @@ pub enum Xml<'a> {
     End(&'a [String], &'a str),
 }
 
-/// Walks an XML document, reporting element starts and text.
+/// Walks an XML document, reporting element starts, text and element ends
+/// (an empty element, `<a/>`, reports its start only).
 pub fn walk_xml(xml: &str, mut on: impl FnMut(Xml)) -> io::Result<()> {
     let mut reader = Reader::from_str(xml);
     let mut stack: Vec<String> = Vec::new();
