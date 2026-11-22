@@ -182,15 +182,19 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     reading: [
       appearance,
       checkRow('Remember reading position', 'Positions sync through the catalog marked "sync".', savePositions),
-      checkRow('Offer to add books opened from elsewhere', 'Shows Move / Copy to library when a file is outside the library folder.', offerLibrary),
       checkRow('Volume keys turn pages', 'While a book is open.', volumeKeys),
     ],
     catalogs: [catalogs],
-    system: [libraryRow, fileTypesRow, row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory }))],
+    system: [
+      libraryRow,
+      checkRow('Offer to add books opened from elsewhere', 'Shows Move / Copy to library when a file is outside the library folder.', offerLibrary),
+      fileTypesRow,
+      row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory })),
+    ],
     shortcuts: [shortcuts],
   }
   // The volume keys are a phone's.
-  content.reading[3].classList.add('android-only')
+  content.reading[2].classList.add('android-only')
 
   const sections = SECTIONS.map(({ id, title }) =>
     el('section', { id: `settings-${id}`, className: 'section' }, el('h2', { textContent: title }), ...content[id]),
