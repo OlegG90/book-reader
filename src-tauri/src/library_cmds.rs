@@ -10,20 +10,59 @@ use crate::system_cmds::Originals;
 use crate::windows::{saving_window, show_book, ReaderWindows};
 use crate::CmdResult;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, State, Window, ipc::Response};
 
-/// The books found by the last scan. The frontend names books by their key
-/// (the path inside the library), which is only accepted when the scan found
-/// it, so the frontend still cannot make the app open arbitrary files.
+/// The books found by the last scan, with indexes so the hot paths (recent
+/// books, covers, adding a book) never copy the whole list. The frontend
+/// names books by their key (the path inside the library), which is only
+/// accepted when the scan found it, so the frontend still cannot make the
+/// app open arbitrary files.
 #[derive(Default)]
-pub(crate) struct LibraryBooks(Mutex<Vec<library::Entry>>);
+pub(crate) struct LibraryBooks(Mutex<Scan>);
+
+#[derive(Default)]
+struct Scan {
+    entries: Vec<library::Entry>,
+    /// Fingerprint to an entry, for duplicate checks without copying the list.
+    by_fingerprint: HashMap<String, usize>,
+    /// Library-relative paths of books with covers, by fingerprint.
+    covers: HashMap<String, String>,
+    /// What was on disk at the last scan: (fingerprint, absolute path).
+    /// Trusted for `exists` until the next scan, which runs on every visit
+    /// to the library screen.
+    present: HashSet<(String, PathBuf)>,
+    /// The folder the scan ran in (for `forget`, after entries moved).
+    root: PathBuf,
+}
+
+impl Scan {
+    fn build(entries: Vec<library::Entry>, root: &Path) -> Self {
+        let mut scan = Scan { entries, root: root.to_path_buf(), ..Default::default() };
+        scan.reindex();
+        scan
+    }
+
+    fn reindex(&mut self) {
+        self.by_fingerprint.clear();
+        self.covers.clear();
+        self.present.clear();
+        for (index, entry) in self.entries.iter().enumerate() {
+            self.by_fingerprint.entry(entry.fingerprint.clone()).or_insert(index);
+            if entry.cover.is_some() {
+                self.covers.insert(entry.fingerprint.clone(), entry.path.clone());
+            }
+            self.present.insert((entry.fingerprint.clone(), entry.absolute(&self.root)));
+        }
+    }
+}
 
 impl LibraryBooks {
     pub(crate) fn entry(&self, key: &str) -> CmdResult<library::Entry> {
         let books = self.0.lock().unwrap();
-        books.iter().find(|b| b.path == key).cloned().ok_or_else(|| "That book is no longer in the library".into())
+        books.entries.iter().find(|b| b.path == key).cloned().ok_or_else(|| "That book is no longer in the library".into())
     }
 
     pub(crate) fn path_of(&self, store: &Store, key: &str) -> CmdResult<PathBuf> {
@@ -32,13 +71,76 @@ impl LibraryBooks {
 
     /// Takes a deleted book out of the list.
     pub(crate) fn forget(&self, key: &str) {
-        self.0.lock().unwrap().retain(|b| b.path != key);
+        let mut scan = self.0.lock().unwrap();
+        scan.entries.retain(|b| b.path != key);
+        scan.reindex();
     }
 
     /// The last scan's books; before any scan in this run, the cached ones.
+    /// Only Organize needs the whole list; the hot paths use the indexes.
     pub(crate) fn snapshot(&self, store: &Store, root: &Path) -> Vec<library::Entry> {
         let books = self.0.lock().unwrap();
-        if books.is_empty() { library_cache(store).load(root) } else { books.clone() }
+        if books.entries.is_empty() { library_cache(store).load(root) } else { books.entries.clone() }
+    }
+
+    /// Remembers a scan and rebuilds the indexes.
+    pub(crate) fn replace(&self, entries: Vec<library::Entry>, root: &Path) {
+        *self.0.lock().unwrap() = Scan::build(entries, root);
+    }
+
+    /// Forgets the last scan's books: they belonged to the old folder.
+    pub(crate) fn clear(&self) {
+        *self.0.lock().unwrap() = Scan::default();
+    }
+
+    /// Whether the scan is from this run (past the first scan, memory serves).
+    pub(crate) fn is_scanned(&self) -> bool {
+        !self.0.lock().unwrap().entries.is_empty()
+    }
+
+    /// The entry with `key`, without copying the list.
+    pub(crate) fn find(&self, key: &str) -> Option<library::Entry> {
+        self.0.lock().unwrap().entries.iter().find(|b| b.path == key).cloned()
+    }
+
+    /// The last scan's books from the disk cache, for the pre-scan run.
+    pub(crate) fn cached(&self, store: &Store, root: &Path) -> Vec<library::Entry> {
+        library_cache(store).load(root)
+    }
+
+    /// Library-relative paths of books with covers, by fingerprint: from the
+    /// scan, or from the disk cache before the first scan in the run.
+    pub(crate) fn covers(&self, store: &Store, root: &Path) -> HashMap<String, String> {
+        let scan = self.0.lock().unwrap();
+        if !scan.entries.is_empty() {
+            return scan.covers.clone();
+        }
+        drop(scan);
+        Self::cached_map(&library_cache(store).load(root))
+    }
+
+    fn cached_map(entries: &[library::Entry]) -> HashMap<String, String> {
+        entries.iter().filter(|e| e.cover.is_some()).map(|e| (e.fingerprint.clone(), e.path.clone())).collect()
+    }
+
+    /// The library key already holding `fingerprint` (a copy on disk), if any:
+    /// from the scan, or from the disk cache before the first scan in the run.
+    pub(crate) fn duplicate(&self, store: &Store, root: &Path, fingerprint: &str) -> Option<String> {
+        let scan = self.0.lock().unwrap();
+        if !scan.entries.is_empty() {
+            let entry = scan.by_fingerprint.get(fingerprint).and_then(|&index| scan.entries.get(index))?;
+            return entry.absolute(root).is_file().then(|| entry.path.clone());
+        }
+        drop(scan);
+        self.cached(store, root)
+            .into_iter()
+            .find(|e| e.fingerprint == fingerprint && e.absolute(root).is_file())
+            .map(|e| e.path)
+    }
+
+    /// Whether the scan saw `fingerprint` at `path` (checked live otherwise).
+    pub(crate) fn is_present(&self, fingerprint: &str, path: &Path) -> bool {
+        self.0.lock().unwrap().present.contains(&(fingerprint.to_string(), path.to_path_buf()))
     }
 }
 
@@ -79,7 +181,7 @@ pub(crate) fn set_library(window: Window, store: State<Store>, books: State<Libr
     let folder = std::path::absolute(&folder).unwrap_or(folder);
     store.update(|s| s.library = Some(folder.clone())).map_err(|e| e.to_string())?;
     // The last scan's keys belong to the old folder.
-    books.0.lock().unwrap().clear();
+    books.clear();
     let _ = window.emit("library-changed", ());
     Ok(Some(folder.display().to_string()))
 }
@@ -108,7 +210,13 @@ pub(crate) struct LibraryBook {
 pub(crate) fn scan_library(app: AppHandle, store: State<Store>, books: State<LibraryBooks>) -> CmdResult<Vec<LibraryBook>> {
     let root = library_root(&store)?;
     Active::check_library_access(&app)?;
-    let entries = library::scan(&root, &library_cache(&store)).map_err(|e| format!("{}: {e}", root.display()))?;
+    // A file count while it runs, so the library screen shows the scan is moving.
+    let entries = library::scan(&root, &library_cache(&store), &mut |done| {
+        if done % 25 == 0 {
+            let _ = app.emit("scan-progress", done);
+        }
+    })
+    .map_err(|e| format!("{}: {e}", root.display()))?;
     let views = store.read(|s| {
         entries
             .iter()
@@ -126,16 +234,21 @@ pub(crate) fn scan_library(app: AppHandle, store: State<Store>, books: State<Lib
             })
             .collect()
     });
-    *books.0.lock().unwrap() = entries;
+    books.replace(entries, &root);
     Ok(views)
 }
 
 #[tauri::command(async)]
 pub(crate) fn library_cover(store: State<Store>, books: State<LibraryBooks>, key: String) -> CmdResult<Response> {
-    // Before the first scan the history's covers come from the cache, as recent_books found them:
-    // the snapshot is the last scan's books, or the cached ones.
-    let root = library_root(&store)?;
-    let cover = books.snapshot(&store, &root).into_iter().find(|b| b.path == key).and_then(|b| b.cover).ok_or("No cover")?;
+    // Before the first scan the history's covers come from the cache, as recent_books found them.
+    let cover = match books.find(&key).and_then(|entry| entry.cover) {
+        Some(cover) => cover,
+        None if books.is_scanned() => return Err("No cover".into()),
+        None => {
+            let root = library_root(&store)?;
+            books.cached(&store, &root).into_iter().find(|b| b.path == key).and_then(|b| b.cover).ok_or("No cover")?
+        }
+    };
     std::fs::read(library_cache(&store).covers().join(cover)).map(Response::new).map_err(|e| e.to_string())
 }
 
@@ -229,11 +342,7 @@ pub(crate) fn put_in_library(store: &Store, books: &LibraryBooks, source: &Path,
     let err = |e: std::io::Error| format!("{}: {e}", paths::file_name(source));
     let format = metadata::Format::of(source).ok_or("Not a book file")?;
     let (fingerprint, meta) = library::read_book(source).map_err(err)?;
-    let known = books
-        .snapshot(store, &root)
-        .into_iter()
-        .find(|e| e.fingerprint == fingerprint && e.absolute(&root).is_file())
-        .map(|e| naming::Placement::Exists(e.path));
+    let known = books.duplicate(store, &root, &fingerprint).map(naming::Placement::Exists);
     let placement = match known {
         Some(found) => found,
         None => {

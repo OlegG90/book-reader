@@ -518,12 +518,16 @@ const libraryVisible = () => !book && !$('library').hidden
 function refreshLibrary(): Promise<void> {
   scanning ??= (async () => {
     if (!libraryBooks.length) showLibraryMessage('Looking for books…')
+    const stopProgress = await appWindow.listen<number>('scan-progress', ({ payload }) => {
+      if (!libraryBooks.length) showLibraryMessage(`Looking for books… (${payload})`)
+    }).catch((): undefined => undefined)
     try {
       libraryBooks = await invoke<LibraryBook[]>('scan_library')
       renderLibrary()
     } catch (e) {
       showLibraryMessage(`Can't read the library folder: ${e}`)
     } finally {
+      stopProgress?.()
       scanning = null
     }
   })()
