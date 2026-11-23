@@ -262,20 +262,31 @@ struct RecentView {
     fraction: Option<f64>,
     /// False when the file has been moved or deleted.
     exists: bool,
+    /// The library's key for the same book (by content), when it has a cover there.
+    cover_key: Option<String>,
 }
 
 #[tauri::command(async)]
-fn recent_books(store: State<Store>) -> Vec<RecentView> {
+fn recent_books(store: State<Store>, library: State<LibraryBooks>) -> Vec<RecentView> {
     let books = store.read(|s| {
         let fraction = |r: &RecentBook| s.positions.get(&r.fingerprint).map(|p| p.fraction);
         s.recent.iter().map(|r| (r.clone(), fraction(r))).collect::<Vec<_>>()
     });
+    // The library's covers, by the books' content (a history entry may lie anywhere).
+    let covers: HashMap<String, String> = library_root(&store)
+        .map(|root| library.snapshot(&store, &root))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|e| e.cover.is_some())
+        .map(|e| (e.fingerprint, e.path))
+        .collect();
     // Checked outside the store lock: a slow drive shouldn't hold up other windows.
     books
         .into_iter()
         .map(|(r, fraction)| RecentView {
             file_name: paths::file_name(&r.path),
             exists: r.path.is_file(),
+            cover_key: covers.get(&r.fingerprint).cloned(),
             key: r.fingerprint,
             title: r.title,
             author: r.author,
@@ -506,7 +517,16 @@ fn scan_library(app: AppHandle, store: State<Store>, books: State<LibraryBooks>)
 
 #[tauri::command(async)]
 fn library_cover(store: State<Store>, books: State<LibraryBooks>, key: String) -> Result<Response, String> {
-    let cover = books.entry(&key)?.cover.ok_or("No cover")?;
+    // Before the first scan the history's covers come from the cache, as recent_books found them.
+    let cover = match books.entry(&key) {
+        Ok(entry) => entry.cover,
+        Err(e) => library_root(&store)
+            .ok()
+            .and_then(|root| books.snapshot(&store, &root).into_iter().find(|b| b.path == key))
+            .ok_or(e)?
+            .cover,
+    }
+    .ok_or("No cover")?;
     std::fs::read(library_cache(&store).covers().join(cover)).map(Response::new).map_err(|e| e.to_string())
 }
 

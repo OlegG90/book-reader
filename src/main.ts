@@ -19,6 +19,13 @@ import {
   type ResolvedTheme,
 } from 'reader-core'
 import 'reader-core/book-view.css'
+// The interface fonts, bundled (offline-first): Latin and Cyrillic only.
+import '@fontsource/cormorant-garamond/latin-600.css'
+import '@fontsource/cormorant-garamond/cyrillic-600.css'
+import '@fontsource/lora/latin-400.css'
+import '@fontsource/lora/cyrillic-400.css'
+import '@fontsource/lora/latin-600.css'
+import '@fontsource/lora/cyrillic-600.css'
 import { createTOCView } from 'reader-core/foliate-js/ui/tree.js'
 import { commandFor, type Command } from './keys'
 import {
@@ -35,9 +42,11 @@ import {
   type Status,
 } from './library'
 import { createCatalogView } from './catalog-view'
+import { icon } from './icons'
+import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
 import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
-import { createSettingsPanel, type PanelValues } from './settings-panel'
+import { HISTORY_LENGTHS, UI_FONTS, createAppearancePanel, createSettingsPage, type PanelValues, type SettingsSection } from './settings-panel'
 
 interface Position {
   cfi: string
@@ -82,11 +91,18 @@ function readSettings(stored: Record<string, unknown>): Settings {
     savePositions: stored.savePositions !== false,
     offerLibrary: stored.offerLibrary !== false,
     volumeKeys: stored.volumeKeys === true,
+    historyLength: HISTORY_LENGTHS.find(n => n === stored.historyLength) ?? 3,
+    uiFont: oneOf(stored.uiFont, UI_FONTS, 'classic'),
   }
 }
 
 const SAVE_DELAY_MS = 500
+/** How far a book is read, as the library shows it: at least 1% once started. */
+const percent = (fraction: number) => `${Math.max(1, Math.round(fraction * 100))}%`
+/** The top bar shows when the mouse comes this close to the top edge. */
 const TOP_EDGE_PX = 48
+/** The bottom bar shows when the mouse comes this close to the bottom edge. */
+const BOTTOM_EDGE_PX = 56
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 // Hides what only the other platform does (`.desktop-only`, `.android-only` in style.css).
@@ -106,7 +122,7 @@ const settingsReady = invoke<Record<string, unknown>>('get_settings')
   .then(stored => {
     settings = readSettings(stored)
     applyTheme()
-    settingsPanel.show(settings)
+    showSettings()
     showLibraryControls()
   })
 void loadLibraryInfo()
@@ -188,6 +204,11 @@ async function openCurrentBook() {
   void invoke('remember_book', { fingerprint, title, author: book.author }).catch(console.error)
   $('toc-title').textContent = title
   $('toc-author').textContent = book.author
+  $('topbar-book').textContent = title
+  $('topbar-author').textContent = book.author
+  $('progress-ticks').replaceChildren(
+    ...book.chapterStarts().map(start => el('span', { style: `left: ${start * 100}%` })),
+  )
   tocView = createTOCView(book.toc, (href: string) => {
     book?.view.goTo(href).catch(console.error)
     closePanels()
@@ -196,6 +217,7 @@ async function openCurrentBook() {
   currentTocHref = undefined
   highlightToc(book.view.lastLocation?.tocItem?.href)
   $('progress').hidden = false
+  $('bottombar').hidden = false
   updateTopbarButtons()
   if (info.offer && settings.offerLibrary) showOffer(info.offer)
   bookmarks = await invoke<Bookmark[]>('get_bookmarks', { fingerprint }).catch((e): Bookmark[] => {
@@ -309,7 +331,8 @@ function setBookmarks(list: Bookmark[]) {
 }
 
 function renderBookmarks() {
-  $('bookmarks').hidden = !bookmarks.length
+  $('bookmark-count').textContent = bookmarks.length ? `(${bookmarks.length})` : ''
+  $('bookmarks-empty').hidden = bookmarks.length > 0
   $('bookmark-list').replaceChildren(
     ...bookmarks.map(mark =>
       el(
@@ -338,7 +361,9 @@ function renderBookmarks() {
 function updateBookmarkButton() {
   const marked = hasBookmark(bookmarks, book?.view.lastLocation?.cfi)
   $('bookmark-button').setAttribute('aria-pressed', String(marked))
-  $('bookmark-button').textContent = marked ? 'Bookmarked' : 'Bookmark'
+  // The icon fills in when the page is bookmarked (style.css).
+  $('bookmark-button').setAttribute('aria-label', marked ? 'Bookmarked' : 'Bookmark')
+  $('bookmark-button').title = marked ? 'Remove the bookmark on this page (B)' : 'Bookmark this page (B)'
 }
 
 // ---- Adding a book to the library ------------------------------------------
@@ -353,6 +378,8 @@ function showOffer(offer: Offer) {
   $('offer-buttons').hidden = false
   $('offer-setup').hidden = offer !== 'setup'
   $('offer-buttons').querySelectorAll<HTMLElement>('.add').forEach(button => (button.hidden = offer !== 'add'))
+  $('offer-never').hidden = true
+  $('offer-more').hidden = offer !== 'add'
   $('offer-move').classList.toggle('primary', settings.libraryAddMode === 'move')
   $('offer-copy').classList.toggle('primary', settings.libraryAddMode === 'copy')
   $('offer').hidden = false
@@ -398,9 +425,11 @@ function closeBook() {
   $('toc-tree').replaceChildren()
   $('start').hidden = true
   document.body.classList.remove('library-mode')
+  embedSettings(false)
   $('error').hidden = true
   $('progress').hidden = true
-  topbar.classList.remove('shown')
+  $('bottombar').hidden = true
+  setChrome(false)
 }
 
 /** Contents and the flow need an open book; the rest of the topbar works without one. */
@@ -420,6 +449,8 @@ interface RecentBook {
   fileName: string
   fraction: number | null
   exists: boolean
+  /** The library's key for its cover, when the library has the book. */
+  coverKey: string | null
 }
 
 interface LibraryInfo {
@@ -431,16 +462,19 @@ interface LibraryInfo {
 async function showLibraryScreen() {
   void appWindow.setTitle('Book Reader').catch(console.error)
   document.body.classList.add('library-mode')
+  embedSettings(true)
   $('start').hidden = false
   const info = await loadLibraryInfo()
-  $('setup').hidden = !!info.folder
-  $('library').hidden = !info.folder
+  libraryReady = !!info.folder
   if (!info.folder) {
+    showView(view ?? 'library')
     $('setup-suggested').textContent = info.suggested
     $('setup-default').focus()
     return
   }
   await refreshLibraryScreen()
+  // The library keeps the page it showed; at first, the history if there is one.
+  showView(view ?? homeView())
 }
 
 /** Reads the library folder (and the first-run suggestion), and shows it in the settings. */
@@ -450,7 +484,7 @@ async function loadLibraryInfo(): Promise<LibraryInfo> {
     return { folder: null, suggested: '' }
   })
   libraryFolder = info.folder
-  settingsPanel.setLibraryFolder(info.folder)
+  settingsPage.setLibraryFolder(info.folder)
   return info
 }
 
@@ -461,9 +495,14 @@ async function refreshRecent() {
     console.error(e)
     return []
   })
-  $('recent').replaceChildren(...books.map(recentItem))
+  $('recent').replaceChildren(...books.slice(0, settings.historyLength).map(recentItem))
   $('recent-title').hidden = !books.length
+  $('recent-empty').hidden = books.length > 0
+  hasRecent = books.length > 0
 }
+
+/** The reading history isn't empty (the desktop then opens on it). */
+let hasRecent = false
 
 /** Uses the suggested library folder, or asks for another one. */
 async function chooseLibrary(pick: boolean) {
@@ -503,13 +542,37 @@ function showLibraryMessage(text: string) {
 }
 
 function showLibraryControls() {
-  $<HTMLSelectElement>('library-status').value = settings.libraryStatus
   $<HTMLSelectElement>('library-sort').value = settings.librarySort
+  renderLibrary()
 }
 
 function renderLibrary() {
   const query = $<HTMLInputElement>('library-search').value
-  const shown = sortBooks(filterBooks(libraryBooks, query, settings.libraryStatus), settings.librarySort)
+  // One pass over the library: the books matching the search, counted by status.
+  const matching = filterBooks(libraryBooks, query, 'all')
+  const counts: Record<Status, number> = { all: matching.length, new: 0, reading: 0, finished: 0 }
+  for (const b of matching) counts[statusOf(b)]++
+  const chosen = settings.libraryStatus
+  const shown = sortBooks(chosen === 'all' ? matching : matching.filter(b => statusOf(b) === chosen), settings.librarySort)
+  // The status switch: each choice with how many of the matching books it holds.
+  $('library-status').replaceChildren(
+    ...STATUSES.map(status =>
+      el(
+        'button',
+        {
+          type: 'button',
+          role: 'radio',
+          ariaChecked: String(status === settings.libraryStatus),
+          onclick: () => {
+            changeSettings({ libraryStatus: status })
+            renderLibrary()
+          },
+        },
+        STATUS_LABELS[status],
+        el('span', { className: 'count', textContent: String(counts[status]) }),
+      ),
+    ),
+  )
   if (!libraryBooks.length) {
     showLibraryMessage(`The library is empty. Open a book (Ctrl+O) or put EPUB and FB2 files into ${libraryFolder}.`)
   } else {
@@ -521,16 +584,14 @@ function renderLibrary() {
 function bookCard(book: LibraryBook) {
   const status = statusOf(book)
   const progress =
-    status === 'finished' ? 'Finished' : status === 'reading' ? `${Math.max(1, Math.round((book.fraction ?? 0) * 100))}%` : ''
-  const cover = el('div', { className: 'cover' }, el('span', { textContent: book.title }))
-  if (book.hasCover) loadCover(cover, book.key)
+    status === 'finished' ? 'Finished' : status === 'reading' ? percent(book.fraction ?? 0) : 'New'
   const button = el(
     'button',
     {
       title: [book.title, book.authors.join(', '), seriesLabel(book)].filter(Boolean).join('\n'),
       onclick: () => void invoke('open_library_book', { key: book.key }).catch(e => showError(book.title, e)),
     },
-    cover,
+    coverWithProgress(book.title, book.hasCover ? book.key : null, book.fraction),
     el('span', { className: 'title', textContent: book.title }),
     el('span', { className: 'author', textContent: book.authors.join(', ') }),
     el('span', { className: 'series', textContent: seriesLabel(book) }),
@@ -566,20 +627,32 @@ function loadCover(host: HTMLElement, key: string) {
   coverObserver.observe(host)
 }
 
+/** A book's cover (or its title on a plain tile), with how far it is read as a line under it. */
+function coverWithProgress(title: string, coverKey: string | null, fraction: number | null) {
+  const cover = el('div', { className: 'cover' }, el('span', { textContent: title }))
+  if (coverKey) loadCover(cover, coverKey)
+  const line = el('span', { className: 'read-line' })
+  if (fraction) line.append(el('span', { style: `width: ${Math.max(2, Math.round(fraction * 100))}%` }))
+  return el('div', { className: 'cover-box' }, cover, line)
+}
+
+/** A "Continue reading" book: a card like the library's. */
 function recentItem(book: RecentBook) {
-  const span = (className: string, textContent: string) => el('span', { className, textContent })
+  const title = book.title || book.fileName
+  const read = book.fraction == null ? '' : percent(book.fraction)
   const button = el(
     'button',
     book.exists
-      ? { onclick: () => void invoke('open_recent', { key: book.key }).catch(console.error) }
+      ? { title: [title, book.author].filter(Boolean).join('\n'), onclick: () => void invoke('open_recent', { key: book.key }).catch(console.error) }
       : {
           className: 'missing',
           title: 'File not found. Click to remove it from the list.',
           onclick: () => void invoke('forget_recent', { key: book.key }).then(refreshRecent, console.error),
         },
-    span('title', book.title || book.fileName),
-    span('percent', book.fraction == null ? '' : `${Math.round(book.fraction * 100)}%`),
-    span('author', book.author),
+    coverWithProgress(title, book.coverKey, book.fraction),
+    el('span', { className: 'title', textContent: title }),
+    el('span', { className: 'author', textContent: book.author }),
+    el('span', { className: 'meta', textContent: book.exists ? read : 'File not found' }),
   )
   return el('li', {}, button)
 }
@@ -600,7 +673,11 @@ function onRelocate(location: Relocation) {
   const { fraction, cfi, tocItem } = location
   const percent = Math.round(fraction * 100)
   $('progress-fill').style.width = `${fraction * 100}%`
-  $('progress-label').textContent = tocItem?.label ? `${percent}% · ${tocItem.label}` : `${percent}%`
+  showTrackAt(fraction)
+  $('progress-chapter').textContent = tocItem?.label?.trim() ?? ''
+  // Pages count within the chapter (the book-wide position is the percentage).
+  const at = book?.chapterPage
+  $('progress-where').textContent = at ? `p. ${at.page} of ${at.of} · ${percent}%` : `${percent}%`
   highlightToc(tocItem?.href)
   updateBookmarkButton()
   if (restoring) return
@@ -617,11 +694,13 @@ function highlightToc(href: string | undefined) {
 // ---- Commands ---------------------------------------------------------------
 
 const tocOpen = () => !$('toc').hidden
-const settingsOpen = () => !$('settings').hidden
+/** The settings page over the window (a book window, or the phone); the library window on a desktop has them in its content. */
+const settingsOpen = () => !$('settings').hidden && !settingsEmbedded()
+const appearanceOpen = () => !$('appearance').hidden
 const aboutOpen = () => !$('about').hidden
 const shortcutsOpen = () => !$('shortcuts').hidden
 /** Panels that open without the scrim (the contents have one, so need no outside check). */
-const scrimlessOpen = () => settingsOpen() || aboutOpen() || shortcutsOpen()
+const scrimlessOpen = () => appearanceOpen() || aboutOpen() || shortcutsOpen()
 
 /** Commands that still work while a side panel has the keyboard. */
 const PANEL_COMMANDS: Command[] = ['toc', 'settings', 'escape', 'fullscreen', 'cycleTheme', 'fontBigger', 'fontSmaller']
@@ -632,7 +711,7 @@ function panelHasKeyboard(e: KeyboardEvent, command: Command) {
   // Letters pick options in a focused list; only Escape leaves it.
   if (target?.closest('select, input')) return command !== 'escape'
   // Keys pressed in the book (its iframes) still turn pages beside the settings.
-  return !!target?.closest('#toc, #settings, #about, #shortcuts') && !PANEL_COMMANDS.includes(command)
+  return !!target?.closest('#toc, #settings, #appearance, #about, #shortcuts') && !PANEL_COMMANDS.includes(command)
 }
 
 function onKey(e: KeyboardEvent) {
@@ -651,6 +730,10 @@ async function runCommand(command: Command) {
     case 'fullscreen':
       return appWindow.setFullscreen(!(await appWindow.isFullscreen()))
     case 'settings':
+      // S / Ctrl+, and the Aa button: the appearance while reading, the settings in the library.
+      if (book) return appearanceOpen() ? closePanels() : openAppearance()
+      // In the library: to the settings, and back to the page that was showing.
+      if (settingsEmbedded()) return showView(view?.startsWith('settings:') ? lastPage : 'settings:reading')
       return settingsOpen() ? closePanels() : openSettings()
     case 'cycleTheme':
       return changeSettings({ theme: nextTheme(settings.theme) })
@@ -695,13 +778,26 @@ async function runCommand(command: Command) {
 /** Closes the footnote, or else any open panel; false when there was none. */
 function closeTopLayer() {
   if (book?.footnoteOpen) book.hideFootnote()
-  else if (tocOpen() || organizeOpen() || scrimlessOpen()) closePanels()
+  else if (tocOpen() || organizeOpen() || settingsOpen() || scrimlessOpen()) closePanels()
   else return false
   return true
 }
 
 async function handleEscape() {
-  if (!closeTopLayer() && (await appWindow.isFullscreen())) await appWindow.setFullscreen(false)
+  if (closeTopLayer() || stepBackInLibrary()) return
+  if (await appWindow.isFullscreen()) await appWindow.setFullscreen(false)
+}
+
+/**
+ * Esc and Back in the library: up a catalog folder; from the catalogs' start
+ * or the settings, home (the history, else the books). False at home.
+ */
+function stepBackInLibrary() {
+  if (book || !settingsEmbedded()) return false
+  if (view === 'catalogs' && catalogView.back()) return true
+  if (view === 'recent' || view === 'library') return false
+  showView(homeView())
+  return true
 }
 
 /**
@@ -709,12 +805,7 @@ async function handleEscape() {
  * book returns to the library, and the library sends the app to the background.
  */
 function handleBack() {
-  if (closeTopLayer()) return
-  // In the catalogs, Back goes up a folder, and from the top to the books.
-  if (!book && !$('catalog-view').hidden) {
-    if (!catalogView.back()) showTab('books')
-    return
-  }
+  if (closeTopLayer() || stepBackInLibrary()) return
   void invoke(book ? 'show_library' : 'leave_app').catch(console.error)
 }
 
@@ -726,13 +817,32 @@ function toggleFlow() {
 }
 
 function updateFlowButton() {
-  $('flow-button').textContent = book?.flow === 'scrolled' ? 'Paginated' : 'Scrolled'
+  const scrolled = book?.flow === 'scrolled'
+  const modeIcon = () => icon(scrolled ? 'scroll' : 'book-open')
+  const mode = scrolled ? 'Scrolled' : 'Paginated'
+  $('flow-button').replaceChildren(modeIcon())
+  $('flow-button').title = `${mode} — switch to ${scrolled ? 'paginated' : 'scrolled'} (M)`
+  $('flow-button').setAttribute('aria-label', mode)
+  appearancePanel.show(settings, book?.flow)
+  $('phone-flow').replaceChildren(modeIcon(), el('span', { textContent: mode }))
+}
+
+/** The drawer's two tabs; the last one chosen stays for the session. */
+let tocTab: 'contents' | 'bookmarks' = 'contents'
+
+function showTocTab(tab: 'contents' | 'bookmarks') {
+  tocTab = tab
+  $('toc-tree').hidden = tab !== 'contents'
+  $('bookmarks').hidden = tab !== 'bookmarks'
+  $('toc-tab-contents').setAttribute('aria-selected', String(tab === 'contents'))
+  $('toc-tab-bookmarks').setAttribute('aria-selected', String(tab === 'bookmarks'))
 }
 
 function openToc() {
   closePanels()
   $('scrim').hidden = false
   $('toc').hidden = false
+  showTocTab(tocTab)
   const current = $('toc-tree').querySelector<HTMLElement>('[aria-current]')
   ;(current ?? $('toc-tree').querySelector<HTMLElement>('[role="treeitem"]'))?.focus()
 }
@@ -745,11 +855,21 @@ function openInfoPanel(id: 'about' | 'shortcuts') {
 }
 
 /** Settings open without the scrim, so changes show on the book right away. */
-function openSettings() {
+function openSettings(section?: SettingsSection) {
+  if (settingsEmbedded()) return showView(`settings:${section ?? 'reading'}`)
   closePanels()
   $('settings').hidden = false
   void refreshFileTypesStatus()
-  $('settings').querySelector<HTMLElement>('button, select, input')?.focus()
+  if (section) settingsPage.showSection(section)
+  $('settings').querySelector<HTMLElement>('button')?.focus()
+}
+
+/** Aa: opens without the scrim, so changes show on the book right away. */
+function openAppearance() {
+  closePanels()
+  $('appearance').hidden = false
+  $('settings-button').setAttribute('aria-expanded', 'true')
+  $('appearance').querySelector<HTMLElement>('button[aria-pressed="true"], button')?.focus()
 }
 
 // ---- Organize library ---------------------------------------------------------
@@ -806,10 +926,13 @@ async function applyOrganize() {
 }
 
 function closePanels() {
+  closeMoreMenu()
   $('scrim').hidden = true
   $('organize').hidden = true
   $('toc').hidden = true
-  $('settings').hidden = true
+  if (!settingsEmbedded()) $('settings').hidden = true
+  $('appearance').hidden = true
+  $('settings-button').setAttribute('aria-expanded', 'false')
   $('about').hidden = true
   $('shortcuts').hidden = true
 }
@@ -818,36 +941,106 @@ function closePanels() {
 
 const systemDark = matchMedia('(prefers-color-scheme: dark)')
 let fileTypesRegistered = false
-const settingsPanel = createSettingsPanel(
-  $('settings'),
-  settings,
-  changes => void changeSettings(changes),
-  {
-    clearHistory: () => {
-      void invoke('clear_recent')
-        .then(() => {
-          if (!book) void refreshRecent()
-        })
-        .catch(console.error)
-    },
-    toggleFileTypes: () => {
-      const command = fileTypesRegistered ? 'unregister_file_types' : 'register_file_types'
-      void invoke(command).then(refreshFileTypesStatus, console.error)
-    },
-    changeLibrary: () => void chooseLibrary(true),
-    organizeLibrary: () => void openOrganize(),
+const settingsPage = createSettingsPage($('settings'), settings, changes => void changeSettings(changes), {
+  clearHistory: () => {
+    void invoke('clear_recent')
+      .then(() => {
+        if (!book) void refreshRecent()
+      })
+      .catch(console.error)
   },
+  toggleFileTypes: () => {
+    const command = fileTypesRegistered ? 'unregister_file_types' : 'register_file_types'
+    void invoke(command).then(refreshFileTypesStatus, console.error)
+  },
+  changeLibrary: () => void chooseLibrary(true),
+  organizeLibrary: () => void openOrganize(),
+  close: closePanels,
+})
+const appearancePanel = createAppearancePanel($('appearance'), settings, changes => void changeSettings(changes), {
+  flow: flow => changeSettings({ flow }),
+  allSettings: () => openSettings('reading'),
+})
+// The catalogs (OPDS servers), the key list and the version have their own sections in the settings.
+const sourcesPanel = createSourcesPanel(settingsPage.catalogs)
+settingsPage.shortcuts.append($('shortcuts').querySelector('dl')!.cloneNode(true))
+const settingsVersion = el('span')
+settingsPage.about.append(
+  el('p', {}, 'Book Reader ', settingsVersion),
+  el('p', { className: 'muted', textContent: 'A compact reader for EPUB and FB2 books.' }),
 )
-// The catalogs (OPDS servers) are edited at the end of the settings.
-const sourcesPanel = createSourcesPanel($('settings').appendChild(el('div', { className: 'field sources-field' })))
-const catalogView = createCatalogView({ library: () => libraryBooks, openSettings })
 
-/** The library window's two tabs: the books on disk, and the catalogs to get more from. */
+/** Refreshes both: the settings page and Aa (with the open book's mode). */
+function showSettings() {
+  settingsPage.show(settings)
+  appearancePanel.show(settings, book?.flow)
+}
+const catalogView = createCatalogView({ library: () => libraryBooks, openSettings: () => openSettings('catalogs') })
+
+// ---- The library's navigation (the desktop's pane, the phone's bottom bar) ----------
+
+/** What the library window shows: the reading history, the books, the catalogs, or a settings section. */
+type View = 'recent' | 'library' | 'catalogs' | `settings:${SettingsSection}`
+/** Unset until the library first shows: then the history if there is one, else the books. */
+let view: View | null = null
+/** The pane's and the bottom bar's items; the pane's Settings heading. */
+const navItems = [...document.querySelectorAll<HTMLElement>('[data-nav]')]
+const settingsHead = document.querySelector<HTMLElement>('#sidebar .section-head')!
+/** The last page that isn't a settings section, for S / Ctrl+, to go back to. */
+let lastPage: View = 'library'
+/** Where the library starts, and Esc / Back lead: the history if there is one, else the books. */
+const homeView = (): View => (hasRecent ? 'recent' : 'library')
+/** A library folder is chosen (else the first-run choice shows). */
+let libraryReady = false
+
+/** The library (the desktop's window, the phone's screen): the settings sit in its content, not over it. */
+const settingsEmbedded = () => $('settings').classList.contains('embedded')
+
+/** Puts the settings in the library's content (`true`) or back over the window. */
+function embedSettings(embed: boolean) {
+  if (embed === settingsEmbedded()) return
+  const settingsEl = $('settings')
+  settingsEl.classList.toggle('embedded', embed)
+  settingsEl.hidden = true
+  if (embed) $('start-main').append(settingsEl)
+  else document.body.append(settingsEl)
+}
+
+/** Shows `to` in the library window's content and marks it in the pane. */
+function showView(to: View) {
+  const wasSettings = !!view?.startsWith('settings:')
+  view = to
+  if (!to.startsWith('settings:')) lastPage = to
+  const settingsView = to.startsWith('settings:')
+  $('setup').hidden = libraryReady || settingsView
+  $('library').hidden = !libraryReady || settingsView
+  if (settingsEmbedded()) $('settings').hidden = !settingsView
+  if (settingsView) {
+    settingsPage.showSection(to.slice('settings:'.length) as SettingsSection)
+    if (!wasSettings) void refreshFileTypesStatus()
+    foldSettingsNav(false)
+  } else if (libraryReady) {
+    showTab(to === 'catalogs' ? 'catalogs' : 'books')
+    // The history and the books are separate pages here (the phone shows both on one).
+    $('books-view').dataset.show = to === 'recent' ? 'recent' : 'all'
+  }
+  for (const item of navItems) {
+    // The phone's Settings stands for all its sections.
+    const group = item.dataset.navGroup
+    item.setAttribute('aria-current', String(item.dataset.nav === to || (!!group && to.startsWith(`${group}:`))))
+  }
+}
+
+/** Folds the Settings group in the pane away (`true`) or open. */
+function foldSettingsNav(fold: boolean) {
+  $('settings-nav').hidden = fold
+  settingsHead.setAttribute('aria-expanded', String(!fold))
+}
+
+/** The library's two parts: the books on disk, and the catalogs to get more from. */
 function showTab(tab: 'books' | 'catalogs') {
   $('books-view').hidden = tab !== 'books'
   $('catalog-view').hidden = tab !== 'catalogs'
-  $('tab-books').setAttribute('aria-selected', String(tab === 'books'))
-  $('tab-catalogs').setAttribute('aria-selected', String(tab === 'catalogs'))
   if (tab === 'catalogs') void catalogView.show()
 }
 
@@ -857,6 +1050,16 @@ const resolvedTheme = (): ResolvedTheme =>
 /** Sets the app theme (style.css defines the colours per data-theme). */
 function applyTheme() {
   document.documentElement.dataset.theme = resolvedTheme()
+  // The interface font: the bundled pair by default (style.css), or one font everywhere.
+  const root = document.documentElement.style
+  if (settings.uiFont === 'classic') {
+    root.removeProperty('--font-body')
+    root.removeProperty('--font-heading')
+  } else {
+    const stack = settings.uiFont === 'system' ? 'system-ui, sans-serif' : `'${settings.uiFont}', system-ui, sans-serif`
+    root.setProperty('--font-body', stack)
+    root.setProperty('--font-heading', stack)
+  }
 }
 
 /** The book is drawn with the app theme's colours, so the two always match. */
@@ -882,12 +1085,14 @@ let settingsTimer: number | undefined
 function applySettings(changes: Partial<Settings>) {
   settings = { ...settings, ...changes }
   if (Object.keys(changes).some(isAppearanceKey)) restyle()
-  settingsPanel.show(settings)
+  showSettings()
   if (book && book.flow !== settings.flow) {
     book.flow = settings.flow
     updateFlowButton()
   }
   if ('volumeKeys' in changes) setReading(!!book)
+  if ('historyLength' in changes && !book) void refreshRecent()
+  if ('uiFont' in changes) applyTheme()
 }
 
 /** Applies changes made in this window, and saves them after a pause. */
@@ -912,27 +1117,72 @@ async function refreshFileTypesStatus() {
     return false
   })
   fileTypesRegistered = registered
-  settingsPanel.setFileTypesRegistered(registered)
+  settingsPage.setFileTypesRegistered(registered)
 }
 
 // ---- Edge controls ----------------------------------------------------------
 
-let hideTopbarTimer: number | undefined
+let hideChromeTimer: number | undefined
+const bottombar = $('bottombar')
 
-/** A tap in the middle of the page (touch screens) shows or hides the top bar. */
-function toggleTopbar() {
-  clearTimeout(hideTopbarTimer)
-  topbar.classList.toggle('shown')
+/** The reading chrome: the top bar and the bottom bar come and go together. */
+function setChrome(shown: boolean) {
+  clearTimeout(hideChromeTimer)
+  hideChromeTimer = undefined
+  topbar.classList.toggle('shown', shown)
+  bottombar.classList.toggle('shown', shown)
+  if (!shown) closeMoreMenu()
 }
 
+/** A tap in the middle of the page (touch screens) shows or hides the chrome. */
+function toggleTopbar() {
+  setChrome(!topbar.classList.contains('shown'))
+}
+
+/** The mouse near the top or bottom edge shows the chrome; elsewhere it fades after a moment. */
 function onPointer(y: number) {
-  if (y < TOP_EDGE_PX) {
-    clearTimeout(hideTopbarTimer)
-    topbar.classList.add('shown')
-  } else if (topbar.classList.contains('shown') && !topbar.matches(':hover')) {
-    clearTimeout(hideTopbarTimer)
-    hideTopbarTimer = window.setTimeout(() => topbar.classList.remove('shown'), 600)
+  // Near the top, or (reading) the bottom: show the bars, unless they already are.
+  if (y < TOP_EDGE_PX || (book && y > innerHeight - BOTTOM_EDGE_PX)) {
+    if (!topbar.classList.contains('shown') || hideChromeTimer) setChrome(true)
+    return
   }
+  // Kept while the mouse is on them, a menu or a panel opened from them is open, or the knob is held.
+  const inUse =
+    topbar.matches(':hover') || bottombar.matches(':hover') || !$('more-menu').hidden || appearanceOpen() || tocOpen() || trackDrag
+  if (!topbar.classList.contains('shown') || inUse) return
+  clearTimeout(hideChromeTimer)
+  hideChromeTimer = window.setTimeout(() => setChrome(false), 600)
+}
+
+// ---- The "more" menu ----------------------------------------------------------
+
+function toggleMoreMenu() {
+  const open = $('more-menu').hidden
+  closePanels()
+  $('more-menu').hidden = !open
+  $('more-button').setAttribute('aria-expanded', String(open))
+  if (open) $('more-menu').querySelector<HTMLElement>('button:not([hidden])')?.focus()
+}
+
+function closeMoreMenu() {
+  $('more-menu').hidden = true
+  $('more-button').setAttribute('aria-expanded', 'false')
+}
+
+// ---- The progress track ---------------------------------------------------------
+
+/** Dragging the knob: the book goes there when the finger or mouse lets go. */
+let trackDrag = false
+
+function trackFraction(e: PointerEvent) {
+  const rect = $('progress-track').getBoundingClientRect()
+  if (!rect.width) return 0
+  return Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+}
+
+function showTrackAt(fraction: number) {
+  $('progress-done').style.width = `${fraction * 100}%`
+  $('progress-knob').style.left = `${fraction * 100}%`
 }
 
 // ---- Wiring -----------------------------------------------------------------
@@ -948,8 +1198,14 @@ $('scrim').addEventListener('click', closePanels)
 document.addEventListener('pointerdown', e => {
   if (!scrimlessOpen()) return
   const target = e.target instanceof Element ? e.target : null
-  if (target?.closest('#settings, #settings-button, #about, #about-button, #shortcuts, #shortcuts-button')) return
+  if (target?.closest('#settings, #appearance, #settings-button, #about, #about-button, #shortcuts, #shortcuts-button, #more-menu, #phone-actions')) return
   closePanels()
+})
+// The "more" menu closes on any press outside it (and its buttons).
+document.addEventListener('pointerdown', e => {
+  const target = e.target instanceof Element ? e.target : null
+  if ($('more-menu').hidden || target?.closest('#more-menu, #more-button, [data-command="more"]')) return
+  closeMoreMenu()
 })
 suppressContextMenu()
 $('toc-button').addEventListener('click', () => runCommand('toc'))
@@ -957,17 +1213,11 @@ $('library-button').addEventListener('click', () => runCommand('library'))
 $('setup-default').addEventListener('click', () => void chooseLibrary(false))
 $('setup-pick').addEventListener('click', () => void chooseLibrary(true))
 $('library-search').addEventListener('input', renderLibrary)
-$('library-status').append(...STATUSES.map(s => el('option', { value: s, textContent: STATUS_LABELS[s] })))
 $('library-sort').append(...SORTS.map(s => el('option', { value: s, textContent: SORT_LABELS[s] })))
-for (const [id, key] of [
-  ['library-status', 'libraryStatus'],
-  ['library-sort', 'librarySort'],
-] as const) {
-  $<HTMLSelectElement>(id).addEventListener('change', e => {
-    changeSettings({ [key]: (e.target as HTMLSelectElement).value })
-    renderLibrary()
-  })
-}
+$<HTMLSelectElement>('library-sort').addEventListener('change', e => {
+  changeSettings({ librarySort: (e.target as HTMLSelectElement).value as Sort })
+  renderLibrary()
+})
 /** Alt-tabbing back rescans at most this often. */
 const FOCUS_RESCAN_MS = 15_000
 let lastFocusRescan = 0
@@ -984,6 +1234,13 @@ appWindow.listen('library-updated', () => {
 $('offer-move').addEventListener('click', () => void addToLibrary('move'))
 $('offer-copy').addEventListener('click', () => void addToLibrary('copy'))
 $('offer-later').addEventListener('click', hideOffer)
+$('offer-more').addEventListener('click', () => {
+  $('offer-more').hidden = true
+  $('offer-never').hidden = false
+  $('offer-never').focus()
+})
+$('toc-tab-contents').addEventListener('click', () => showTocTab('contents'))
+$('toc-tab-bookmarks').addEventListener('click', () => showTocTab('bookmarks'))
 $('offer-setup').addEventListener('click', () => {
   hideOffer()
   void runCommand('library')
@@ -999,8 +1256,10 @@ setInterval(() => void pushSync(), SYNC_EVERY_MS)
 // Going to the background (minimising, switching apps on the phone) sends the position too.
 document.addEventListener('visibilitychange', () => document.hidden && void pushSync())
 $('organize-cancel').addEventListener('click', closePanels)
-$('tab-books').addEventListener('click', () => showTab('books'))
-$('tab-catalogs').addEventListener('click', () => showTab('catalogs'))
+// The library window's pane (desktop): its items, Settings folding out, its width.
+for (const item of navItems) item.addEventListener('click', () => showView(item.dataset.nav as View))
+settingsHead.addEventListener('click', () => foldSettingsNav(!$('settings-nav').hidden))
+sidebarResizer($('start'), $('sidebar-resizer'))
 appWindow.listen('catalogs-changed', () => {
   void sourcesPanel.refresh()
   if (!$('catalog-view').hidden) void catalogView.show()
@@ -1017,8 +1276,32 @@ $('open-button').addEventListener('click', () => runCommand('open'))
 $('flow-button').addEventListener('click', () => runCommand('toggleFlow'))
 $('bookmark-button').addEventListener('click', () => runCommand('bookmark'))
 $('fullscreen-button').addEventListener('click', () => runCommand('fullscreen'))
-$('progress').addEventListener('click', e => {
-  book?.view.goToFraction(e.clientX / innerWidth).catch(console.error)
+$('more-button').addEventListener('click', toggleMoreMenu)
+// A chosen item closes the menu (its own handler above does the work).
+$('more-menu').addEventListener('click', e => {
+  if ((e.target as Element).closest('button')) closeMoreMenu()
+})
+// The phone's bottom bar: the same commands as the top bar's buttons.
+for (const button of document.querySelectorAll<HTMLButtonElement>('#phone-actions [data-command]')) {
+  const command = button.dataset.command
+  button.addEventListener('click', () => (command === 'more' ? toggleMoreMenu() : void runCommand(command as Command)))
+}
+$('progress-track').addEventListener('pointerdown', e => {
+  if (!book || e.button !== 0) return
+  trackDrag = true
+  $('progress-track').setPointerCapture(e.pointerId)
+  showTrackAt(trackFraction(e))
+})
+$('progress-track').addEventListener('pointermove', e => trackDrag && showTrackAt(trackFraction(e)))
+$('progress-track').addEventListener('pointerup', e => {
+  if (!trackDrag) return
+  trackDrag = false
+  book?.view.goToFraction(trackFraction(e)).catch(console.error)
+})
+// Cancelled (the system took the touch): the knob goes back to where the book is.
+$('progress-track').addEventListener('pointercancel', () => {
+  trackDrag = false
+  showTrackAt(book?.view.lastLocation?.fraction ?? 0)
 })
 
 appWindow.listen('book-changed', () => openCurrentBook())
@@ -1049,6 +1332,7 @@ void refreshFileTypesStatus()
 void invoke<string>('app_version')
   .then(version => {
     $('about-version').textContent = `v${version}`
+    settingsVersion.textContent = `v${version}`
   })
   .catch(console.error)
 openCurrentBook()

@@ -1,10 +1,13 @@
 import { invoke } from '@tauri-apps/api/core'
 import { FORMAT_LABELS, fetchSources, inLibrary, preferredFile, type CatalogBook, type CatalogEntry, type Feed, type Source } from './catalog'
 import { el } from 'reader-core'
+import { icon } from './icons'
 
 /** A page the reader went to, kept so Back shows it again without a refetch. */
 interface Page {
+  /** The page's name in the breadcrumbs; the catalog's start (`start`) shows the catalog's current name. */
   title: string
+  start?: boolean
   entries: CatalogEntry[]
   next: string | null
 }
@@ -21,7 +24,6 @@ export function createCatalogView(deps: CatalogViewDeps) {
   const $ = (id: string) => document.getElementById(id) as HTMLElement
   const sourceSelect = $('catalog-source') as HTMLSelectElement
   const search = $('catalog-search') as HTMLInputElement
-  const back = $('catalog-back') as HTMLButtonElement
   const more = $('catalog-more') as HTMLButtonElement
   const list = $('catalog-list')
 
@@ -51,14 +53,17 @@ export function createCatalogView(deps: CatalogViewDeps) {
       return
     }
     const kept = sources.find(s => s.id === source?.id)
+    // Another catalog, or this one moved to another address: start over there.
+    if (!kept || kept.url !== source?.url) pages = []
     source = kept ?? sources[0]
-    if (!kept) pages = []
     sourceSelect.value = source.id
+    // Renamed meanwhile: the way shows the new name even if the server doesn't answer.
+    render()
     if (!pages.length) await open(null)
   }
 
-  /** Opens a feed: the catalog's root (null), a folder, or a search. */
-  async function open(href: string | null, query?: string) {
+  /** Opens a feed: the catalog's start (null), a folder (named `label`, as its entry was), or a search. */
+  async function open(href: string | null, query?: string, label?: string) {
     if (!source) return
     const id = source.id
     const mine = ++request
@@ -68,8 +73,10 @@ export function createCatalogView(deps: CatalogViewDeps) {
         ? await invoke<Feed>('catalog_search', { id, query })
         : await invoke<Feed>('catalog_feed', { id, url: href })
       if (mine !== request) return
-      const title = query ? `Search: ${query}` : feed.title || source.name
-      pages.push({ title, entries: feed.entries, next: feed.next })
+      // Servers often give every page the same feed title (CWA does), so a page is named
+      // after the folder it was opened from; the start, after the catalog.
+      const title = query ? `Search: ${query}` : (label ?? source.name)
+      pages.push({ title, entries: feed.entries, next: feed.next, start: !href && !query })
       message(feed.entries.length ? '' : 'Nothing here.')
       render()
     } catch (e) {
@@ -98,8 +105,18 @@ export function createCatalogView(deps: CatalogViewDeps) {
 
   function render() {
     const page = pages.at(-1)
-    $('catalog-title').textContent = page?.title ?? ''
-    back.hidden = pages.length < 2
+    // Where in the catalog: every page on the way, each one a step back to it. The
+    // first is the catalog itself, by its current name (also before it answers).
+    const titles = pages.length ? pages.map(p => (p.start && source ? source.name : p.title)) : source ? [source.name] : []
+    $('catalog-title').replaceChildren(
+      ...titles.flatMap((title, i) => {
+        const last = i === titles.length - 1
+        const crumb = last
+          ? el('span', { className: 'here', textContent: title, ariaCurrent: 'page' })
+          : el('button', { type: 'button', textContent: title, onclick: () => backTo(i) })
+        return i ? [el('span', { className: 'sep', textContent: '›', ariaHidden: 'true' }), crumb] : [crumb]
+      }),
+    )
     more.hidden = !page?.next
     list.replaceChildren(...(page?.entries ?? []).map(entryRow))
   }
@@ -111,7 +128,7 @@ export function createCatalogView(deps: CatalogViewDeps) {
         { className: 'folder' },
         el(
           'button',
-          { onclick: () => void open(entry.href) },
+          { onclick: () => void open(entry.href, undefined, entry.title) },
           el('span', { className: 'title', textContent: entry.title }),
           el('span', { className: 'summary', textContent: entry.summary }),
         ),
@@ -125,11 +142,12 @@ export function createCatalogView(deps: CatalogViewDeps) {
     const cover = el('div', { className: 'cover' })
     if (book.cover) loadCover(cover, book.cover)
     const action = el('button', { className: 'download' })
+    const actionLabel = (text: string) => action.replaceChildren(icon('download'), text)
     // Only a hint (same title and author): downloading checks the content.
     const known = inLibrary(book, deps.library())
     if (file) {
       const label = `Download ${FORMAT_LABELS[file.format]}`
-      action.textContent = label
+      actionLabel(label)
       action.onclick = async () => {
         if (!source) return
         action.disabled = true
@@ -144,7 +162,7 @@ export function createCatalogView(deps: CatalogViewDeps) {
           action.title = added.path
         } catch (e) {
           action.disabled = false
-          action.textContent = label
+          actionLabel(label)
           action.title = String(e)
           message(String(e))
         }
@@ -157,12 +175,9 @@ export function createCatalogView(deps: CatalogViewDeps) {
       el(
         'div',
         { className: 'about' },
-        el('span', { className: 'title', textContent: book.title }),
+        el('span', { className: 'title', textContent: book.title }, ...(known ? [el('span', { className: 'tag', textContent: 'In library' })] : [])),
         el('span', { className: 'author', textContent: book.authors.join(', ') }),
-        el('span', {
-          className: 'meta',
-          textContent: [...new Set(book.files.map(f => FORMAT_LABELS[f.format]))].join(' · ') + (known ? ' · in library' : ''),
-        }),
+        el('span', { className: 'meta', textContent: [...new Set(book.files.map(f => FORMAT_LABELS[f.format]))].join(' · ') }),
       ),
       action,
     )
@@ -199,13 +214,17 @@ export function createCatalogView(deps: CatalogViewDeps) {
     void open(null)
   })
   function goBack() {
+    backTo(pages.length - 2)
+  }
+
+  /** Back to the page at `index` on the way (0: the catalog's start). */
+  function backTo(index: number) {
     request++
-    pages.pop()
+    pages.length = Math.max(1, index + 1)
     message('')
     render()
   }
 
-  back.addEventListener('click', goBack)
   more.addEventListener('click', () => void loadMore())
   search.addEventListener('keydown', e => {
     if (e.key !== 'Enter' || !search.value.trim()) return

@@ -1,48 +1,81 @@
 /* Themes: main.ts sets data-theme to the resolved theme ("system" becomes light
-   or dark). The book is drawn with --fg and --link too (see appearance.ts), so
-   these variables are the one place a theme's colours are defined. */
+   or dark). The book is drawn with --fg and --link too (see reader-core's
+   appearance.ts), so these variables are the one place a theme's colours are
+   defined. The palette follows docs/design/ui-refresh.md ("Classical"): warm
+   neutrals and one gold accent, used for strokes and text rather than fills. */
 :root {
+  /* The three page colours, also drawn by the theme swatches in the settings */
+  --light-bg: #f3f2f2;
+  --light-fg: #201f1d;
+  --sepia-bg: #fff3e4;
+  --sepia-fg: #3a270d;
+  --dark-bg: #2d2b2b;
+  --dark-fg: #eae7e7;
+
   color-scheme: light;
-  --bg: #fbfbf8;
-  --fg: #1f1f1f;
-  --link: #1a5fb4;
-  --muted: #777;
-  --panel: #ffffff;
-  --line: rgba(0, 0, 0, 0.12);
-  --active: rgba(0, 0, 0, 0.07);
-  --accent: #6b6b6b;
-  --shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  --bg: var(--light-bg);
+  --fg: var(--light-fg);
+  /* Raised surfaces: covers, inputs on the page */
+  --surface: #eae9e9;
+  /* Panels, drawers and pop-ups over the page */
+  --panel: #f8f4f4;
+  --accent: #b68235;
+  /* The accent as text (darker, to read on the page) */
+  --accent-text: #7d5411;
+  --link: var(--accent-text);
+  --muted: color-mix(in srgb, var(--fg) 58%, transparent);
+  --line: color-mix(in srgb, var(--fg) 16%, transparent);
+  --active: color-mix(in srgb, var(--fg) 7%, transparent);
+  --shadow-sm: 0 1px 2px #2d2b2b24;
+  --shadow-md: 0 3px 10px #2d2b2b29;
+  --shadow: 0 12px 32px #2d2b2b38;
+
+  --font-heading: 'Cormorant Garamond', Georgia, serif;
+  --font-body: 'Lora', Georgia, serif;
+  --space-1: 4.6px;
+  --space-2: 9.2px;
+  --space-3: 13.8px;
+  --space-4: 18.4px;
+  --space-6: 27.6px;
+  --space-8: 36.8px;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 7px;
+  /* The reading bottom bar's height (without the safe area), for what sits above it */
+  --bottombar-height: 56px;
+
   /* On Android the page is drawn edge to edge, under the status and navigation
      bars; these keep controls clear of them (zero on the desktop). */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-family: var(--font-body);
   font-size: 14px;
+  font-variant-numeric: tabular-nums;
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --bg: #1b1b1c;
-  --fg: #d8d8d6;
-  --link: #8ab4f8;
-  --muted: #8a8a8a;
-  --panel: #262628;
-  --line: rgba(255, 255, 255, 0.12);
-  --active: rgba(255, 255, 255, 0.08);
-  --accent: #9a9a9a;
-  --shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  --bg: var(--dark-bg);
+  --fg: var(--dark-fg);
+  --surface: #3a3838;
+  --panel: #363434;
+  --accent: #c28d41;
+  --accent-text: #e1ad66;
+  --line: color-mix(in srgb, var(--fg) 14%, transparent);
+  --shadow-sm: 0 1px 2px #0000004d;
+  --shadow-md: 0 3px 10px #00000059;
+  --shadow: 0 0 0 1px #ffffff14, 0 12px 32px #00000080;
 }
 
 :root[data-theme='sepia'] {
-  --bg: #f4ecd8;
-  --fg: #5b4636;
-  --link: #8a4b1f;
-  --muted: #8c7b66;
-  --panel: #faf4e6;
-  --line: rgba(91, 70, 54, 0.18);
-  --active: rgba(91, 70, 54, 0.08);
-  --accent: #9c8467;
-  --shadow: 0 8px 28px rgba(91, 70, 54, 0.2);
+  --bg: var(--sepia-bg);
+  --fg: var(--sepia-fg);
+  --surface: #ffe9cc;
+  --panel: #fff8ee;
+  --accent-text: #7d5411;
+  --shadow-sm: 0 1px 2px #3a270d24;
+  --shadow-md: 0 3px 10px #3a270d29;
+  --shadow: 0 12px 32px #3a270d38;
 }
 
 * {
@@ -62,6 +95,39 @@ body {
   display: none !important;
 }
 
+h1,
+h2,
+h3 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  accent-color: var(--accent);
+}
+
+input[type='range'] {
+  accent-color: var(--accent);
+}
+
 .muted {
   color: var(--muted);
 }
@@ -78,27 +144,12 @@ body {
   display: none !important;
 }
 
-/* A finger needs bigger targets than a mouse; the top bar wraps instead of
-   running off a narrow screen. It is shown by a tap in the page's middle. */
+/* A finger needs bigger targets than a mouse. */
 @media (pointer: coarse) {
-  #topbar {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  #topbar .spacer {
-    display: none;
-  }
-
-  #topbar button {
+  #topbar button,
+  #phone-actions button {
     min-height: 44px;
-    padding: 8px 12px;
-    font-size: 16px;
-  }
-
-  /* The library sits below the taller bar */
-  #start {
-    padding-top: calc(76px + var(--safe-top));
+    min-width: 44px;
   }
 }
 
@@ -143,33 +194,28 @@ body {
   margin: 0;
 }
 
+/* The one main action in a place: the accent as a stroke, not a fill */
 button.primary {
   padding: 8px 16px;
-  color: var(--bg);
-  background: var(--fg);
+  color: var(--accent-text);
+  border: 1px solid var(--accent);
 }
 
 button.primary:hover {
-  background: var(--fg);
-  opacity: 0.85;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+button.primary:active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 #setup-suggested {
   font-weight: 600;
 }
 
-/* In the library the topbar stays visible, and the reading buttons are gone */
-body.library-mode #topbar {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-body.library-mode #bookmark-button,
-body.library-mode #toc-button,
-body.library-mode #flow-button,
-body.library-mode #library-button,
-body.library-mode #fullscreen-button {
-  display: none;
+/* Reading-only parts (the top bar is hidden in the library anyway; the "more" menu's) */
+body.library-mode .reader-only {
+  display: none !important;
 }
 
 .library-bar {
@@ -202,25 +248,6 @@ body.library-mode #fullscreen-button {
   border: 1px solid var(--line);
 }
 
-.library-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 12px;
-}
-
-.library-tabs button {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--muted);
-  padding: 4px 10px;
-}
-
-.library-tabs button[aria-selected='true'] {
-  color: var(--fg);
-  background: var(--active);
-}
-
-/* Catalogs */
 #catalog-list {
   margin: 0;
   padding: 0;
@@ -303,10 +330,6 @@ body.library-mode #fullscreen-button {
 }
 
 /* Catalog sources in the settings */
-#settings .sources-field {
-  gap: 8px;
-}
-
 #settings .sources {
   display: flex;
   flex-direction: column;
@@ -353,8 +376,7 @@ body.library-mode #fullscreen-button {
   color: var(--muted);
 }
 
-#settings .stacked input,
-#settings .sources-field button {
+#settings .stacked input {
   font: inherit;
   color: var(--fg);
 }
@@ -364,11 +386,6 @@ body.library-mode #fullscreen-button {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 5px 8px;
-}
-
-#settings .sources-field button {
-  border: 1px solid var(--line);
-  justify-self: start;
 }
 
 #settings .source-form .buttons {
@@ -391,7 +408,7 @@ body.library-mode #fullscreen-button {
   text-align: center;
 }
 
-#library-books {
+.book-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
   gap: 20px 16px;
@@ -400,7 +417,7 @@ body.library-mode #fullscreen-button {
   list-style: none;
 }
 
-#library-books button {
+.book-grid button {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -409,7 +426,7 @@ body.library-mode #fullscreen-button {
   text-align: start;
 }
 
-#library-books .cover {
+.book-grid .cover {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -425,17 +442,17 @@ body.library-mode #fullscreen-button {
   text-align: center;
 }
 
-#library-books .cover:has(img) {
+.book-grid .cover:has(img) {
   padding: 0;
 }
 
-#library-books .cover img {
+.book-grid .cover img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-#library-books .title {
+.book-grid .title {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -443,9 +460,9 @@ body.library-mode #fullscreen-button {
   font-weight: 600;
 }
 
-#library-books .author,
-#library-books .series,
-#library-books .meta {
+.book-grid .author,
+.book-grid .series,
+.book-grid .meta {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -453,8 +470,8 @@ body.library-mode #fullscreen-button {
   font-size: 12px;
 }
 
-#library-books .series:empty,
-#library-books .author:empty {
+.book-grid .series:empty,
+.book-grid .author:empty {
   display: none;
 }
 
@@ -473,7 +490,7 @@ body.library-mode #fullscreen-button {
 #sync-bar {
   position: fixed;
   left: 50%;
-  bottom: calc(16px + var(--safe-bottom));
+  bottom: calc(24px + var(--safe-bottom));
   z-index: 15;
   transform: translateX(-50%);
   display: flex;
@@ -486,8 +503,18 @@ body.library-mode #fullscreen-button {
   padding: 8px 12px;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
+}
+
+/* With the bottom bar shown, the bars sit above it */
+body:has(#bottombar.shown) :is(#offer, #sync-bar) {
+  bottom: calc(var(--bottombar-height) + 20px + var(--safe-bottom));
+}
+
+/* Options for the desktop only (the phone's lists leave them out) */
+.android option.desktop-only {
+  display: none;
 }
 
 #offer-buttons,
@@ -570,51 +597,6 @@ button.link:hover {
   background: none;
 }
 
-#recent {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 4px;
-  margin: 0 0 24px;
-  padding: 0;
-  list-style: none;
-  font-size: 14px;
-  text-align: start;
-}
-
-#recent:empty {
-  display: none;
-}
-
-#recent button {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  width: 100%;
-  padding: 8px 12px;
-  text-align: start;
-}
-
-#recent .title {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#recent .author,
-#recent .percent {
-  color: var(--muted);
-}
-
-#recent .percent {
-  grid-row: span 2;
-  align-self: center;
-  padding-inline-start: 12px;
-}
-
-#recent .missing {
-  opacity: 0.45;
-}
-
 /* Controls shown near the window edges */
 .edge {
   position: fixed;
@@ -631,25 +613,280 @@ button.link:hover {
   pointer-events: auto;
 }
 
+/* Top bar: back and contents · the book's title · bookmark, Aa, mode, more */
 #topbar {
   top: 0;
-  display: flex;
-  gap: 4px;
-  padding: calc(6px + var(--safe-top)) 8px 6px;
-  background: var(--panel);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--space-2);
+  padding: calc(8px + var(--safe-top)) 16px 8px;
+  background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
 
-#topbar .spacer {
-  flex: 1;
+#topbar .bar-start,
+#topbar .bar-end {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+#topbar .bar-end {
+  justify-content: flex-end;
+  grid-column: 3;
+}
+
+#topbar-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-heading);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+#topbar-author {
+  font-family: var(--font-body);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+#topbar-author:not(:empty)::before {
+  content: ' · ';
+}
+
+.icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vertical-align: middle;
+}
+
+.sprite {
+  display: none;
+}
+
+#topbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+}
+
+#topbar button.icon {
+  width: 36px;
+  padding: 0;
+}
+
+#library-button {
+  font-size: 14px;
+}
+
+.aa {
+  font-family: var(--font-heading);
+  font-size: 18px;
+  line-height: 1;
+}
+
+#settings-button[aria-expanded='true'],
+#more-button[aria-expanded='true'] {
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+/* The "more" menu under its button */
+#more-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 12px;
+  z-index: 25;
+  display: grid;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+#more-menu button {
+  justify-content: space-between;
+  text-align: left;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 14px;
+}
+
+#more-menu kbd {
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Bottom bar while reading: the chapter · a track with chapter ticks · the page */
+#bottombar {
+  bottom: 0;
+  padding: 10px 24px calc(10px + var(--safe-bottom));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+
+#progress-row {
+  display: grid;
+  grid-template-columns: minmax(0, 260px) 1fr minmax(0, 260px);
+  align-items: center;
+  gap: var(--space-4);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+#progress-chapter {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#progress-where {
+  text-align: right;
+  white-space: nowrap;
+}
+
+#progress-track {
+  position: relative;
+  height: 20px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+#progress-track::before,
+#progress-done {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--line);
+}
+
+#progress-track::before {
+  right: 0;
+}
+
+#progress-done {
+  height: 2px;
+  margin-top: -0.5px;
+  background: var(--accent);
+}
+
+#progress-ticks span {
+  position: absolute;
+  top: calc(50% - 4px);
+  width: 1px;
+  height: 8px;
+  background: color-mix(in srgb, var(--fg) 25%, transparent);
+}
+
+#progress-knob {
+  position: absolute;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  margin: -6.5px 0 0 -6.5px;
+  background: var(--bg);
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+}
+
+/* Android: the top bar keeps back, title, bookmark; the rest moves to the bottom */
+.android #topbar {
+  grid-template-columns: auto 1fr auto;
+  padding-inline: 8px;
+}
+
+.android #topbar .bar-end {
+  grid-column: auto;
+}
+
+.android #topbar .on-bottom {
+  display: none;
+}
+
+.android #topbar-title {
+  display: grid;
+  line-height: 1.2;
+}
+
+.android #topbar-author::before {
+  content: none;
+}
+
+.android #bottombar {
+  padding-inline: 20px;
+}
+
+.android {
+  --bottombar-height: 130px;
+}
+
+.android #progress-row {
+  grid-template-columns: 1fr auto;
+  gap: 4px var(--space-2);
+}
+
+.android #progress-track {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  height: 32px;
+}
+
+.android #progress-knob {
+  width: 21px;
+  height: 21px;
+  margin: -10.5px 0 0 -10.5px;
+}
+
+#phone-actions {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin-top: 6px;
+}
+
+#phone-actions button {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 4px;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#phone-actions .icon,
+#phone-actions .aa {
+  width: 22px;
+  height: 22px;
+  color: var(--fg);
 }
 
 button {
   font: inherit;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 15px;
   color: inherit;
   background: none;
-  border: 0;
-  border-radius: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   padding: 5px 10px;
   cursor: pointer;
 }
@@ -749,10 +986,11 @@ button:hover {
   display: none;
 }
 
-#topbar #bookmark-button[aria-pressed='true'] {
-  font-weight: 600;
-  background: var(--active);
+#topbar #bookmark-button[aria-pressed='true'] .icon {
+  fill: var(--accent);
+  stroke: var(--accent);
 }
+
 
 #bookmarks {
   max-height: 40%;
@@ -786,8 +1024,7 @@ button:hover {
   color: var(--muted);
 }
 
-/* Side panels: settings, about, shortcuts */
-#settings,
+/* Side panels: about, shortcuts */
 #about,
 #shortcuts {
   position: fixed;
@@ -806,78 +1043,150 @@ button:hover {
   accent-color: var(--accent);
 }
 
-#settings h2,
 #about h2,
 #shortcuts h2 {
   margin: 0 0 4px;
   font-size: 16px;
 }
 
-#settings .field {
+:is(#appearance, #settings) .field {
   display: grid;
   align-items: center;
   gap: 6px 8px;
 }
 
 /* A slider with its value beside it */
-#settings .field:has(> output) {
+:is(#appearance, #settings) .field:has(> output) {
   grid-template-columns: 1fr auto;
 }
 
-#settings .label {
+:is(#appearance, #settings) .label {
   grid-column: 1 / -1;
   color: var(--muted);
 }
 
-#settings select {
-  font: inherit;
-  color: inherit;
+:is(#appearance, #settings) select {
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
+  min-height: 34px;
   padding: 5px 8px;
 }
 
-#settings .segmented {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+/* Theme swatches: each page colour with "Aa" in its text colour; System is
+   split light / dark. The name sits under the swatch. */
+:is(#appearance, #settings) .swatches {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
 }
 
-#settings .segmented button {
+:is(#appearance, #settings) .swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+:is(#appearance, #settings) .swatch:hover {
+  background: none;
+}
+
+:is(#appearance, #settings) .swatch::before {
+  content: 'Aa';
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 44px;
+  font-family: var(--font-heading);
+  font-size: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+:is(#appearance, #settings) .swatch[data-theme='light']::before {
+  background: var(--light-bg);
+  color: var(--light-fg);
+}
+
+:is(#appearance, #settings) .swatch[data-theme='sepia']::before {
+  background: var(--sepia-bg);
+  color: var(--sepia-fg);
+}
+
+:is(#appearance, #settings) .swatch[data-theme='dark']::before {
+  background: var(--dark-bg);
+  color: var(--dark-fg);
+}
+
+:is(#appearance, #settings) .swatch[data-theme='system']::before {
+  background: linear-gradient(135deg, var(--light-bg) 50%, var(--dark-bg) 50%);
+  color: var(--accent);
+}
+
+:is(#appearance, #settings) .swatch:hover::before {
+  border-color: color-mix(in srgb, var(--fg) 45%, transparent);
+}
+
+:is(#appearance, #settings) .swatch[aria-pressed='true'] {
+  color: var(--fg);
+}
+
+:is(#appearance, #settings) .swatch[aria-pressed='true']::before {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* Switches: the mode (Aa), the library's status, the drawer's Contents / Bookmarks */
+:is(#appearance, #settings) .segmented,
+.status-switch,
+.toc-switch {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+:is(#appearance, #settings) .segmented button,
+.status-switch button,
+.toc-switch button {
   flex: 1;
   padding: 5px 4px;
+  border: 0;
+  border-radius: 0;
 }
 
-#settings .segmented button[aria-pressed='true'] {
-  background: var(--active);
-  font-weight: 600;
+:is(#appearance, #settings) .segmented button + button,
+.status-switch button + button,
+.toc-switch button + button {
+  border-left: 1px solid var(--line);
 }
 
-#settings .stepper {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+:is(:is(#appearance, #settings) .segmented, .status-switch, .toc-switch) :is([aria-pressed='true'], [aria-checked='true'], [aria-selected='true']) {
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-#settings .stepper output {
-  min-width: 48px;
-  text-align: center;
+.status-switch button,
+.toc-switch button {
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 13px;
 }
 
-#settings .stepper button {
-  border: 1px solid var(--line);
-}
 
 /* Action buttons (history, file types) read as buttons, not labels */
-#settings .field > button {
-  border: 1px solid var(--line);
+:is(#appearance, #settings) .field > button {
+  border-color: var(--line);
   justify-self: start;
 }
 
-#settings .check {
+:is(#appearance, #settings) .check {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -897,41 +1206,629 @@ button:hover {
   color: var(--muted);
 }
 
-/* Progress bar */
+/* Progress hairline (the chrome hidden) */
 #progress {
   position: fixed;
   left: 0;
   right: 0;
   bottom: var(--safe-bottom);
-  z-index: 10;
-  height: 3px;
-  cursor: pointer;
-  transition: height 0.12s;
-}
-
-#progress:hover {
-  height: 22px;
-  background: var(--panel);
-  border-top: 1px solid var(--line);
+  z-index: 9;
+  height: 2px;
+  pointer-events: none;
 }
 
 #progress-fill {
   height: 100%;
   width: 0;
   background: var(--accent);
+  opacity: 0.5;
+}
+
+/* Aa: a pop-up under the top bar's button */
+#appearance {
+  position: fixed;
+  top: calc(58px + var(--safe-top));
+  right: 16px;
+  z-index: 21;
+  width: min(340px, calc(100vw - 32px));
+  max-height: calc(100vh - 80px - var(--safe-top));
+  overflow-y: auto;
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+:is(#appearance, #settings) .font-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+:is(#appearance, #settings) .font-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+:is(#appearance, #settings) .stepper {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+:is(#appearance, #settings) .stepper button {
+  border: 0;
+  border-radius: 0;
+  min-width: 36px;
+}
+
+:is(#appearance, #settings) .stepper output {
+  min-width: 32px;
+  text-align: center;
+  border-inline: 1px solid var(--line);
+  line-height: 32px;
+}
+
+#appearance .all-settings {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
+#appearance .all-settings .link {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Phone: Aa is a sheet from the bottom, with a grab handle */
+.android #appearance {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  max-height: 80vh;
+  padding: 26px 20px calc(20px + var(--safe-bottom));
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.android #appearance::before {
+  content: '';
+  position: absolute;
+  top: 9px;
+  left: calc(50% - 18px);
+  width: 36px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.android #appearance .swatch::before {
+  height: 52px;
+}
+
+/* The settings page: over the whole window, the sections listed on the left */
+#settings {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--bg);
+}
+
+#settings .page-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: calc(14px + var(--safe-top)) 48px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+#settings .page-header h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+#settings .back {
+  font-size: 14px;
+}
+
+#settings .page-body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 760px);
+  gap: 48px;
+  min-height: 0;
+  padding: 0 48px;
+}
+
+#settings .sections {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding-top: 32px;
+}
+
+#settings .sections button {
+  text-align: left;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+#settings .sections button[aria-selected='true'] {
+  color: var(--accent-text);
+}
+
+.android #settings .sections button[aria-selected='true'] {
+  border-color: var(--accent);
+}
+
+#settings .page-content {
+  overflow-y: auto;
+  padding: 32px 4px calc(48px + var(--safe-bottom));
+}
+
+#settings .section h2 {
+  margin: 0;
+  padding-bottom: var(--space-2);
+  font-size: 26px;
+  border-bottom: 1px solid var(--line);
+}
+
+#settings .appearance {
+  display: grid;
+  gap: 18px;
+  max-width: 420px;
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+#settings .row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+#settings label.row {
+  cursor: pointer;
+}
+
+#settings .row-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+#settings .row-label {
+  font-size: 14px;
+}
+
+#settings .hint {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+#settings .row-controls {
+  display: flex;
+  gap: var(--space-2);
+  flex: none;
+}
+
+#settings .row-controls button {
+  border-color: var(--line);
+}
+
+#settings .catalogs {
+  padding-top: var(--space-3);
+}
+
+#settings .shortcuts dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 6px 12px;
+  margin: var(--space-3) 0 0;
+}
+
+#settings .shortcuts dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* Phone: one column, the section list as a row of chips */
+.android #settings .page-header {
+  padding-inline: 20px;
+}
+
+.android #settings .page-body {
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr;
+  gap: 0;
+  padding: 0 20px;
+}
+
+.android #settings .sections {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding: 12px 0;
+}
+
+.android #settings .sections button {
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.android #settings .page-content {
+  padding-top: 8px;
+}
+
+/* ---- Desktop library window: a WinUI-style navigation pane ---------------------
+   The pane on the window's ground; the content on a lighter layer with a
+   rounded corner beside it; the chosen item marked by an accent pill. */
+/* The library has its own navigation (the pane, or the phone's bottom bar):
+   no top bar, no tabs */
+body.library-mode #topbar {
+  display: none !important;
+}
+
+:root:not(.android) #start {
+  display: grid;
+  grid-template-columns: var(--sidebar-width, 240px) minmax(0, 1fr);
+  padding: 0;
+  overflow: hidden;
+}
+
+#start-main {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+:root:not(.android) #start-main {
+  margin-top: 8px;
+  padding: 24px 32px calc(24px + var(--safe-bottom));
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  border-top-left-radius: var(--radius-lg);
+}
+
+#sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow: hidden auto;
+  padding: 8px 4px;
+}
+
+#sidebar ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#sidebar h3 {
+  margin: 0;
+}
+
+#sidebar .section {
+  margin-left: 16px;
+}
+
+#sidebar .side-item,
+#sidebar .section-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-md);
+  text-align: left;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 14px;
+}
+
+#sidebar .section-head {
+  font-weight: 600;
+}
+
+#sidebar .side-item:hover,
+#sidebar .section-head:hover {
+  background: var(--active);
+}
+
+#sidebar .side-item[aria-current='true'] {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+#sidebar .side-item[aria-current='true']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+#sidebar .section-head .icon:last-child {
+  width: 12px;
+  height: 12px;
+  margin-left: auto;
+  transition: transform 0.15s;
+}
+
+#sidebar .section-head[aria-expanded='false'] .icon:last-child {
+  transform: rotate(-90deg);
+}
+
+/* The pane's edge: dragged to change its width (src/sidebar-resize.ts) */
+#sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+}
+
+#sidebar-resizer:hover,
+#sidebar-resizer:focus-visible {
+  background: var(--accent);
+  opacity: 0.4;
+  outline: none;
+}
+
+/* The settings in the library window's content: no header or section list of
+   their own (the pane has them), just the chosen section. */
+#settings.embedded {
+  position: static;
+  display: block;
+  background: none;
+  z-index: auto;
+}
+
+#settings.embedded[hidden] {
+  display: none;
+}
+
+#settings.embedded .page-header,
+#settings.embedded .sections {
+  display: none;
+}
+
+#settings.embedded .page-body {
+  display: block;
+  padding: 0;
+}
+
+#settings.embedded .page-content {
+  max-width: 760px;
+  overflow: visible;
+  padding: 0;
+}
+
+#settings .about p {
+  margin: var(--space-3) 0 0;
+}
+
+/* The library: the history and the books are separate pages */
+#books-view[data-show='recent'] :is(.library-bar, #library-message, #library-books) {
+  display: none !important;
+}
+
+#books-view[data-show='all'] :is(#recent-title, #recent, #recent-empty) {
+  display: none !important;
+}
+
+/* How far a book is read: a hairline under its cover */
+.book-grid .cover-box {
+  display: grid;
+  gap: 6px;
+}
+
+.book-grid .read-line {
+  display: block;
+  height: 2px;
+  background: var(--line);
+}
+
+.book-grid .read-line span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.book-grid .missing {
   opacity: 0.45;
 }
 
-#progress-label {
-  position: absolute;
-  inset: 0;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  pointer-events: none;
+#recent {
+  margin-bottom: 24px;
 }
 
-#progress:hover #progress-label {
+/* ---- Phone library: navigation at the bottom ---------------------------------- */
+.android #start {
+  padding: calc(16px + var(--safe-top)) 16px calc(76px + var(--safe-bottom));
+}
+
+#bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 15;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 6px 8px calc(6px + var(--safe-bottom));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+
+#bottom-nav button {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-height: 52px;
+  padding: 4px;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#bottom-nav .icon {
+  width: 22px;
+  height: 22px;
+}
+
+#bottom-nav button[aria-current='true'] {
+  color: var(--accent-text);
+}
+
+/* The settings inside the phone's library: the section chips stay, as tabs */
+.android #settings.embedded .sections {
   display: flex;
+}
+
+.android #settings.embedded .page-body {
+  display: grid;
+}
+
+.android #settings.embedded .page-content {
+  padding: 0;
+}
+
+/* The book grid: three across on a phone */
+.android .book-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px 12px;
+}
+
+/* The library's status switch: each choice with its count */
+.status-switch button {
+  flex: none;
+  padding-inline: 10px;
+  white-space: nowrap;
+}
+
+.status-switch .count {
+  margin-left: 6px;
+  color: var(--muted);
+}
+
+.status-switch [aria-checked='true'] .count {
+  color: inherit;
+}
+
+/* Phone: the statuses as a row of chips that scrolls */
+.android .status-switch {
+  order: 1;
+  width: 100%;
+  gap: 6px;
+  overflow-x: auto;
+  border: 0;
+}
+
+.android .status-switch button,
+.android .status-switch button + button {
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+/* The contents drawer: Contents / Bookmarks */
+.toc-switch {
+  margin: 4px 16px 8px;
+}
+
+#toc #bookmarks {
+  flex: 1;
+  max-height: none;
+}
+
+#toc-tree [aria-current] {
+  color: var(--accent-text);
+}
+
+#bookmarks-empty {
+  margin: 12px 8px;
+  font-size: 13px;
+}
+
+/* The offer bar: the "more" button */
+#offer .icon-button {
+  padding: 5px 8px;
+}
+
+/* Catalog: where we are, the "in library" tag, the download button */
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  margin: 4px 0 12px;
+  font-family: var(--font-heading);
+  font-size: 18px;
+}
+
+.crumbs button {
+  padding: 2px 4px;
+  font-size: 18px;
+  color: var(--muted);
+}
+
+.crumbs .here {
+  font-weight: 600;
+}
+
+.crumbs .sep {
+  color: var(--muted);
+}
+
+#catalog-list .tag {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  white-space: nowrap;
+}
+
+#catalog-list .download {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent-text);
+  border: 1px solid var(--accent);
+}
+
+#catalog-list .download:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }

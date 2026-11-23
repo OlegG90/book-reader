@@ -20,13 +20,31 @@ export type Command =
   | 'closeWindow'
   | 'escape'
 
-type Key = Pick<KeyboardEvent, 'key' | 'shiftKey' | 'ctrlKey' | 'altKey' | 'metaKey'>
+type Key = Pick<KeyboardEvent, 'key' | 'shiftKey' | 'ctrlKey' | 'altKey' | 'metaKey'> & Partial<Pick<KeyboardEvent, 'code'>>
+
+/** Keys named by where they sit (a US keyboard), so shortcuts work in any layout. */
+const BY_POSITION: Record<string, string> = { Comma: ',', Equal: '=', Minus: '-' }
+
+/**
+ * The key as the shortcuts name it: what it types when that is Latin (so
+ * AZERTY's or QWERTZ's letters stay theirs), else its place on a US keyboard
+ * (T is T in a Ukrainian layout too); letters in lower case; other keys
+ * (arrows, Space, F11, numpad +) by what they are.
+ */
+function shortcutKey(e: Key) {
+  if (/^[\x20-\x7e]$/.test(e.key)) return e.key.toLowerCase()
+  const code = e.code ?? ''
+  if (code.startsWith('Key')) return code.slice(3).toLowerCase()
+  if (code in BY_POSITION) return BY_POSITION[code]
+  return e.key.length === 1 ? e.key.toLowerCase() : e.key
+}
 
 /** Maps a key press to a reader command; `null` leaves it to the browser. */
 export function commandFor(e: Key): Command | null {
   if (e.altKey || e.metaKey) return null
+  const key = shortcutKey(e)
   if (e.ctrlKey) {
-    switch (e.key) {
+    switch (key) {
       case '=':
       case '+':
         return 'fontBigger'
@@ -35,7 +53,7 @@ export function commandFor(e: Key): Command | null {
       case ',':
         return 'settings'
     }
-    switch (e.key.toLowerCase()) {
+    switch (key) {
       case 'o':
         return 'open'
       case 'w':
@@ -43,8 +61,8 @@ export function commandFor(e: Key): Command | null {
     }
     return null
   }
-  // Letters work with or without Shift / Caps Lock.
-  switch (e.key.length === 1 ? e.key.toLowerCase() : e.key) {
+  // Letters work with or without Shift / Caps Lock, in any keyboard layout.
+  switch (key) {
     case 'ArrowLeft':
       return 'left'
     case 'ArrowRight':

@@ -33,4 +33,17 @@ describe('commandFor', () => {
     expect(key('ArrowRight', { altKey: true })).toBeNull()
     expect(key('x')).toBeNull()
   })
+
+  it("works in any keyboard layout (by the key's place)", () => {
+    const at = (k: string, code: string, mods = {}) =>
+      commandFor({ key: k, code, shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, ...mods })
+    expect(at('е', 'KeyT')).toBe('toc')
+    expect(at('и', 'KeyB')).toBe('bookmark')
+    expect(at('б', 'Comma', { ctrlKey: true })).toBe('settings')
+    expect(at('щ', 'KeyO', { ctrlKey: true })).toBe('open')
+    expect(at(' ', 'Space')).toBe('next')
+    // A Latin layout keeps its letters: AZERTY's "m" (where US has ",") is M.
+    expect(at('m', 'Semicolon')).toBe('toggleFlow')
+    expect(at('a', 'KeyQ')).toBeNull()
+  })
 })
