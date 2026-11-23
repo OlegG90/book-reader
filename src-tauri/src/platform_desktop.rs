@@ -1,6 +1,7 @@
 //! Where the library lives on the desktop (see platform_android.rs for the phone).
 
-use crate::{data_dir, Outside};
+use crate::data_dir;
+use crate::system_cmds::Outside;
 use tauri_plugin_dialog::{DialogExt, FileDialogBuilder};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Builder, Manager, Window, Wry};
