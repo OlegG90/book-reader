@@ -115,23 +115,42 @@ export function onLongPress(target: HTMLElement, action: (at: { x: number; y: nu
   let timer: number | undefined
   let start = { x: 0, y: 0 }
   let fired = false
+  let touching = false
   const cancel = () => clearTimeout(timer)
+  const fire = () => {
+    cancel()
+    if (fired) return
+    fired = true
+    action(start)
+  }
   target.addEventListener('pointerdown', e => {
     fired = false
-    if (e.pointerType !== 'touch') return
+    touching = e.pointerType === 'touch'
+    if (!touching) return
     start = { x: e.clientX, y: e.clientY }
-    timer = window.setTimeout(() => {
-      fired = true
-      action(start)
-    }, HOLD_MS)
+    timer = window.setTimeout(fire, HOLD_MS)
   })
   target.addEventListener('pointermove', e => {
     if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > SLACK_PX) cancel()
   })
   target.addEventListener('pointerup', cancel)
-  target.addEventListener('pointercancel', cancel)
-  // A long press also brings the browser's own menu: not here.
-  target.addEventListener('contextmenu', e => fired && e.preventDefault())
+  target.addEventListener('pointercancel', () => {
+    cancel()
+    // No click follows a cancelled press: nothing to swallow.
+    fired = false
+  })
+  // The WebView's own long-press "context menu" (before or after the timer):
+  // the same one press, so the menu shows once, and the target's own handler doesn't run.
+  target.addEventListener(
+    'contextmenu',
+    e => {
+      if (!touching) return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      fire()
+    },
+    true,
+  )
   target.addEventListener(
     'click',
     e => {

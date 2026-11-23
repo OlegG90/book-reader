@@ -20,6 +20,7 @@
   /* Panels, drawers and pop-ups over the page */
   --panel: #f8f4f4;
   --accent: #b68235;
+  --danger: #c0392b;
   /* The accent as text (darker, to read on the page) */
   --accent-text: #7d5411;
   --link: var(--accent-text);
@@ -60,6 +61,7 @@
   --surface: #3a3838;
   --panel: #363434;
   --accent: #c28d41;
+  --danger: #ff7b72;
   --accent-text: #e1ad66;
   --line: color-mix(in srgb, var(--fg) 14%, transparent);
   --shadow-sm: 0 1px 2px #0000004d;
@@ -1855,11 +1857,7 @@ body.library-mode #topbar {
 
 .popup-menu .danger,
 dialog.confirm .danger {
-  color: #c0392b;
-}
-
-:root[data-theme='dark'] :is(.popup-menu, dialog.confirm) .danger {
-  color: #ff7b72;
+  color: var(--danger);
 }
 
 dialog.confirm .danger {

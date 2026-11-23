@@ -422,6 +422,11 @@ impl LibraryBooks {
         Ok(self.entry(key)?.absolute(&library_root(store)?))
     }
 
+    /// Takes a deleted book out of the list.
+    fn forget(&self, key: &str) {
+        self.0.lock().unwrap().retain(|b| b.path != key);
+    }
+
     /// The last scan's books; before any scan in this run, the cached ones.
     fn snapshot(&self, store: &Store, root: &Path) -> Vec<library::Entry> {
         let books = self.0.lock().unwrap();
@@ -543,10 +548,16 @@ fn open_library_book(
     from_start: Option<bool>,
 ) -> Result<(), String> {
     let path = books.path_of(&store, &key)?;
+    let mut reload = None;
     if from_start == Some(true) {
         start_over.0.lock().unwrap().insert(path.clone());
+        // A desktop window already showing it only comes forward: it reads the book again, from the beginning.
+        reload = window.state::<ReaderWindows>().showing(&path, None).filter(|_| cfg!(desktop));
     }
     show_book(&window, path);
+    if let Some(label) = reload {
+        let _ = window.emit_to(label.as_str(), "book-changed", ());
+    }
     Ok(())
 }
 
@@ -561,9 +572,9 @@ struct StartOver(Mutex<HashSet<PathBuf>>);
 #[tauri::command(async)]
 fn delete_library_book(app: AppHandle, store: State<Store>, books: State<LibraryBooks>, key: String) -> Result<(), String> {
     let entry = books.entry(&key)?;
-    let path = books.path_of(&store, &key)?;
+    let path = entry.absolute(&library_root(&store)?);
     platform::delete_book(&path).map_err(|e| format!("{}: {e}", paths::file_name(&path)))?;
-    books.0.lock().unwrap().retain(|b| b.path != key);
+    books.forget(&key);
     store.update(|s| s.recent.retain(|r| r.fingerprint != entry.fingerprint)).map_err(|e| e.to_string())?;
     let _ = app.emit("library-updated", ());
     Ok(())

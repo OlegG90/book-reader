@@ -646,6 +646,7 @@ async function deleteBook(book: LibraryBook) {
 /** The series shown on the Series page; null shows the list of them. */
 let openSeries: string | null = null
 
+/** Draws the Series page: the list of series, or the open one's books. */
 function renderSeries() {
   const groups = groupSeries(libraryBooks)
   const group = groups.find(g => g.name === openSeries)
@@ -1113,7 +1114,7 @@ function showView(to: View) {
     if (!wasSettings) void refreshFileTypesStatus()
     foldSettingsNav(false)
   } else if (libraryReady) {
-    showTab(to === 'catalogs' ? 'catalogs' : to === 'series' ? 'series' : 'books')
+    showTab(to === 'catalogs' || to === 'series' ? to : 'books')
     // The history and the books are separate pages here (the phone shows both on one).
     $('books-view').dataset.show = to === 'recent' ? 'recent' : 'all'
   }
