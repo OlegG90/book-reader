@@ -6,7 +6,7 @@ use crate::fingerprint;
 use crate::library_cmds::{library_root, LibraryBooks};
 use crate::paths;
 use crate::store::{Position, RecentBook, Store};
-use crate::windows::{saving_window, show_book, ReaderWindows};
+use crate::windows::{show_book, ReaderWindows};
 use crate::CmdResult;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -188,16 +188,11 @@ pub(crate) fn get_bookmarks(store: State<Store>, fingerprint: String) -> Value {
     store.read(|s| s.bookmarks.get(&fingerprint).cloned().unwrap_or_else(|| Value::Array(vec![])))
 }
 
-/// Replaces a book's bookmarks (an empty list forgets the book).
+/// Replaces a book's bookmarks (an empty list forgets the book). Bookmarks
+/// are keyed by fingerprint, so unlike positions they need no window;
+/// `--no-save` is enforced by the frontend, which never sends them.
 #[tauri::command(async)]
-pub(crate) fn set_bookmarks(
-    window: Window,
-    windows: State<ReaderWindows>,
-    store: State<Store>,
-    fingerprint: String,
-    bookmarks: Value,
-) -> CmdResult<()> {
-    saving_window(&windows, &window)?;
+pub(crate) fn set_bookmarks(store: State<Store>, fingerprint: String, bookmarks: Value) -> CmdResult<()> {
     store
         .update(|s| match bookmarks.as_array() {
             Some(list) if !list.is_empty() => {
