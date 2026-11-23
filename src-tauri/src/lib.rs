@@ -46,6 +46,7 @@ use tauri::ipc::Response;
 #[cfg(desktop)]
 use tauri::DragDropEvent;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, Window, WindowEvent};
+use tauri_plugin_opener::OpenerExt;
 
 #[cfg(desktop)]
 const DEFAULT_WIDTH: f64 = 1100.0;
@@ -358,11 +359,16 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// Where the app's source lives, opened from Settings → About (with
-/// `/releases/latest` for a newer version).
+/// Opens the app's repository on GitHub in the browser (Settings → About).
 #[tauri::command]
-fn app_repository() -> &'static str {
-    updates::REPOSITORY
+fn open_repository(app: AppHandle) -> Result<(), String> {
+    app.opener().open_url(updates::REPOSITORY, None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Opens the latest release's page, where its files are, in the browser.
+#[tauri::command]
+fn open_latest_release(app: AppHandle) -> Result<(), String> {
+    app.opener().open_url(format!("{}/releases/latest", updates::REPOSITORY), None::<&str>).map_err(|e| e.to_string())
 }
 
 /// Asks GitHub for the latest release and compares it with this copy.
@@ -1170,8 +1176,9 @@ pub fn run() {
             unregister_file_types,
             file_types_registered,
             app_version,
-            app_repository,
+            open_repository,
             check_for_update,
+            open_latest_release,
             open_incoming,
             delete_library_book,
             set_reading,

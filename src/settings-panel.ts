@@ -303,6 +303,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       updateStatus.textContent = String(e)
     } finally {
       checkUpdate.disabled = false
+      // Disabling the button dropped the keyboard focus: put it on what comes next.
+      ;(openRelease.hidden ? checkUpdate : openRelease).focus()
     }
   }
 
