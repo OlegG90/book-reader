@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { fetchSources, type Source } from './catalog'
 import { el } from 'reader-core'
+import { row } from './settings-panel'
 
 /**
  * The Catalogs part of the settings: the OPDS servers, with a form to add or
@@ -11,8 +12,9 @@ export function createSourcesPanel(host: HTMLElement) {
   const list = el('ul', { className: 'sources' })
   const status = el('p', { className: 'muted source-status' })
   const add = el('button', { type: 'button', textContent: 'Add catalog…', onclick: () => edit(undefined) })
+  const addRow = el('p', { className: 'add-source' }, add)
   const form = el('form', { className: 'source-form', hidden: true })
-  host.append(el('span', { className: 'label', textContent: 'Catalogs' }), list, add, form, status)
+  host.append(list, addRow, form, status)
 
   function input(label: string, props: object) {
     const field = el('input', props)
@@ -26,16 +28,14 @@ export function createSourcesPanel(host: HTMLElement) {
         el(
           'li',
           {},
-          el(
-            'span',
-            { className: 'name' },
-            source.name,
-            source.sync ? el('span', { className: 'badge', textContent: 'sync', title: 'Syncs reading progress' }) : '',
-          ),
-          el('span', { className: 'url muted', textContent: source.url }),
-          el(
-            'span',
-            { className: 'actions' },
+          row(
+            el(
+              'span',
+              {},
+              source.name,
+              source.sync ? el('span', { className: 'badge', textContent: 'sync', title: 'Syncs reading progress' }) : '',
+            ),
+            source.url,
             el('button', { type: 'button', textContent: 'Edit', onclick: () => edit(source) }),
             el('button', { type: 'button', textContent: 'Remove', onclick: () => void remove(source) }),
           ),
@@ -96,7 +96,7 @@ export function createSourcesPanel(host: HTMLElement) {
       }
     }
     form.hidden = false
-    add.hidden = true
+    addRow.hidden = true
     status.textContent = ''
     name.field.focus()
   }
@@ -104,7 +104,7 @@ export function createSourcesPanel(host: HTMLElement) {
   function close() {
     form.hidden = true
     form.replaceChildren()
-    add.hidden = false
+    addRow.hidden = false
   }
 
   async function remove(source: Source) {

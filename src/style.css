@@ -332,29 +332,15 @@ body.library-mode .reader-only {
 }
 
 /* Catalog sources in the settings */
+/* Each catalog is a settings row: name and address, then its buttons */
 #settings .sources {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-#settings .sources li {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-#settings .sources .url {
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-#settings .sources .actions {
-  display: flex;
-  gap: 4px;
+#settings .add-source {
+  margin: var(--space-3) 0;
 }
 
 #settings .badge {
@@ -470,6 +456,24 @@ body.library-mode .reader-only {
   white-space: nowrap;
   color: var(--muted);
   font-size: 12px;
+}
+
+/* The series name gives way to its number */
+.book-grid .series {
+  display: flex;
+  gap: 4px;
+}
+
+.book-grid .series-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.book-grid .series-index {
+  flex: none;
+  color: var(--fg);
+  font-weight: 600;
 }
 
 .book-grid .series:empty,
@@ -1420,6 +1424,7 @@ button:hover {
 
 #settings .row-label {
   font-size: 14px;
+  overflow-wrap: anywhere;
 }
 
 #settings .hint {
@@ -1434,7 +1439,8 @@ button:hover {
   flex: none;
 }
 
-#settings .row-controls button {
+#settings .row-controls button,
+#settings .add-source button {
   border-color: var(--line);
 }
 
