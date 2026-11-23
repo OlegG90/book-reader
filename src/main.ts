@@ -42,6 +42,7 @@ import {
   type Status,
 } from './library'
 import { createCatalogView } from './catalog-view'
+import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
 import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
 import { createAppearancePanel, createSettingsPage, type PanelValues, type SettingsSection } from './settings-panel'
@@ -415,6 +416,7 @@ function closeBook() {
   $('toc-tree').replaceChildren()
   $('start').hidden = true
   document.body.classList.remove('library-mode')
+  embedSettings(false)
   $('error').hidden = true
   $('progress').hidden = true
   $('bottombar').hidden = true
@@ -449,10 +451,16 @@ interface LibraryInfo {
 async function showLibraryScreen() {
   void appWindow.setTitle('Book Reader').catch(console.error)
   document.body.classList.add('library-mode')
+  embedSettings(true)
   $('start').hidden = false
   const info = await loadLibraryInfo()
-  $('setup').hidden = !!info.folder
-  $('library').hidden = !info.folder
+  libraryReady = !!info.folder
+  // The desktop keeps what its pane showed; the phone shows its books or the first-run choice.
+  if (settingsEmbedded()) showView(view)
+  else {
+    $('setup').hidden = libraryReady
+    $('library').hidden = !libraryReady
+  }
   if (!info.folder) {
     $('setup-suggested').textContent = info.suggested
     $('setup-default').focus()
@@ -640,7 +648,8 @@ function highlightToc(href: string | undefined) {
 // ---- Commands ---------------------------------------------------------------
 
 const tocOpen = () => !$('toc').hidden
-const settingsOpen = () => !$('settings').hidden
+/** The settings page over the window (a book window, or the phone); the library window on a desktop has them in its content. */
+const settingsOpen = () => !$('settings').hidden && !settingsEmbedded()
 const appearanceOpen = () => !$('appearance').hidden
 const aboutOpen = () => !$('about').hidden
 const shortcutsOpen = () => !$('shortcuts').hidden
@@ -675,8 +684,9 @@ async function runCommand(command: Command) {
     case 'fullscreen':
       return appWindow.setFullscreen(!(await appWindow.isFullscreen()))
     case 'settings':
-      // S / Ctrl+, and the Aa button: the appearance while reading, the settings page in the library.
+      // S / Ctrl+, and the Aa button: the appearance while reading, the settings in the library.
       if (book) return appearanceOpen() ? closePanels() : openAppearance()
+      if (settingsEmbedded()) return showView(view.startsWith('settings') ? 'library' : 'settings:reading')
       return settingsOpen() ? closePanels() : openSettings()
     case 'cycleTheme':
       return changeSettings({ theme: nextTheme(settings.theme) })
@@ -727,7 +737,10 @@ function closeTopLayer() {
 }
 
 async function handleEscape() {
-  if (!closeTopLayer() && (await appWindow.isFullscreen())) await appWindow.setFullscreen(false)
+  if (closeTopLayer()) return
+  // In the library window, Esc goes back from the settings or the catalogs to the books.
+  if (settingsEmbedded() && view !== 'library') return showView('library')
+  if (await appWindow.isFullscreen()) await appWindow.setFullscreen(false)
 }
 
 /**
@@ -779,6 +792,7 @@ function openInfoPanel(id: 'about' | 'shortcuts') {
 
 /** Settings open without the scrim, so changes show on the book right away. */
 function openSettings(section?: SettingsSection) {
+  if (settingsEmbedded()) return showView(`settings:${section ?? 'reading'}`)
   closePanels()
   $('settings').hidden = false
   void refreshFileTypesStatus()
@@ -852,7 +866,7 @@ function closePanels() {
   $('scrim').hidden = true
   $('organize').hidden = true
   $('toc').hidden = true
-  $('settings').hidden = true
+  if (!settingsEmbedded()) $('settings').hidden = true
   $('appearance').hidden = true
   $('settings-button').setAttribute('aria-expanded', 'false')
   $('about').hidden = true
@@ -883,9 +897,14 @@ const appearancePanel = createAppearancePanel($('appearance'), settings, changes
   flow: flow => changeSettings({ flow }),
   allSettings: () => openSettings('reading'),
 })
-// The catalogs (OPDS servers) and the key list have their own sections on the settings page.
+// The catalogs (OPDS servers), the key list and the version have their own sections in the settings.
 const sourcesPanel = createSourcesPanel(settingsPage.catalogs)
 settingsPage.shortcuts.append($('shortcuts').querySelector('dl')!.cloneNode(true))
+const settingsVersion = el('span')
+settingsPage.about.append(
+  el('p', {}, 'Book Reader ', settingsVersion),
+  el('p', { className: 'muted', textContent: 'A compact reader for EPUB and FB2 books.' }),
+)
 
 /** Refreshes both: the settings page and Aa (with the open book's mode). */
 function showSettings() {
@@ -895,6 +914,52 @@ function showSettings() {
 const catalogView = createCatalogView({ library: () => libraryBooks, openSettings: () => openSettings('catalogs') })
 
 /** The library window's two tabs: the books on disk, and the catalogs to get more from. */
+// ---- The library window's navigation (desktop) ----------------------------------
+
+/** What the library window shows: the books, the catalogs, or a settings section. */
+type View = 'library' | 'catalogs' | `settings:${SettingsSection}`
+let view: View = 'library'
+/** A library folder is chosen (else the first-run choice shows). */
+let libraryReady = false
+
+/** Desktop library window: the settings sit in the content beside the pane, not over the window. */
+const settingsEmbedded = () => $('settings').classList.contains('embedded')
+
+/** Puts the settings in the library window's content (`true`) or back over the window. */
+function embedSettings(embed: boolean) {
+  if (isAndroid || embed === settingsEmbedded()) return
+  const settingsEl = $('settings')
+  settingsEl.classList.toggle('embedded', embed)
+  settingsEl.hidden = true
+  if (embed) $('start-main').append(settingsEl)
+  else document.body.append(settingsEl)
+}
+
+/** Shows `to` in the library window's content and marks it in the pane. */
+function showView(to: View) {
+  view = to
+  const settingsView = to.startsWith('settings:')
+  $('setup').hidden = libraryReady || settingsView
+  $('library').hidden = !libraryReady || settingsView
+  if (settingsEmbedded()) $('settings').hidden = !settingsView
+  if (settingsView) {
+    settingsPage.showSection(to.slice('settings:'.length) as SettingsSection)
+    void refreshFileTypesStatus()
+    foldSettingsNav(false)
+  } else if (libraryReady) {
+    showTab(to === 'catalogs' ? 'catalogs' : 'books')
+  }
+  for (const item of document.querySelectorAll<HTMLElement>('#sidebar [data-nav]')) {
+    item.setAttribute('aria-current', String(item.dataset.nav === to))
+  }
+}
+
+/** Folds the Settings group in the pane away (`true`) or open. */
+function foldSettingsNav(fold: boolean) {
+  $('settings-nav').hidden = fold
+  document.querySelector('#sidebar .section-head')?.setAttribute('aria-expanded', String(!fold))
+}
+
 function showTab(tab: 'books' | 'catalogs') {
   $('books-view').hidden = tab !== 'books'
   $('catalog-view').hidden = tab !== 'catalogs'
@@ -1096,6 +1161,12 @@ document.addEventListener('visibilitychange', () => document.hidden && void push
 $('organize-cancel').addEventListener('click', closePanels)
 $('tab-books').addEventListener('click', () => showTab('books'))
 $('tab-catalogs').addEventListener('click', () => showTab('catalogs'))
+// The library window's pane (desktop): its items, Settings folding out, its width.
+for (const item of document.querySelectorAll<HTMLElement>('#sidebar [data-nav]')) {
+  item.addEventListener('click', () => showView(item.dataset.nav as View))
+}
+document.querySelector('#sidebar .section-head')?.addEventListener('click', () => foldSettingsNav(!$('settings-nav').hidden))
+sidebarResizer($('start'), $('sidebar-resizer'))
 appWindow.listen('catalogs-changed', () => {
   void sourcesPanel.refresh()
   if (!$('catalog-view').hidden) void catalogView.show()
@@ -1164,6 +1235,7 @@ void refreshFileTypesStatus()
 void invoke<string>('app_version')
   .then(version => {
     $('about-version').textContent = `v${version}`
+    settingsVersion.textContent = `v${version}`
   })
   .catch(console.error)
 openCurrentBook()

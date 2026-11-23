@@ -143,6 +143,7 @@ const SECTIONS = [
   { id: 'catalogs', title: 'Catalogs' },
   { id: 'system', title: 'System' },
   { id: 'shortcuts', title: 'Shortcuts', desktopOnly: true },
+  { id: 'about', title: 'About' },
 ] as const
 
 export type SettingsSection = (typeof SECTIONS)[number]['id']
@@ -151,8 +152,8 @@ export type SettingsSection = (typeof SECTIONS)[number]['id']
  * The settings page: a back button, the sections' names on the left as tabs,
  * and one section at a time (Reading with the appearance, Catalogs, System
  * with the library folder, Shortcuts). Every change goes to `onChange` with just the changed values;
- * button presses go to `actions`. `catalogs` and `shortcuts` are the hosts
- * the app fills in (the sources panel, the key list).
+ * button presses go to `actions`. `catalogs`, `shortcuts` and `about` are
+ * the hosts the app fills in (the sources panel, the key list, the version).
  */
 export function createSettingsPage(host: HTMLElement, initial: PanelValues, onChange: (changes: Partial<PanelValues>) => void, actions: PanelActions) {
   const appearance = el('div', { className: 'appearance' })
@@ -172,6 +173,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const fileTypesButton = el('button', { type: 'button', onclick: actions.toggleFileTypes })
   const catalogs = el('div', { className: 'catalogs' })
   const shortcuts = el('div', { className: 'shortcuts' })
+  const about = el('div', { className: 'about' })
 
   const libraryRow = row('Library folder', '', el('button', { type: 'button', textContent: 'Change…', onclick: actions.changeLibrary }), el('button', { type: 'button', textContent: 'Organize…', onclick: actions.organizeLibrary }))
   libraryRow.querySelector('.hint')?.replaceWith(libraryFolder)
@@ -192,6 +194,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory })),
     ],
     shortcuts: [shortcuts],
+    about: [about],
   }
   // The volume keys are a phone's.
   content.reading[2].classList.add('android-only')
@@ -250,5 +253,5 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   setFileTypesRegistered(false)
   setLibraryFolder(null)
   showSection('reading')
-  return { show, setFileTypesRegistered, setLibraryFolder, showSection, catalogs, shortcuts }
+  return { show, setFileTypesRegistered, setLibraryFolder, showSection, catalogs, shortcuts, about }
 }

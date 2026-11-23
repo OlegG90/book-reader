@@ -1543,3 +1543,160 @@ button:hover {
 .android #settings .page-content {
   padding-top: 8px;
 }
+
+/* ---- Desktop library window: a WinUI-style navigation pane ---------------------
+   The pane on the window's ground; the content on a lighter layer with a
+   rounded corner beside it; the chosen item marked by an accent pill. */
+:root:not(.android) body.library-mode #topbar,
+:root:not(.android) .library-tabs {
+  display: none !important;
+}
+
+:root:not(.android) #start {
+  display: grid;
+  grid-template-columns: var(--sidebar-width, 240px) minmax(0, 1fr);
+  padding: 0;
+  overflow: hidden;
+}
+
+#start-main {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+:root:not(.android) #start-main {
+  margin-top: 8px;
+  padding: 24px 32px calc(24px + var(--safe-bottom));
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  border-top-left-radius: var(--radius-lg);
+}
+
+#sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow: hidden auto;
+  padding: 8px 4px;
+}
+
+#sidebar ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#sidebar h3 {
+  margin: 0;
+}
+
+#sidebar .section {
+  margin-left: 16px;
+}
+
+#sidebar .side-item,
+#sidebar .section-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-md);
+  text-align: left;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 14px;
+}
+
+#sidebar .section-head {
+  font-weight: 600;
+}
+
+#sidebar .side-item:hover,
+#sidebar .section-head:hover {
+  background: var(--active);
+}
+
+#sidebar .side-item[aria-current='true'] {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+#sidebar .side-item[aria-current='true']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+#sidebar .section-head .icon:last-child {
+  width: 12px;
+  height: 12px;
+  margin-left: auto;
+  transition: transform 0.15s;
+}
+
+#sidebar .section-head[aria-expanded='false'] .icon:last-child {
+  transform: rotate(-90deg);
+}
+
+/* The pane's edge: dragged to change its width (src/sidebar-resize.ts) */
+#sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+}
+
+#sidebar-resizer:hover,
+#sidebar-resizer:focus-visible {
+  background: var(--accent);
+  opacity: 0.4;
+  outline: none;
+}
+
+/* The settings in the library window's content: no header or section list of
+   their own (the pane has them), just the chosen section. */
+#settings.embedded {
+  position: static;
+  display: block;
+  background: none;
+  z-index: auto;
+}
+
+#settings.embedded[hidden] {
+  display: none;
+}
+
+#settings.embedded .page-header,
+#settings.embedded .sections {
+  display: none;
+}
+
+#settings.embedded .page-body {
+  display: block;
+  padding: 0;
+}
+
+#settings.embedded .page-content {
+  max-width: 760px;
+  overflow: visible;
+  padding: 0;
+}
+
+#settings .about p {
+  margin: var(--space-3) 0 0;
+}
