@@ -70,6 +70,11 @@ impl Platform for Desktop {
         Self::password(source_id).is_some()
     }
 
+    /// One credential-store lookup per source.
+    fn has_passwords(source_ids: &[String]) -> Vec<bool> {
+        source_ids.iter().map(|id| Self::has_password(id)).collect()
+    }
+
     /// A catalog's password, if one is kept.
     fn password(source_id: &str) -> Option<String> {
         credential(source_id).ok()?.get_password().ok()

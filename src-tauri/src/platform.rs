@@ -48,6 +48,10 @@ pub(crate) trait Platform {
     /// Whether a catalog has a password kept (without decrypting it).
     fn has_password(source_id: &str) -> bool;
 
+    /// Whether each catalog has a password kept, in one call: one bridge
+    /// round-trip on a phone, whatever the source count.
+    fn has_passwords(source_ids: &[String]) -> Vec<bool>;
+
     /// A catalog's password, if one is kept.
     fn password(source_id: &str) -> Option<String>;
 

@@ -27,7 +27,10 @@ pub(crate) struct SourceView {
 #[tauri::command(async)]
 pub(crate) fn catalog_sources(store: State<Store>) -> Vec<SourceView> {
     let sources = store.read(|s| s.sources.clone());
-    sources.into_iter().map(|source| SourceView { has_password: Active::has_password(&source.id), source }).collect()
+    // One bridge round-trip for all sources, not one per source.
+    let ids: Vec<_> = sources.iter().map(|s| s.id.clone()).collect();
+    let kept = Active::has_passwords(&ids);
+    sources.into_iter().zip(kept).map(|(source, has_password)| SourceView { has_password, source }).collect()
 }
 
 #[derive(Deserialize)]
