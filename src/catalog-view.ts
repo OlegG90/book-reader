@@ -57,8 +57,8 @@ export function createCatalogView(deps: CatalogViewDeps) {
     if (!pages.length) await open(null)
   }
 
-  /** Opens a feed: the catalog's root (null), a folder, or a search. */
-  async function open(href: string | null, query?: string) {
+  /** Opens a feed: the catalog's start (null), a folder (named `label`, as its entry was), or a search. */
+  async function open(href: string | null, query?: string, label?: string) {
     if (!source) return
     const id = source.id
     const mine = ++request
@@ -68,7 +68,9 @@ export function createCatalogView(deps: CatalogViewDeps) {
         ? await invoke<Feed>('catalog_search', { id, query })
         : await invoke<Feed>('catalog_feed', { id, url: href })
       if (mine !== request) return
-      const title = query ? `Search: ${query}` : feed.title || source.name
+      // Servers often give every page the same feed title (CWA does), so a page is named
+      // after the folder it was opened from; the start, after the catalog.
+      const title = query ? `Search: ${query}` : (label ?? source.name)
       pages.push({ title, entries: feed.entries, next: feed.next })
       message(feed.entries.length ? '' : 'Nothing here.')
       render()
@@ -120,7 +122,7 @@ export function createCatalogView(deps: CatalogViewDeps) {
         { className: 'folder' },
         el(
           'button',
-          { onclick: () => void open(entry.href) },
+          { onclick: () => void open(entry.href, undefined, entry.title) },
           el('span', { className: 'title', textContent: entry.title }),
           el('span', { className: 'summary', textContent: entry.summary }),
         ),
