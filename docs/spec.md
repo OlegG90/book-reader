@@ -32,21 +32,22 @@ Markdown, fixed-layout EPUB, DRM-protected books, PDF, MOBI/AZW3, TXT, highlight
 Inherited from Simple Reader unless noted:
 
 - **Modes:** paginated (default) and scrolled.
-- **Appearance:** theme (light / dark / sepia, follows the system by default), font, font size, line height, margins. Settings are per device and not synced.
-- **Navigation:** table of contents, progress bar, footnotes in a pop-up, images.
-- **Bookmarks:** new. Local to each device. `B` (or the topbar button) bookmarks the page or removes the bookmark on it; the list sits under the contents (`T`). A bookmark is a point in the text, so it stays found when the font or window size changes the pages. `--no-save` windows keep none.
+- **Appearance:** theme (light / dark / sepia, follows the system by default; chosen with page swatches), font, font size, line spacing, line length. In a book they are in the **Aa** pop-up (`S` / `Ctrl+,`, or the Aa button; a sheet from the bottom on the phone), with Paginated / Scrolled and **All settings…**; in the library, under Settings › Reading. Settings are per device and not synced.
+- **Reading chrome:** a slim top bar (← Library, Contents · the book's title and author · Bookmark, Aa, the mode, ⋯ with Shortcuts, About, Full screen) and a bottom bar: the chapter · a track with a tick at each chapter and a knob (click or drag to go there) · `p. 14 of 30 · 12%` (pages count within the chapter; the book-wide position is the percentage). Both come and go together: the mouse near the top or bottom edge, or a tap in the page's middle; while hidden, a hairline shows the progress. On the phone the top bar keeps ←, the title and the bookmark, and the bottom bar adds Contents / Appearance / Mode / More under the slider.
+- **Navigation:** a drawer with **Contents | Bookmarks (n)** (`T`; the current chapter in the accent; the last tab stays for the session), the reading chrome's progress row, footnotes in a pop-up, images.
+- **Bookmarks:** new. Local to each device. `B` (or the top bar's bookmark, filled when the page has one) bookmarks the page or removes the bookmark on it; the list is the drawer's Bookmarks tab. A bookmark is a point in the text, so it stays found when the font or window size changes the pages. `--no-save` windows keep none.
 - **Reading position:** saved automatically, synced between devices through the server (see [Progress sync](#progress-sync)).
 
 ### Android interaction
 
-- Tap zones: left third — previous page, right third — next page, centre — menu.
+- Tap zones: left third — previous page, right third — next page, centre — shows or hides the top and bottom bars.
 - Swipe to turn pages.
 - Volume keys turn pages while a book is open (a setting, off by default).
 - Full screen with the status bar hidden while reading (a swipe from the top shows it for a moment).
 - The screen stays on while a book is open.
 - Orientation follows the system; no orientation lock in the first version.
 - One window: a book opens in place of the library, and the library comes back in its place (the desktop keeps a window per book).
-- Back, one step at a time: closes a footnote or a panel (contents, settings, Organize), then returns from the book to the library; on the library it sends the app to the background, as Android apps do.
+- Back, one step at a time: closes a footnote or a panel (contents, Aa, the ⋯ menu, settings, Organize), then returns from the book to the library; in the library it goes up a catalog folder, then from the catalogs or the settings to the books; at the books it sends the app to the background, as Android apps do.
 
 ## Library
 
@@ -60,12 +61,14 @@ Inherited from Simple Reader unless noted:
 
 ### Library screen
 
-- Grid of books with covers; search (title, author, series); sort by author (series in reading order), title or recently added; filter by reading status: not started, reading, finished (98% or more, since books often end in notes).
+- **Continue reading** and **Library** are separate pages. Continue reading shows the last books read (1–5, a setting; 3 by default; the app remembers the last 10) as cover cards; the library opens on it when there is a history, else on the books.
+- Library: a grid of books with covers and how far each is read as a line under the cover (`New`, `NN%`, `Finished`); search (title, author, series); sort by author (series in reading order), title or recently added; a switch by reading status with counts: all, not started, reading, finished (98% or more, since books often end in notes).
 - "Recently added" is when the book came into the library (remembered by the scan cache), not the file date, which a copy keeps.
-- The settings show the library folder with **Change…** (pick another) and **Organize…**.
-- A "Catalogs" tab for the servers (see [Servers](#servers)).
+- Navigation, desktop: the library window has a navigation pane (WinUI style) — Continue reading, Library, Catalogs (see [Servers](#servers)), and Settings folding out to Reading, Catalogs, System, Shortcuts and About; the content beside it shows the one chosen. The pane's edge drags to resize it (the width is kept in this PC's WebView storage, not the config; a double click resets it). Esc goes up a catalog folder, then back to the books; `S` / `Ctrl+,` open the settings and go back to the page they left.
+- Navigation, phone: a bottom bar — Reading (the history), Library, Catalogs, Settings; the settings' sections are chips at the top of their page.
+- Settings › System holds the library folder with **Change…** (pick another) and **Organize…**, the offer for books from elsewhere, file types, the interface font (Classical — Lora with Cormorant Garamond headings — or System, or Georgia, Cambria, Segoe UI, Calibri on Windows), how many books Continue reading shows, and clearing the history.
 - Grouping by series comes later.
-- Desktop: the library is one window; each book opens in its own window (as in Simple Reader).
+- Desktop: each book opens in its own window (as in Simple Reader); the settings there are a page over the window (from Aa's **All settings…**).
 
 ### File naming
 
@@ -85,10 +88,10 @@ Unknown Author/{original file name}            # no metadata
 
 ### Files outside the library
 
-Opening a file that is not inside the library folder shows an unobtrusive bar: **Copy to library**, **Move to library**, **Not now**, **Never for this file**.
+Opening a file that is not inside the library folder shows an unobtrusive bar: **Move to library** and **Copy to library**, **Not now**, and **⋯**, which shows **Never for this file**.
 
-- The last choice between copy and move becomes the primary button; both are always shown.
-- A global setting turns the offer off.
+- The last choice between copy and move comes first, outlined in the accent; both are always shown.
+- A setting (Settings › System) turns the offer off.
 - After a move the window keeps showing the book from its new path.
 - The reading position survives copying and moving: book identity is a content fingerprint, not a path (as in Simple Reader).
 - If no library folder has been chosen yet (the app was first started on a book), the bar offers **Choose library folder** instead, which opens the library's first-run choice.
@@ -108,10 +111,10 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 
 ### Catalog browsing
 
-- The library window has two tabs, **Library** and **Catalogs**. With several sources, a list at the top picks one.
-- Navigation follows the server's OPDS feeds (new, authors, series, categories…), with **← Back** (Android's Back too), **More** for the next page of a long list, and OPDS search (the server's OpenSearch template).
+- **Catalogs** is a page of the library (the pane's item; the phone's bottom bar). With several sources, a list at the top picks one.
+- Navigation follows the server's OPDS feeds (new, authors, series, categories…), with breadcrumbs of the way (the catalog's name, then each folder as it was named; each a step back; Esc and Android's Back go up one), **More** for the next page of a long list, and OPDS search (the server's OpenSearch template).
 - Covers in the lists, fetched through the app with the source's login.
-- A mark on books the library seems to hold (same title and first author's surname: a hint; downloading checks the content).
+- An **In library** tag on books the library seems to hold (same title and first author's surname: a hint; downloading checks the content); outlined download buttons.
 - Download format: EPUB if available, otherwise FB2. CWA serves FB2 as `text/xml`, so the download link tells the format. (Choosing another format by hand: later.)
 - Downloaded books go into the library folder under the [naming template](#file-naming), the same way as Copy / Move: a book the library already holds isn't added twice.
 
@@ -134,7 +137,7 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 
 ## State
 
-- **Desktop:** one JSON config next to the exe (`breader.json`), falling back to `%APPDATA%\book-reader` when the folder is not writable (as in Simple Reader). It holds settings, the library folder, sources (without passwords), reading positions, bookmarks, window geometry.
+- **Desktop:** one JSON config next to the exe (`breader.json`), falling back to `%APPDATA%\book-reader` when the folder is not writable (as in Simple Reader). It holds settings, the library folder, sources (without passwords), reading positions, bookmarks, window geometry. (The library pane's width is kept in the WebView's storage on that PC instead.)
 - **Android:** the same data in the app's private storage. Catalog passwords are encrypted with a key kept in the Android Keystore.
 - **Book identity:** content fingerprint (from Simple Reader); the KOSync hash is computed separately for sync.
 - **Library cache:** metadata and covers, rebuilt by rescanning.
@@ -142,7 +145,8 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 ## Technology
 
 - **Shell:** Tauri 2 (Rust) on both platforms; WebView2 on Windows, system WebView on Android.
-- **Frontend:** plain TypeScript, no framework.
+- **Frontend:** plain TypeScript, no framework. The look follows `docs/design/ui-refresh.md` (the "Classical" tokens: warm neutrals, one gold accent used as strokes). Interface fonts Cormorant Garamond and Lora, bundled (woff2 from the Fontsource packages, Latin and Cyrillic only; their SIL OFL 1.1 licences ship in `licenses/`), never loaded from the internet; icons from Lucide (ISC), one inline SVG sprite.
+- **Keyboard:** shortcuts read what a key types when that is Latin (AZERTY and QWERTZ keep their letters) and the key's place on the keyboard otherwise, so `T`, `B`, `S`, `Ctrl+,`… work in a Ukrainian layout too.
 - **Rendering:** the shared [reader-core](https://github.com/OlegG90/reader-core) package (public, MIT), also used by Simple Reader: `BookView` over [foliate-js](https://github.com/johnfactotum/foliate-js) (vendored there, without PDF, MOBI, comics, fixed-layout EPUB and TTS), appearance, page layout, touch. An npm git dependency pinned to a tag (`git+https://github.com/OlegG90/reader-core.git#vX.Y.Z`; `.npmrc` allows this one git dependency, which npm 12 refuses by default). Key bindings, settings, the library and everything else stay in the app.
 - **Removed from Simple Reader:** Markdown support with marked, Mermaid and highlight.js.
 - **Native pieces** (All files access, credential stores, keep-screen-on, volume keys) via small app-level Tauri plugins in Kotlin (`SystemPlugin.kt`) called from Rust (`platform_android.rs`).
