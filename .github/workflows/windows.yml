@@ -1,0 +1,57 @@
+# Builds breader.exe for x64 and ARM64 (portable, no installer) and runs the
+# tests, on every push that touches the app or what it is built from. The exes
+# are kept as the `book-reader-windows` artifact; releases come from
+# release.yml.
+name: Windows
+
+on:
+  push:
+    paths: ['src/**', 'src-tauri/**', 'index.html', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', '.github/workflows/windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exe:
+    # One x64 runner builds both: MSVC cross-compiles to ARM64 (the runner's
+    # LLVM, at the path .cargo/config.toml names, compiles ring's C for it).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc, aarch64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: windows
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build:x64
+      - run: npm run build:arm64
+
+      - name: Collect the exes
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory release -Force | Out-Null
+          Copy-Item src-tauri/target/x86_64-pc-windows-msvc/release/breader.exe release/breader-x64.exe
+          Copy-Item src-tauri/target/aarch64-pc-windows-msvc/release/breader.exe release/breader-arm64.exe
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: book-reader-windows
+          path: release/
+          if-no-files-found: error
