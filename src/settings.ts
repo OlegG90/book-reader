@@ -1,3 +1,12 @@
+/**
+ * The app-owned settings and their defaults: this module is the only place
+ * that assigns them, and settings.test.ts locks the key set.
+ *
+ * Appearance keys (theme, font, ...) default in reader-core's readAppearance
+ * (spread in first); the backend stores settings opaquely (see store.rs),
+ * so a new key here needs no Rust change — old installs read it fresh,
+ * new code tolerates its absence.
+ */
 import { oneOf, readAppearance, type Flow } from 'reader-core'
 import { HISTORY_LENGTHS, UI_FONTS, type PanelValues } from './settings-panel'
 import { SORTS, STATUSES, type Sort, type Status } from './library'

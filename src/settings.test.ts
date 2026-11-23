@@ -24,6 +24,14 @@ describe('readSettings', () => {
     expect(settings.librarySort).toBe('title')
   })
 
+  it('covers exactly the known keys', () => {
+    // A new key needs a default here (and only here): the backend stores
+    // settings opaquely, and appearance keys default in reader-core.
+    expect(Object.keys(readSettings({})).sort()).toEqual(
+      ['flow', 'font', 'fontSize', 'historyLength', 'libraryAddMode', 'librarySort', 'libraryStatus', 'lineHeight', 'lineLength', 'offerLibrary', 'savePositions', 'theme', 'uiFont', 'volumeKeys'],
+    )
+  })
+
   it('falls back on unknown values', () => {
     const settings = readSettings({ flow: 'sideways', librarySort: 'colour', historyLength: 99, uiFont: 'comic sans' })
     expect(settings.flow).toBe('paginated')
