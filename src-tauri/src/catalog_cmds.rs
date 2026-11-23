@@ -148,7 +148,7 @@ pub(crate) fn catalog_download(
     let result = put_in_library(&store, &books, &file, AddMode::Move);
     // Left behind when the library already had the book, or on a failure.
     let _ = std::fs::remove_file(&file);
-    let (added, _) = result?;
+    let added = result?.added;
     let _ = app.emit("library-updated", ());
     Ok(added)
 }

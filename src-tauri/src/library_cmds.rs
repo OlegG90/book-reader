@@ -132,16 +132,10 @@ pub(crate) fn scan_library(app: AppHandle, store: State<Store>, books: State<Lib
 
 #[tauri::command(async)]
 pub(crate) fn library_cover(store: State<Store>, books: State<LibraryBooks>, key: String) -> CmdResult<Response> {
-    // Before the first scan the history's covers come from the cache, as recent_books found them.
-    let cover = match books.entry(&key) {
-        Ok(entry) => entry.cover,
-        Err(e) => library_root(&store)
-            .ok()
-            .and_then(|root| books.snapshot(&store, &root).into_iter().find(|b| b.path == key))
-            .ok_or(e)?
-            .cover,
-    }
-    .ok_or("No cover")?;
+    // Before the first scan the history's covers come from the cache, as recent_books found them:
+    // the snapshot is the last scan's books, or the cached ones.
+    let root = library_root(&store)?;
+    let cover = books.snapshot(&store, &root).into_iter().find(|b| b.path == key).and_then(|b| b.cover).ok_or("No cover")?;
     std::fs::read(library_cache(&store).covers().join(cover)).map(Response::new).map_err(|e| e.to_string())
 }
 
@@ -209,21 +203,28 @@ pub(crate) fn add_to_library(
     // A phone's book from outside is the app's own copy: it moves in, and
     // Move then deletes the document it came from.
     let original = originals.0.lock().unwrap().remove(&source);
-    let (mut added, fingerprint) = put_in_library(&store, &books, &source, if original.is_some() { AddMode::Move } else { mode })?;
+    let placed = put_in_library(&store, &books, &source, if original.is_some() { AddMode::Move } else { mode })?;
+    let mut added = placed.added;
     if let (Some(original), AddMode::Move, false) = (original, mode, added.existed) {
         added.original_kept = !Active::delete_original(&original);
     }
     let target = library::join(&library_root(&store)?, &added.path);
     windows.set_path(window.label(), target.clone());
-    repath_recent(&store, &[(fingerprint, target)])?;
+    repath_recent(&store, &[(placed.fingerprint, target)])?;
     let _ = window.emit("library-updated", ());
     Ok(added)
 }
 
+/// A book moved or copied into the library, with its fingerprint.
+pub(crate) struct Placed {
+    pub(crate) added: Added,
+    pub(crate) fingerprint: String,
+}
+
 /// Moves or copies the book file `source` into the library under the naming
 /// template. If the library already holds the same book (under any name),
-/// nothing is moved or copied. Also returns the book's fingerprint.
-pub(crate) fn put_in_library(store: &Store, books: &LibraryBooks, source: &Path, mode: AddMode) -> CmdResult<(Added, String)> {
+/// nothing is moved or copied.
+pub(crate) fn put_in_library(store: &Store, books: &LibraryBooks, source: &Path, mode: AddMode) -> CmdResult<Placed> {
     let root = library_root(store)?;
     let err = |e: std::io::Error| format!("{}: {e}", paths::file_name(source));
     let format = metadata::Format::of(source).ok_or("Not a book file")?;
@@ -252,7 +253,7 @@ pub(crate) fn put_in_library(store: &Store, books: &LibraryBooks, source: &Path,
         }
         naming::Placement::Exists(rel) => Added { path: rel, existed: true, ..Default::default() },
     };
-    Ok((added, fingerprint))
+    Ok(Placed { added, fingerprint })
 }
 
 /// Points recent-list entries at the books' new places (by fingerprint), in one write.
