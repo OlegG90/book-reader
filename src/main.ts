@@ -327,7 +327,8 @@ function setBookmarks(list: Bookmark[]) {
 }
 
 function renderBookmarks() {
-  $('bookmarks').hidden = !bookmarks.length
+  $('bookmark-count').textContent = bookmarks.length ? `(${bookmarks.length})` : ''
+  $('bookmarks-empty').hidden = bookmarks.length > 0
   $('bookmark-list').replaceChildren(
     ...bookmarks.map(mark =>
       el(
@@ -373,6 +374,8 @@ function showOffer(offer: Offer) {
   $('offer-buttons').hidden = false
   $('offer-setup').hidden = offer !== 'setup'
   $('offer-buttons').querySelectorAll<HTMLElement>('.add').forEach(button => (button.hidden = offer !== 'add'))
+  $('offer-never').hidden = true
+  $('offer-more').hidden = offer !== 'add'
   $('offer-move').classList.toggle('primary', settings.libraryAddMode === 'move')
   $('offer-copy').classList.toggle('primary', settings.libraryAddMode === 'copy')
   $('offer').hidden = false
@@ -535,13 +538,32 @@ function showLibraryMessage(text: string) {
 }
 
 function showLibraryControls() {
-  $<HTMLSelectElement>('library-status').value = settings.libraryStatus
   $<HTMLSelectElement>('library-sort').value = settings.librarySort
+  renderLibrary()
 }
 
 function renderLibrary() {
   const query = $<HTMLInputElement>('library-search').value
   const shown = sortBooks(filterBooks(libraryBooks, query, settings.libraryStatus), settings.librarySort)
+  // The status switch: each choice with how many of the matching books it holds.
+  $('library-status').replaceChildren(
+    ...STATUSES.map(status =>
+      el(
+        'button',
+        {
+          type: 'button',
+          role: 'radio',
+          ariaChecked: String(status === settings.libraryStatus),
+          onclick: () => {
+            changeSettings({ libraryStatus: status })
+            renderLibrary()
+          },
+        },
+        STATUS_LABELS[status],
+        el('span', { className: 'count', textContent: String(filterBooks(libraryBooks, query, status).length) }),
+      ),
+    ),
+  )
   if (!libraryBooks.length) {
     showLibraryMessage(`The library is empty. Open a book (Ctrl+O) or put EPUB and FB2 files into ${libraryFolder}.`)
   } else {
@@ -791,10 +813,22 @@ function updateFlowButton() {
   $('phone-flow').replaceChildren(icon(), el('span', { textContent: mode }))
 }
 
+/** The drawer's two tabs; the last one chosen stays for the session. */
+let tocTab: 'contents' | 'bookmarks' = 'contents'
+
+function showTocTab(tab: 'contents' | 'bookmarks') {
+  tocTab = tab
+  $('toc-tree').hidden = tab !== 'contents'
+  $('bookmarks').hidden = tab !== 'bookmarks'
+  $('toc-tab-contents').setAttribute('aria-selected', String(tab === 'contents'))
+  $('toc-tab-bookmarks').setAttribute('aria-selected', String(tab === 'bookmarks'))
+}
+
 function openToc() {
   closePanels()
   $('scrim').hidden = false
   $('toc').hidden = false
+  showTocTab(tocTab)
   const current = $('toc-tree').querySelector<HTMLElement>('[aria-current]')
   ;(current ?? $('toc-tree').querySelector<HTMLElement>('[role="treeitem"]'))?.focus()
 }
@@ -1150,17 +1184,11 @@ $('library-button').addEventListener('click', () => runCommand('library'))
 $('setup-default').addEventListener('click', () => void chooseLibrary(false))
 $('setup-pick').addEventListener('click', () => void chooseLibrary(true))
 $('library-search').addEventListener('input', renderLibrary)
-$('library-status').append(...STATUSES.map(s => el('option', { value: s, textContent: STATUS_LABELS[s] })))
 $('library-sort').append(...SORTS.map(s => el('option', { value: s, textContent: SORT_LABELS[s] })))
-for (const [id, key] of [
-  ['library-status', 'libraryStatus'],
-  ['library-sort', 'librarySort'],
-] as const) {
-  $<HTMLSelectElement>(id).addEventListener('change', e => {
-    changeSettings({ [key]: (e.target as HTMLSelectElement).value })
-    renderLibrary()
-  })
-}
+$<HTMLSelectElement>('library-sort').addEventListener('change', e => {
+  changeSettings({ librarySort: (e.target as HTMLSelectElement).value as Sort })
+  renderLibrary()
+})
 /** Alt-tabbing back rescans at most this often. */
 const FOCUS_RESCAN_MS = 15_000
 let lastFocusRescan = 0
@@ -1177,6 +1205,13 @@ appWindow.listen('library-updated', () => {
 $('offer-move').addEventListener('click', () => void addToLibrary('move'))
 $('offer-copy').addEventListener('click', () => void addToLibrary('copy'))
 $('offer-later').addEventListener('click', hideOffer)
+$('offer-more').addEventListener('click', () => {
+  $('offer-more').hidden = true
+  $('offer-never').hidden = false
+  $('offer-never').focus()
+})
+$('toc-tab-contents').addEventListener('click', () => showTocTab('contents'))
+$('toc-tab-bookmarks').addEventListener('click', () => showTocTab('bookmarks'))
 $('offer-setup').addEventListener('click', () => {
   hideOffer()
   void runCommand('library')

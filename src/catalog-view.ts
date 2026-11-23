@@ -98,7 +98,16 @@ export function createCatalogView(deps: CatalogViewDeps) {
 
   function render() {
     const page = pages.at(-1)
-    $('catalog-title').textContent = page?.title ?? ''
+    // Where in the catalog: every page on the way, each one a step back to it.
+    $('catalog-title').replaceChildren(
+      ...pages.flatMap((p, i) => {
+        const last = i === pages.length - 1
+        const crumb = last
+          ? el('span', { className: 'here', textContent: p.title, ariaCurrent: 'page' })
+          : el('button', { type: 'button', textContent: p.title, onclick: () => backTo(i) })
+        return i ? [el('span', { className: 'sep', textContent: '›', ariaHidden: 'true' }), crumb] : [crumb]
+      }),
+    )
     back.hidden = pages.length < 2
     more.hidden = !page?.next
     list.replaceChildren(...(page?.entries ?? []).map(entryRow))
@@ -125,11 +134,13 @@ export function createCatalogView(deps: CatalogViewDeps) {
     const cover = el('div', { className: 'cover' })
     if (book.cover) loadCover(cover, book.cover)
     const action = el('button', { className: 'download' })
+    const actionLabel = (text: string) =>
+      action.replaceChildren(el('span', { innerHTML: '<svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>' }), text)
     // Only a hint (same title and author): downloading checks the content.
     const known = inLibrary(book, deps.library())
     if (file) {
       const label = `Download ${FORMAT_LABELS[file.format]}`
-      action.textContent = label
+      actionLabel(label)
       action.onclick = async () => {
         if (!source) return
         action.disabled = true
@@ -144,7 +155,7 @@ export function createCatalogView(deps: CatalogViewDeps) {
           action.title = added.path
         } catch (e) {
           action.disabled = false
-          action.textContent = label
+          actionLabel(label)
           action.title = String(e)
           message(String(e))
         }
@@ -157,12 +168,9 @@ export function createCatalogView(deps: CatalogViewDeps) {
       el(
         'div',
         { className: 'about' },
-        el('span', { className: 'title', textContent: book.title }),
+        el('span', { className: 'title', textContent: book.title }, ...(known ? [el('span', { className: 'tag', textContent: 'In library' })] : [])),
         el('span', { className: 'author', textContent: book.authors.join(', ') }),
-        el('span', {
-          className: 'meta',
-          textContent: [...new Set(book.files.map(f => FORMAT_LABELS[f.format]))].join(' · ') + (known ? ' · in library' : ''),
-        }),
+        el('span', { className: 'meta', textContent: [...new Set(book.files.map(f => FORMAT_LABELS[f.format]))].join(' · ') }),
       ),
       action,
     )
@@ -199,8 +207,13 @@ export function createCatalogView(deps: CatalogViewDeps) {
     void open(null)
   })
   function goBack() {
+    backTo(pages.length - 2)
+  }
+
+  /** Back to the page at `index` on the way (0: the catalog's start). */
+  function backTo(index: number) {
     request++
-    pages.pop()
+    pages.length = Math.max(1, index + 1)
     message('')
     render()
   }

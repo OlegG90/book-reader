@@ -53,7 +53,7 @@
         <div id="books-view">
           <div class="library-bar">
             <input id="library-search" type="search" placeholder="Search title, author, series" aria-label="Search the library" />
-            <select id="library-status" aria-label="Show"></select>
+            <div id="library-status" class="status-switch" role="radiogroup" aria-label="Show"></div>
             <select id="library-sort" aria-label="Sort by"></select>
             <button id="open-button" title="Open a book file (Ctrl+O)"><span class="desktop-only">Open file…</span><span class="android-only">Add book…</span></button>
           </div>
@@ -69,7 +69,7 @@
             <button id="catalog-back" hidden>← Back</button>
             <input id="catalog-search" type="search" placeholder="Search the catalog" aria-label="Search the catalog" />
           </div>
-          <h2 id="catalog-title"></h2>
+          <nav id="catalog-title" class="crumbs" aria-label="Where in the catalog"></nav>
           <p id="catalog-message" class="muted" hidden></p>
           <ul id="catalog-list" aria-label="Catalog"></ul>
           <p><button id="catalog-more" hidden>More</button></p>
@@ -90,6 +90,7 @@
       <symbol id="i-library" viewBox="0 0 24 24"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></symbol>
       <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
       <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
       <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
       <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></symbol>
       <symbol id="i-keyboard" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01"/><path d="M10 8h.01"/><path d="M14 8h.01"/><path d="M18 8h.01"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/><path d="M7 16h10"/></symbol>
@@ -140,10 +141,14 @@
     <nav id="toc" aria-label="Contents" hidden>
       <h2 id="toc-title"></h2>
       <p id="toc-author" class="muted"></p>
+      <div class="toc-switch" role="tablist">
+        <button id="toc-tab-contents" role="tab" aria-selected="true">Contents</button>
+        <button id="toc-tab-bookmarks" role="tab" aria-selected="false">Bookmarks <span id="bookmark-count"></span></button>
+      </div>
       <div id="toc-tree"></div>
       <section id="bookmarks" hidden>
-        <h3>Bookmarks</h3>
         <ol id="bookmark-list"></ol>
+        <p id="bookmarks-empty" class="muted">No bookmarks yet: B bookmarks the page you're on.</p>
       </section>
     </nav>
 
@@ -167,7 +172,8 @@
         <button id="offer-move" class="add">Move to library</button>
         <button id="offer-copy" class="add">Copy to library</button>
         <button id="offer-later">Not now</button>
-        <button id="offer-never" class="add">Never for this file</button>
+        <button id="offer-more" class="add icon-button" title="More" aria-label="More"><svg class="icon" aria-hidden="true"><use href="#i-ellipsis"/></svg></button>
+        <button id="offer-never" class="add" hidden>Never for this file</button>
       </span>
     </div>
 
