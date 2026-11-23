@@ -8,19 +8,15 @@ export interface MenuItem {
   danger?: boolean
 }
 
-let open: { menu: HTMLElement; close(): void } | null = null
-
-/** Closes the pop-up menu, if one is open. */
-export function closeMenu() {
-  open?.close()
-}
+/** Closes the open menu, if any. */
+let closeOpen: (() => void) | null = null
 
 /**
  * A small menu at `at` (window coordinates, kept on screen): a press outside
  * it or Esc closes it, a choice closes it and acts.
  */
 export function showMenu(at: { x: number; y: number }, items: MenuItem[]) {
-  closeMenu()
+  closeOpen?.()
   const menu = el(
     'div',
     { className: 'popup-menu', role: 'menu' },
@@ -31,7 +27,7 @@ export function showMenu(at: { x: number; y: number }, items: MenuItem[]) {
         className: item.danger ? 'danger' : '',
         textContent: item.label,
         onclick: () => {
-          closeMenu()
+          close()
           item.action()
         },
       }),
@@ -54,17 +50,17 @@ export function showMenu(at: { x: number; y: number }, items: MenuItem[]) {
     menu.remove()
     document.removeEventListener('pointerdown', outside, true)
     document.removeEventListener('keydown', keys, true)
-    open = null
+    closeOpen = null
   }
   document.addEventListener('pointerdown', outside, true)
   document.addEventListener('keydown', keys, true)
-  open = { menu, close }
+  closeOpen = close
   menu.querySelector('button')?.focus()
 }
 
 /** Closes the open menu or question (Back on the phone; Esc they handle themselves); false when there was none. */
 export function closePopup() {
-  if (open) closeMenu()
+  if (closeOpen) closeOpen()
   else if (asking) asking.dispatchEvent(new Event('cancel'))
   else return false
   return true

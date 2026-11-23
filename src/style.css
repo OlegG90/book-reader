@@ -705,12 +705,16 @@ button.link:hover {
   border-color: var(--accent);
 }
 
-/* The "more" menu under its button */
+/* The "more" menu under its button; a book's menu (book-menu.ts) looks the same */
 #more-menu {
   position: absolute;
   top: calc(100% + 4px);
   right: 12px;
   z-index: 25;
+}
+
+#more-menu,
+.popup-menu {
   display: grid;
   min-width: 180px;
   padding: 4px;
@@ -720,7 +724,7 @@ button.link:hover {
   box-shadow: var(--shadow);
 }
 
-#more-menu button {
+:is(#more-menu, .popup-menu) button {
   justify-content: space-between;
   text-align: left;
   font-family: var(--font-body);
@@ -1835,24 +1839,11 @@ body.library-mode #topbar {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
-/* A small menu at a book (open: continue / from the beginning; delete) */
+/* A book's menu sits where it was asked for */
 .popup-menu {
   position: fixed;
   z-index: 40;
-  display: grid;
   min-width: 200px;
-  padding: 4px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
-}
-
-.popup-menu button {
-  text-align: left;
-  font-family: var(--font-body);
-  font-weight: 400;
-  font-size: 14px;
 }
 
 .popup-menu .danger,

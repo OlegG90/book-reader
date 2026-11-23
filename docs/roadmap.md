@@ -28,9 +28,10 @@
    - Contents / Bookmarks as one drawer with a switch; the offer bar with one primary choice and ⋯; catalog breadcrumbs, an "In library" tag, outlined download buttons.
    - Order: theme and tokens first (everything else builds on them), then reader chrome, settings split, library, the rest; each part checked on Windows and the phone.
    - Added on the way, at the user's request: the settings as tabs (one section at a time); the desktop library window as a WinUI-style navigation pane (Continue reading, Library, Catalogs, Settings with its sections) and the phone's library with a bottom bar the same way; Continue reading and the books as separate pages, the history as cover cards with a 1–5 length setting; an interface font setting; catalog breadcrumbs named after the folders opened; shortcuts that work in any keyboard layout. reader-core 0.3.0 gives the page within the chapter and the chapter starts.
-7. **Phase "e"** — read status and shelves in CWA, metadata editing through the Calibre Content Server.
+7. **Library actions** (Windows + Android): open a started book from Library with a choice (continue at NN% or from the beginning); delete a book from the library through its menu (right click / long press), to the Recycle Bin on Windows, keeping its position and bookmarks; a Series page in the pane and the bottom bar.
+8. **Phase "e"** — read status and shelves in CWA, metadata editing through the Calibre Content Server.
 
-Full-text search in a book and grouping by series fit after stage 4.
+Full-text search in a book fits after stage 4.
 
 ## Open questions
 

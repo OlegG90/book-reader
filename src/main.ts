@@ -34,7 +34,6 @@ import {
   STATUSES,
   STATUS_LABELS,
   filterBooks,
-  groupSeries,
   seriesLabel,
   sortBooks,
   statusOf,
@@ -43,6 +42,7 @@ import {
   type Status,
 } from './library'
 import { createCatalogView } from './catalog-view'
+import { createSeriesView } from './series-view'
 import { closePopup, confirmDialog, onLongPress, showMenu, type MenuItem } from './book-menu'
 import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
@@ -581,7 +581,7 @@ function renderLibrary() {
     showLibraryMessage(shown.length ? '' : 'No books match.')
   }
   $('library-books').replaceChildren(...shown.map(bookCard))
-  if (!$('series-view').hidden) renderSeries()
+  if (view === 'series') seriesView.show()
 }
 
 function bookCard(book: LibraryBook) {
@@ -591,23 +591,22 @@ function bookCard(book: LibraryBook) {
   const open = (fromStart = false) =>
     void invoke('open_library_book', { key: book.key, fromStart }).catch(e => showError(book.title, e))
   // A book read before: continue where it was, or start over (asked); a new one just opens.
-  const started = status !== 'new'
-  const choices = (): MenuItem[] =>
-    started
-      ? [
+  const choices: MenuItem[] =
+    status === 'new'
+      ? [{ label: 'Open', action: () => open() }]
+      : [
           { label: `Continue · ${percent(book.fraction ?? 0)}`, action: () => open() },
           { label: 'Start from the beginning', action: () => open(true) },
         ]
-      : [{ label: 'Open', action: () => open() }]
-  const withDelete = (): MenuItem[] => [...choices(), { label: 'Delete from library…', danger: true, action: () => void deleteBook(book) }]
+  const withDelete = [...choices, { label: 'Delete from library…', danger: true, action: () => void deleteBook(book) }]
   const button = el(
     'button',
     {
       title: [book.title, book.authors.join(', '), seriesLabel(book)].filter(Boolean).join('\n'),
-      onclick: (e: MouseEvent) => (started ? showMenu(menuPlace(e, button), choices()) : open()),
+      onclick: (e: MouseEvent) => (status === 'new' ? open() : showMenu(menuPlace(e, button), choices)),
       oncontextmenu: (e: MouseEvent) => {
         e.preventDefault()
-        showMenu({ x: e.clientX, y: e.clientY }, withDelete())
+        showMenu({ x: e.clientX, y: e.clientY }, withDelete)
       },
     },
     coverWithProgress(book.title, book.hasCover ? book.key : null, book.fraction),
@@ -616,7 +615,7 @@ function bookCard(book: LibraryBook) {
     el('span', { className: 'series', textContent: seriesLabel(book) }),
     el('span', { className: 'meta', textContent: [book.format, progress].filter(Boolean).join(' · ') }),
   )
-  onLongPress(button, at => showMenu(at, withDelete()))
+  onLongPress(button, at => showMenu(at, withDelete))
   return el('li', {}, button)
 }
 
@@ -631,62 +630,12 @@ function menuPlace(e: MouseEvent, button: HTMLElement) {
 async function deleteBook(book: LibraryBook) {
   const ok = await confirmDialog({
     title: `Delete “${book.title}” from the library?`,
-    text: isAndroid
-      ? 'The file is deleted from the phone. Its reading position and bookmarks are kept, should it come back.'
-      : 'The file goes to the Recycle Bin. Its reading position and bookmarks are kept, should it come back.',
+    text: `${isAndroid ? 'The file is deleted from the phone.' : 'The file goes to the Recycle Bin.'} Its reading position and bookmarks are kept, should it come back.`,
     confirm: 'Delete',
   })
   if (!ok) return
   // The library redraws on "library-updated".
   await invoke('delete_library_book', { key: book.key }).catch(e => showError(book.title, e))
-}
-
-// ---- Series --------------------------------------------------------------------
-
-/** The series shown on the Series page; null shows the list of them. */
-let openSeries: string | null = null
-
-/** Draws the Series page: the list of series, or the open one's books. */
-function renderSeries() {
-  const groups = groupSeries(libraryBooks)
-  const group = groups.find(g => g.name === openSeries)
-  if (!group) openSeries = null
-  const crumbs: HTMLElement[] = [
-    group
-      ? el('button', { type: 'button', textContent: 'Series', onclick: () => showSeries(null) })
-      : el('span', { className: 'here', textContent: 'Series' }),
-  ]
-  if (group) crumbs.push(el('span', { className: 'sep', textContent: '›' }), el('span', { className: 'here', textContent: group.name }))
-  $('series-crumbs').replaceChildren(...crumbs)
-  $('series-empty').hidden = groups.length > 0
-  $('series-list').hidden = !!group
-  $('series-books').hidden = !group
-  $('series-books').replaceChildren(...(group?.books ?? []).map(bookCard))
-  if (group) return
-  $('series-list').replaceChildren(
-    ...groups.map(g => {
-      const first = g.books.find(b => b.hasCover) ?? g.books[0]
-      const read = g.books.length ? g.read / g.books.length : 0
-      return el(
-        'li',
-        {},
-        el(
-          'button',
-          { type: 'button', onclick: () => showSeries(g.name) },
-          coverWithProgress(g.name, first.hasCover ? first.key : null, read),
-          el('span', { className: 'title', textContent: g.name }),
-          el('span', { className: 'meta', textContent: `${g.books.length === 1 ? '1 book' : `${g.books.length} books`} · ${g.read} read` }),
-        ),
-      )
-    }),
-  )
-}
-
-/** Opens a series on the Series page, or (null) its list. */
-function showSeries(name: string | null) {
-  openSeries = name
-  renderSeries()
-  $('start-main').scrollTop = 0
 }
 
 /** Cover images by book key, kept for the window's life so redraws don't reload them. */
@@ -866,6 +815,7 @@ async function runCommand(command: Command) {
 
 /** Closes the footnote, or else any open panel; false when there was none. */
 function closeTopLayer() {
+  if (closePopup()) return true
   if (book?.footnoteOpen) book.hideFootnote()
   else if (tocOpen() || organizeOpen() || settingsOpen() || scrimlessOpen()) closePanels()
   else return false
@@ -883,12 +833,8 @@ async function handleEscape() {
  */
 function stepBackInLibrary() {
   if (book || !settingsEmbedded()) return false
-  if (closePopup()) return true
   if (view === 'catalogs' && catalogView.back()) return true
-  if (view === 'series' && openSeries) {
-    showSeries(null)
-    return true
-  }
+  if (view === 'series' && seriesView.back()) return true
   if (view === 'recent' || view === 'library') return false
   showView(homeView())
   return true
@@ -1069,6 +1015,12 @@ function showSettings() {
   settingsPage.show(settings)
   appearancePanel.show(settings, book?.flow)
 }
+const seriesView = createSeriesView({
+  library: () => libraryBooks,
+  bookCard,
+  cover: coverWithProgress,
+  scrollTop: () => ($('start-main').scrollTop = 0),
+})
 const catalogView = createCatalogView({ library: () => libraryBooks, openSettings: () => openSettings('catalogs') })
 
 // ---- The library's navigation (the desktop's pane, the phone's bottom bar) ----------
@@ -1137,7 +1089,7 @@ function showTab(tab: 'books' | 'series' | 'catalogs') {
   $('series-view').hidden = tab !== 'series'
   $('catalog-view').hidden = tab !== 'catalogs'
   if (tab === 'catalogs') void catalogView.show()
-  if (tab === 'series') renderSeries()
+  if (tab === 'series') seriesView.show()
 }
 
 const resolvedTheme = (): ResolvedTheme =>

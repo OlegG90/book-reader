@@ -101,7 +101,10 @@ export interface SeriesGroup {
 export function groupSeries(books: LibraryBook[]): SeriesGroup[] {
   const byName = new Map<string, LibraryBook[]>()
   for (const book of books) {
-    if (book.series) byName.set(book.series, [...(byName.get(book.series) ?? []), book])
+    if (!book.series) continue
+    const list = byName.get(book.series)
+    if (list) list.push(book)
+    else byName.set(book.series, [book])
   }
   return [...byName]
     .map(([name, list]) => ({
