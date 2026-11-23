@@ -45,7 +45,7 @@ import { createCatalogView } from './catalog-view'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
 import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
-import { createAppearancePanel, createSettingsPage, type PanelValues, type SettingsSection } from './settings-panel'
+import { HISTORY_LENGTHS, createAppearancePanel, createSettingsPage, type PanelValues, type SettingsSection } from './settings-panel'
 
 interface Position {
   cfi: string
@@ -90,6 +90,7 @@ function readSettings(stored: Record<string, unknown>): Settings {
     savePositions: stored.savePositions !== false,
     offerLibrary: stored.offerLibrary !== false,
     volumeKeys: stored.volumeKeys === true,
+    historyLength: HISTORY_LENGTHS.find(n => n === stored.historyLength) ?? 3,
   }
 }
 
@@ -440,6 +441,8 @@ interface RecentBook {
   fileName: string
   fraction: number | null
   exists: boolean
+  /** The library's key for its cover, when the library has the book. */
+  coverKey: string | null
 }
 
 interface LibraryInfo {
@@ -489,7 +492,7 @@ async function refreshRecent() {
     console.error(e)
     return []
   })
-  $('recent').replaceChildren(...books.map(recentItem))
+  $('recent').replaceChildren(...books.slice(0, settings.historyLength).map(recentItem))
   $('recent-title').hidden = !books.length
   $('recent-empty').hidden = books.length > 0
   hasRecent = books.length > 0
@@ -555,15 +558,13 @@ function bookCard(book: LibraryBook) {
   const status = statusOf(book)
   const progress =
     status === 'finished' ? 'Finished' : status === 'reading' ? `${Math.max(1, Math.round((book.fraction ?? 0) * 100))}%` : ''
-  const cover = el('div', { className: 'cover' }, el('span', { textContent: book.title }))
-  if (book.hasCover) loadCover(cover, book.key)
   const button = el(
     'button',
     {
       title: [book.title, book.authors.join(', '), seriesLabel(book)].filter(Boolean).join('\n'),
       onclick: () => void invoke('open_library_book', { key: book.key }).catch(e => showError(book.title, e)),
     },
-    cover,
+    coverWithProgress(book.title, book.hasCover ? book.key : null, book.fraction),
     el('span', { className: 'title', textContent: book.title }),
     el('span', { className: 'author', textContent: book.authors.join(', ') }),
     el('span', { className: 'series', textContent: seriesLabel(book) }),
@@ -599,20 +600,32 @@ function loadCover(host: HTMLElement, key: string) {
   coverObserver.observe(host)
 }
 
+/** A book's cover (or its title on a plain tile), with how far it is read as a line under it. */
+function coverWithProgress(title: string, coverKey: string | null, fraction: number | null) {
+  const cover = el('div', { className: 'cover' }, el('span', { textContent: title }))
+  if (coverKey) loadCover(cover, coverKey)
+  const line = el('span', { className: 'read-line' })
+  if (fraction) line.append(el('span', { style: `width: ${Math.max(2, Math.round(fraction * 100))}%` }))
+  return el('div', { className: 'cover-box' }, cover, line)
+}
+
+/** A "Continue reading" book: a card like the library's. */
 function recentItem(book: RecentBook) {
-  const span = (className: string, textContent: string) => el('span', { className, textContent })
+  const title = book.title || book.fileName
+  const percent = book.fraction == null ? '' : `${Math.max(1, Math.round(book.fraction * 100))}%`
   const button = el(
     'button',
     book.exists
-      ? { onclick: () => void invoke('open_recent', { key: book.key }).catch(console.error) }
+      ? { title: [title, book.author].filter(Boolean).join('\n'), onclick: () => void invoke('open_recent', { key: book.key }).catch(console.error) }
       : {
           className: 'missing',
           title: 'File not found. Click to remove it from the list.',
           onclick: () => void invoke('forget_recent', { key: book.key }).then(refreshRecent, console.error),
         },
-    span('title', book.title || book.fileName),
-    span('percent', book.fraction == null ? '' : `${Math.round(book.fraction * 100)}%`),
-    span('author', book.author),
+    coverWithProgress(title, book.coverKey, book.fraction),
+    el('span', { className: 'title', textContent: title }),
+    el('span', { className: 'author', textContent: book.author }),
+    el('span', { className: 'meta', textContent: book.exists ? percent : 'File not found' }),
   )
   return el('li', {}, button)
 }
@@ -1015,6 +1028,7 @@ function applySettings(changes: Partial<Settings>) {
     updateFlowButton()
   }
   if ('volumeKeys' in changes) setReading(!!book)
+  if ('historyLength' in changes && !book) void refreshRecent()
 }
 
 /** Applies changes made in this window, and saves them after a pause. */

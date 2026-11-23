@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_APPEARANCE } from 'reader-core'
 import { createAppearancePanel, createSettingsPage, type PanelValues } from './settings-panel'
 
-const initial: PanelValues = { ...DEFAULT_APPEARANCE, savePositions: true, offerLibrary: true, volumeKeys: false }
+const initial: PanelValues = { ...DEFAULT_APPEARANCE, savePositions: true, offerLibrary: true, volumeKeys: false, historyLength: 3 }
 
 const buttonIn = (host: HTMLElement) => (text: string) => {
   const found = [...host.querySelectorAll('button')].find(b => b.textContent === text)
@@ -128,5 +128,17 @@ describe('settings page', () => {
     button('System').click()
     expect(shown()).toEqual(['settings-system'])
     expect(button('Catalogs').getAttribute('aria-selected')).toBe('false')
+  })
+
+  it('sets how many books Continue reading shows', () => {
+    const { host, onChange, panel } = page()
+    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Books in Continue reading"]')
+    if (!select) throw new Error('no history length')
+    expect(select.value).toBe('3')
+    select.value = '5'
+    select.dispatchEvent(new Event('change'))
+    expect(onChange).toHaveBeenCalledWith({ historyLength: 5 })
+    panel.show({ ...initial, historyLength: 1 })
+    expect(select.value).toBe('1')
   })
 })

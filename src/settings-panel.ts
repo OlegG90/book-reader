@@ -7,7 +7,12 @@ export interface PanelValues extends Appearance {
   offerLibrary: boolean
   /** Android: the volume keys turn pages. */
   volumeKeys: boolean
+  /** How many books "Continue reading" shows (1–5). */
+  historyLength: number
 }
+
+/** The choices for `historyLength`. */
+export const HISTORY_LENGTHS = [1, 2, 3, 4, 5] as const
 
 /** Buttons in the settings page that act instead of changing a value. */
 export interface PanelActions {
@@ -178,6 +183,12 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const libraryRow = row('Library folder', '', el('button', { type: 'button', textContent: 'Change…', onclick: actions.changeLibrary }), el('button', { type: 'button', textContent: 'Organize…', onclick: actions.organizeLibrary }))
   libraryRow.querySelector('.hint')?.replaceWith(libraryFolder)
   const fileTypesRow = row('File types', '', fileTypesButton)
+  const historyLength = el(
+    'select',
+    { ariaLabel: 'Books in Continue reading' },
+    ...HISTORY_LENGTHS.map(n => el('option', { value: String(n), textContent: n === 1 ? '1 book' : `${n} books` })),
+  )
+  historyLength.onchange = () => onChange({ historyLength: Number(historyLength.value) })
   fileTypesRow.querySelector('.hint')?.replaceWith(fileTypesStatus)
 
   const content: Record<SettingsSection, HTMLElement[]> = {
@@ -191,6 +202,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       libraryRow,
       checkRow('Offer to add books opened from elsewhere', 'Shows Move / Copy to library when a file is outside the library folder.', offerLibrary),
       fileTypesRow,
+      row('Continue reading', 'How many of the last books read it shows.', historyLength),
       row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory })),
     ],
     shortcuts: [shortcuts],
@@ -237,6 +249,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     savePositions.checked = values.savePositions
     offerLibrary.checked = values.offerLibrary
     volumeKeys.checked = values.volumeKeys
+    historyLength.value = String(values.historyLength)
   }
 
   function setFileTypesRegistered(registered: boolean) {

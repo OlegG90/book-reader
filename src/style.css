@@ -442,7 +442,7 @@ body:not(.library-mode) .library-only {
   text-align: center;
 }
 
-#library-books {
+.book-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
   gap: 20px 16px;
@@ -451,7 +451,7 @@ body:not(.library-mode) .library-only {
   list-style: none;
 }
 
-#library-books button {
+.book-grid button {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -460,7 +460,7 @@ body:not(.library-mode) .library-only {
   text-align: start;
 }
 
-#library-books .cover {
+.book-grid .cover {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -476,17 +476,17 @@ body:not(.library-mode) .library-only {
   text-align: center;
 }
 
-#library-books .cover:has(img) {
+.book-grid .cover:has(img) {
   padding: 0;
 }
 
-#library-books .cover img {
+.book-grid .cover img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-#library-books .title {
+.book-grid .title {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -494,9 +494,9 @@ body:not(.library-mode) .library-only {
   font-weight: 600;
 }
 
-#library-books .author,
-#library-books .series,
-#library-books .meta {
+.book-grid .author,
+.book-grid .series,
+.book-grid .meta {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -504,8 +504,8 @@ body:not(.library-mode) .library-only {
   font-size: 12px;
 }
 
-#library-books .series:empty,
-#library-books .author:empty {
+.book-grid .series:empty,
+.book-grid .author:empty {
   display: none;
 }
 
@@ -619,51 +619,6 @@ button.link {
 
 button.link:hover {
   background: none;
-}
-
-#recent {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 4px;
-  margin: 0 0 24px;
-  padding: 0;
-  list-style: none;
-  font-size: 14px;
-  text-align: start;
-}
-
-#recent:empty {
-  display: none;
-}
-
-#recent button {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  width: 100%;
-  padding: 8px 12px;
-  text-align: start;
-}
-
-#recent .title {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#recent .author,
-#recent .percent {
-  color: var(--muted);
-}
-
-#recent .percent {
-  grid-row: span 2;
-  align-self: center;
-  padding-inline-start: 12px;
-}
-
-#recent .missing {
-  opacity: 0.45;
 }
 
 /* Controls shown near the window edges */
@@ -1712,4 +1667,30 @@ button:hover {
 
 .android #recent-empty {
   display: none;
+}
+
+/* How far a book is read: a hairline under its cover */
+.book-grid .cover-box {
+  display: grid;
+  gap: 6px;
+}
+
+.book-grid .read-line {
+  display: block;
+  height: 2px;
+  background: var(--line);
+}
+
+.book-grid .read-line span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.book-grid .missing {
+  opacity: 0.45;
+}
+
+#recent {
+  margin-bottom: 24px;
 }
