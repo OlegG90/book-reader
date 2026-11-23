@@ -4,7 +4,7 @@
 
 use crate::net::{self, Auth, Login, Reply};
 use crate::opds::{self, Feed, FileFormat};
-use crate::platform;
+use crate::platform::{Active, Platform};
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use url::Url;
@@ -74,7 +74,7 @@ pub fn login(source: &Source) -> Option<Login> {
 pub fn login_with(source: &Source, password: Option<&str>) -> Option<Login> {
     (!source.user.is_empty()).then(|| Login {
         user: source.user.clone(),
-        password: password.map(str::to_string).or_else(|| platform::password(&source.id)).unwrap_or_default(),
+        password: password.map(str::to_string).or_else(|| Active::password(&source.id)).unwrap_or_default(),
     })
 }
 

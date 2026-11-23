@@ -4,7 +4,7 @@ use crate::library;
 use crate::metadata;
 use crate::naming;
 use crate::paths;
-use crate::platform;
+use crate::platform::{Active, Platform};
 use crate::store::Store;
 use crate::system_cmds::Originals;
 use crate::windows::{saving_window, show_book, ReaderWindows};
@@ -66,7 +66,7 @@ pub(crate) struct LibraryInfo {
 pub(crate) fn library_info(app: AppHandle, store: State<Store>) -> CmdResult<LibraryInfo> {
     Ok(LibraryInfo {
         folder: store.read(|s| s.library.as_ref().map(|p| p.display().to_string())),
-        suggested: platform::suggested_library(&app)?.display().to_string(),
+        suggested: Active::suggested_library(&app)?.display().to_string(),
     })
 }
 
@@ -74,7 +74,7 @@ pub(crate) fn library_info(app: AppHandle, store: State<Store>) -> CmdResult<Lib
 /// Returns the folder, or `None` when the picker was cancelled.
 #[tauri::command(async)]
 pub(crate) fn set_library(window: Window, store: State<Store>, books: State<LibraryBooks>, pick: bool) -> CmdResult<Option<String>> {
-    let Some(folder) = platform::chosen_library(&window, pick)? else { return Ok(None) };
+    let Some(folder) = Active::chosen_library(&window, pick)? else { return Ok(None) };
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     let folder = std::path::absolute(&folder).unwrap_or(folder);
     store.update(|s| s.library = Some(folder.clone())).map_err(|e| e.to_string())?;
@@ -107,7 +107,7 @@ pub(crate) struct LibraryBook {
 #[tauri::command(async)]
 pub(crate) fn scan_library(app: AppHandle, store: State<Store>, books: State<LibraryBooks>) -> CmdResult<Vec<LibraryBook>> {
     let root = library_root(&store)?;
-    platform::check_library_access(&app)?;
+    Active::check_library_access(&app)?;
     let entries = library::scan(&root, &library_cache(&store)).map_err(|e| format!("{}: {e}", root.display()))?;
     let views = store.read(|s| {
         entries
@@ -165,7 +165,7 @@ pub(crate) fn open_library_book(
 pub(crate) fn delete_library_book(app: AppHandle, store: State<Store>, books: State<LibraryBooks>, key: String) -> CmdResult<()> {
     let entry = books.entry(&key)?;
     let path = entry.absolute(&library_root(&store)?);
-    platform::delete_book(&path).map_err(|e| format!("{}: {e}", paths::file_name(&path)))?;
+    Active::delete_book(&path).map_err(|e| format!("{}: {e}", paths::file_name(&path)))?;
     books.forget(&key);
     if store.read(|s| s.recent.iter().any(|r| r.fingerprint == entry.fingerprint)) {
         store.update(|s| s.recent.retain(|r| r.fingerprint != entry.fingerprint)).map_err(|e| e.to_string())?;
@@ -211,7 +211,7 @@ pub(crate) fn add_to_library(
     let original = originals.0.lock().unwrap().remove(&source);
     let (mut added, fingerprint) = put_in_library(&store, &books, &source, if original.is_some() { AddMode::Move } else { mode })?;
     if let (Some(original), AddMode::Move, false) = (original, mode, added.existed) {
-        added.original_kept = !platform::delete_original(&original);
+        added.original_kept = !Active::delete_original(&original);
     }
     let target = library::join(&library_root(&store)?, &added.path);
     windows.set_path(window.label(), target.clone());
