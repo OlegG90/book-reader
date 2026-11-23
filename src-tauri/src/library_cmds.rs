@@ -132,16 +132,10 @@ pub(crate) fn scan_library(app: AppHandle, store: State<Store>, books: State<Lib
 
 #[tauri::command(async)]
 pub(crate) fn library_cover(store: State<Store>, books: State<LibraryBooks>, key: String) -> CmdResult<Response> {
-    // Before the first scan the history's covers come from the cache, as recent_books found them.
-    let cover = match books.entry(&key) {
-        Ok(entry) => entry.cover,
-        Err(e) => library_root(&store)
-            .ok()
-            .and_then(|root| books.snapshot(&store, &root).into_iter().find(|b| b.path == key))
-            .ok_or(e)?
-            .cover,
-    }
-    .ok_or("No cover")?;
+    // Before the first scan the history's covers come from the cache, as recent_books found them:
+    // the snapshot is the last scan's books, or the cached ones.
+    let root = library_root(&store)?;
+    let cover = books.snapshot(&store, &root).into_iter().find(|b| b.path == key).and_then(|b| b.cover).ok_or("No cover")?;
     std::fs::read(library_cache(&store).covers().join(cover)).map(Response::new).map_err(|e| e.to_string())
 }
 
