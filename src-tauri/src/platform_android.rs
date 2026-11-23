@@ -111,6 +111,23 @@ impl Platform for Android {
         call("savePassword", json!({ "id": source_id, "password": password }))
     }
 
+    /// Whether each catalog has a password kept, in one bridge call;
+    /// falls back to one call per source when the batch fails.
+    fn has_passwords(source_ids: &[String]) -> Vec<bool> {
+        #[derive(Deserialize)]
+        struct KeptList {
+            kept: Vec<bool>,
+        }
+        #[derive(Serialize)]
+        struct Ids<'a> {
+            ids: &'a [String],
+        }
+        match run::<KeptList>("hasPasswords", Ids { ids: source_ids }) {
+            Ok(list) if list.kept.len() == source_ids.len() => list.kept,
+            _ => source_ids.iter().map(|id| Self::has_password(id)).collect(),
+        }
+    }
+
     /// Whether a catalog has a password kept (without decrypting it).
     fn has_password(source_id: &str) -> bool {
         #[derive(Deserialize)]

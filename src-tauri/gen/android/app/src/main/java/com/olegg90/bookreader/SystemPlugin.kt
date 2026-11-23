@@ -27,6 +27,7 @@ import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.File
 import java.security.KeyStore
+import org.json.JSONArray
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -47,6 +48,11 @@ class ReadingArgs {
 @InvokeArg
 class UriArgs {
   lateinit var uri: String
+}
+
+@InvokeArg
+class IdsArgs {
+  var ids: List<String>? = null
 }
 
 /**
@@ -315,6 +321,13 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun hasPassword(invoke: Invoke) {
     invoke.resolve(JSObject().put("kept", prefs().contains(invoke.parseArgs(PasswordArgs::class.java).id)))
+  }
+
+  /** Whether each catalog has a password kept: `{ kept: [...] }`, in the asked order. */
+  @Command
+  fun hasPasswords(invoke: Invoke) {
+    val ids = invoke.parseArgs(IdsArgs::class.java).ids ?: emptyList()
+    invoke.resolve(JSObject().put("kept", JSONArray(ids.map { prefs().contains(it) })))
   }
 
   @Command
