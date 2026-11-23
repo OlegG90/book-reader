@@ -97,6 +97,9 @@ function readSettings(stored: Record<string, unknown>): Settings {
 }
 
 const SAVE_DELAY_MS = 500
+/** How far a book is read, as the library shows it: at least 1% once started. */
+const percent = (fraction: number) => `${Math.max(1, Math.round(fraction * 100))}%`
+/** The top bar shows when the mouse comes this close to the top edge. */
 const TOP_EDGE_PX = 48
 /** The bottom bar shows when the mouse comes this close to the bottom edge. */
 const BOTTOM_EDGE_PX = 56
@@ -545,7 +548,12 @@ function showLibraryControls() {
 
 function renderLibrary() {
   const query = $<HTMLInputElement>('library-search').value
-  const shown = sortBooks(filterBooks(libraryBooks, query, settings.libraryStatus), settings.librarySort)
+  // One pass over the library: the books matching the search, counted by status.
+  const matching = filterBooks(libraryBooks, query, 'all')
+  const counts: Record<Status, number> = { all: matching.length, new: 0, reading: 0, finished: 0 }
+  for (const b of matching) counts[statusOf(b)]++
+  const chosen = settings.libraryStatus
+  const shown = sortBooks(chosen === 'all' ? matching : matching.filter(b => statusOf(b) === chosen), settings.librarySort)
   // The status switch: each choice with how many of the matching books it holds.
   $('library-status').replaceChildren(
     ...STATUSES.map(status =>
@@ -561,7 +569,7 @@ function renderLibrary() {
           },
         },
         STATUS_LABELS[status],
-        el('span', { className: 'count', textContent: String(filterBooks(libraryBooks, query, status).length) }),
+        el('span', { className: 'count', textContent: String(counts[status]) }),
       ),
     ),
   )
@@ -576,7 +584,7 @@ function renderLibrary() {
 function bookCard(book: LibraryBook) {
   const status = statusOf(book)
   const progress =
-    status === 'finished' ? 'Finished' : status === 'reading' ? `${Math.max(1, Math.round((book.fraction ?? 0) * 100))}%` : 'New'
+    status === 'finished' ? 'Finished' : status === 'reading' ? percent(book.fraction ?? 0) : 'New'
   const button = el(
     'button',
     {
@@ -631,7 +639,7 @@ function coverWithProgress(title: string, coverKey: string | null, fraction: num
 /** A "Continue reading" book: a card like the library's. */
 function recentItem(book: RecentBook) {
   const title = book.title || book.fileName
-  const percent = book.fraction == null ? '' : `${Math.max(1, Math.round(book.fraction * 100))}%`
+  const read = book.fraction == null ? '' : percent(book.fraction)
   const button = el(
     'button',
     book.exists
@@ -644,7 +652,7 @@ function recentItem(book: RecentBook) {
     coverWithProgress(title, book.coverKey, book.fraction),
     el('span', { className: 'title', textContent: title }),
     el('span', { className: 'author', textContent: book.author }),
-    el('span', { className: 'meta', textContent: book.exists ? percent : 'File not found' }),
+    el('span', { className: 'meta', textContent: book.exists ? read : 'File not found' }),
   )
   return el('li', {}, button)
 }
@@ -665,8 +673,7 @@ function onRelocate(location: Relocation) {
   const { fraction, cfi, tocItem } = location
   const percent = Math.round(fraction * 100)
   $('progress-fill').style.width = `${fraction * 100}%`
-  $('progress-done').style.width = `${fraction * 100}%`
-  $('progress-knob').style.left = `${fraction * 100}%`
+  showTrackAt(fraction)
   $('progress-chapter').textContent = tocItem?.label?.trim() ?? ''
   // Pages count within the chapter (the book-wide position is the percentage).
   const at = book?.chapterPage
@@ -976,6 +983,9 @@ const catalogView = createCatalogView({ library: () => libraryBooks, openSetting
 type View = 'recent' | 'library' | 'catalogs' | `settings:${SettingsSection}`
 /** Unset until the library first shows: then the history if there is one, else the books. */
 let view: View | null = null
+/** The pane's and the bottom bar's items; the pane's Settings heading. */
+const navItems = [...document.querySelectorAll<HTMLElement>('[data-nav]')]
+const settingsHead = document.querySelector<HTMLElement>('#sidebar .section-head')!
 /** The last page that isn't a settings section, for S / Ctrl+, to go back to. */
 let lastPage: View = 'library'
 /** Where the library starts, and Esc / Back lead: the history if there is one, else the books. */
@@ -998,6 +1008,7 @@ function embedSettings(embed: boolean) {
 
 /** Shows `to` in the library window's content and marks it in the pane. */
 function showView(to: View) {
+  const wasSettings = !!view?.startsWith('settings:')
   view = to
   if (!to.startsWith('settings:')) lastPage = to
   const settingsView = to.startsWith('settings:')
@@ -1006,14 +1017,14 @@ function showView(to: View) {
   if (settingsEmbedded()) $('settings').hidden = !settingsView
   if (settingsView) {
     settingsPage.showSection(to.slice('settings:'.length) as SettingsSection)
-    void refreshFileTypesStatus()
+    if (!wasSettings) void refreshFileTypesStatus()
     foldSettingsNav(false)
   } else if (libraryReady) {
     showTab(to === 'catalogs' ? 'catalogs' : 'books')
     // The history and the books are separate pages here (the phone shows both on one).
     $('books-view').dataset.show = to === 'recent' ? 'recent' : 'all'
   }
-  for (const item of document.querySelectorAll<HTMLElement>('[data-nav]')) {
+  for (const item of navItems) {
     // The phone's Settings stands for all its sections.
     const group = item.dataset.navGroup
     item.setAttribute('aria-current', String(item.dataset.nav === to || (!!group && to.startsWith(`${group}:`))))
@@ -1023,7 +1034,7 @@ function showView(to: View) {
 /** Folds the Settings group in the pane away (`true`) or open. */
 function foldSettingsNav(fold: boolean) {
   $('settings-nav').hidden = fold
-  document.querySelector('#sidebar .section-head')?.setAttribute('aria-expanded', String(!fold))
+  settingsHead.setAttribute('aria-expanded', String(!fold))
 }
 
 /** The library's two parts: the books on disk, and the catalogs to get more from. */
@@ -1117,6 +1128,7 @@ const bottombar = $('bottombar')
 /** The reading chrome: the top bar and the bottom bar come and go together. */
 function setChrome(shown: boolean) {
   clearTimeout(hideChromeTimer)
+  hideChromeTimer = undefined
   topbar.classList.toggle('shown', shown)
   bottombar.classList.toggle('shown', shown)
   if (!shown) closeMoreMenu()
@@ -1129,7 +1141,11 @@ function toggleTopbar() {
 
 /** The mouse near the top or bottom edge shows the chrome; elsewhere it fades after a moment. */
 function onPointer(y: number) {
-  if (y < TOP_EDGE_PX || (book && y > innerHeight - BOTTOM_EDGE_PX)) return setChrome(true)
+  // Near the top, or (reading) the bottom: show the bars, unless they already are.
+  if (y < TOP_EDGE_PX || (book && y > innerHeight - BOTTOM_EDGE_PX)) {
+    if (!topbar.classList.contains('shown') || hideChromeTimer) setChrome(true)
+    return
+  }
   // Kept while the mouse is on them, a menu or a panel opened from them is open, or the knob is held.
   const inUse =
     topbar.matches(':hover') || bottombar.matches(':hover') || !$('more-menu').hidden || appearanceOpen() || tocOpen() || trackDrag
@@ -1241,10 +1257,8 @@ setInterval(() => void pushSync(), SYNC_EVERY_MS)
 document.addEventListener('visibilitychange', () => document.hidden && void pushSync())
 $('organize-cancel').addEventListener('click', closePanels)
 // The library window's pane (desktop): its items, Settings folding out, its width.
-for (const item of document.querySelectorAll<HTMLElement>('[data-nav]')) {
-  item.addEventListener('click', () => showView(item.dataset.nav as View))
-}
-document.querySelector('#sidebar .section-head')?.addEventListener('click', () => foldSettingsNav(!$('settings-nav').hidden))
+for (const item of navItems) item.addEventListener('click', () => showView(item.dataset.nav as View))
+settingsHead.addEventListener('click', () => foldSettingsNav(!$('settings-nav').hidden))
 sidebarResizer($('start'), $('sidebar-resizer'))
 appWindow.listen('catalogs-changed', () => {
   void sourcesPanel.refresh()

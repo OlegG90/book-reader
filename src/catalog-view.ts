@@ -22,7 +22,6 @@ export function createCatalogView(deps: CatalogViewDeps) {
   const $ = (id: string) => document.getElementById(id) as HTMLElement
   const sourceSelect = $('catalog-source') as HTMLSelectElement
   const search = $('catalog-search') as HTMLInputElement
-  const back = $('catalog-back') as HTMLButtonElement
   const more = $('catalog-more') as HTMLButtonElement
   const list = $('catalog-list')
 
@@ -111,7 +110,6 @@ export function createCatalogView(deps: CatalogViewDeps) {
         return i ? [el('span', { className: 'sep', textContent: '›', ariaHidden: 'true' }), crumb] : [crumb]
       }),
     )
-    back.hidden = pages.length < 2
     more.hidden = !page?.next
     list.replaceChildren(...(page?.entries ?? []).map(entryRow))
   }
@@ -220,7 +218,6 @@ export function createCatalogView(deps: CatalogViewDeps) {
     render()
   }
 
-  back.addEventListener('click', goBack)
   more.addEventListener('click', () => void loadMore())
   search.addEventListener('keydown', e => {
     if (e.key !== 'Enter' || !search.value.trim()) return
