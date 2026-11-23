@@ -42,5 +42,8 @@ describe('commandFor', () => {
     expect(at('б', 'Comma', { ctrlKey: true })).toBe('settings')
     expect(at('щ', 'KeyO', { ctrlKey: true })).toBe('open')
     expect(at(' ', 'Space')).toBe('next')
+    // A Latin layout keeps its letters: AZERTY's "m" (where US has ",") is M.
+    expect(at('m', 'Semicolon')).toBe('toggleFlow')
+    expect(at('a', 'KeyQ')).toBeNull()
   })
 })

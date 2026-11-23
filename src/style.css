@@ -217,9 +217,8 @@ body.library-mode #topbar {
   pointer-events: auto;
 }
 
-/* Reading-only and library-only parts of the top bar */
-body.library-mode .reader-only,
-body:not(.library-mode) .library-only {
+/* Reading-only parts (the top bar is hidden in the library anyway; the "more" menu's) */
+body.library-mode .reader-only {
   display: none !important;
 }
 
@@ -253,25 +252,6 @@ body:not(.library-mode) .library-only {
   border: 1px solid var(--line);
 }
 
-.library-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 12px;
-}
-
-.library-tabs button {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--muted);
-  padding: 4px 10px;
-}
-
-.library-tabs button[aria-selected='true'] {
-  color: var(--fg);
-  background: var(--active);
-}
-
-/* Catalogs */
 #catalog-list {
   margin: 0;
   padding: 0;
@@ -524,7 +504,7 @@ body:not(.library-mode) .library-only {
 #sync-bar {
   position: fixed;
   left: 50%;
-  bottom: calc(16px + var(--safe-bottom));
+  bottom: calc(24px + var(--safe-bottom));
   z-index: 15;
   transform: translateX(-50%);
   display: flex;
@@ -537,8 +517,22 @@ body:not(.library-mode) .library-only {
   padding: 8px 12px;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
+}
+
+/* With the bottom bar shown, the bars sit above it (the phone's is tall) */
+body:has(#bottombar.shown) :is(#offer, #sync-bar) {
+  bottom: calc(76px + var(--safe-bottom));
+}
+
+.android body:has(#bottombar.shown) :is(#offer, #sync-bar) {
+  bottom: calc(150px + var(--safe-bottom));
+}
+
+/* Options for the desktop only (the phone's lists leave them out) */
+.android option.desktop-only {
+  display: none;
 }
 
 #offer-buttons,
@@ -1504,8 +1498,7 @@ button:hover {
    rounded corner beside it; the chosen item marked by an accent pill. */
 /* The library has its own navigation (the pane, or the phone's bottom bar):
    no top bar, no tabs */
-body.library-mode #topbar,
-.library-tabs {
+body.library-mode #topbar {
   display: none !important;
 }
 

@@ -46,10 +46,6 @@
         <p><button id="setup-pick" class="link">Choose another folder…</button></p>
       </section>
       <section id="library" hidden>
-        <div class="library-tabs" role="tablist">
-          <button id="tab-books" role="tab" aria-selected="true">Library</button>
-          <button id="tab-catalogs" role="tab" aria-selected="false">Catalogs</button>
-        </div>
         <div id="books-view">
           <div class="library-bar">
             <input id="library-search" type="search" placeholder="Search title, author, series" aria-label="Search the library" />
@@ -95,7 +91,6 @@
       <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></symbol>
       <symbol id="i-keyboard" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01"/><path d="M10 8h.01"/><path d="M14 8h.01"/><path d="M18 8h.01"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/><path d="M7 16h10"/></symbol>
       <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
-      <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M21 4h-7"/><path d="M10 4H3"/><path d="M21 12h-9"/><path d="M8 12H3"/><path d="M21 20h-5"/><path d="M12 20H3"/><path d="M14 2v4"/><path d="M8 10v4"/><path d="M16 18v4"/></symbol>
     </svg>
 
     <!-- The reading chrome: the top bar and (while reading) the bottom bar come
@@ -108,7 +103,7 @@
       <div id="topbar-title" class="reader-only"><span id="topbar-book"></span><span id="topbar-author"></span></div>
       <div class="bar-end">
         <button id="bookmark-button" class="icon reader-only" title="Bookmark this page (B)" aria-label="Bookmark"><svg class="icon" aria-hidden="true"><use href="#i-bookmark"/></svg></button>
-        <button id="settings-button" class="on-bottom" title="Settings (S)" aria-label="Settings"><span class="reader-only aa">Aa</span><span class="library-only"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span></button>
+        <button id="settings-button" class="on-bottom" title="Appearance (S)" aria-label="Appearance"><span class="aa">Aa</span></button>
         <button id="flow-button" class="icon reader-only on-bottom" title="Paginated / scrolled (M)"></button>
         <button id="more-button" class="icon on-bottom" title="More" aria-label="More" aria-haspopup="menu"><svg class="icon" aria-hidden="true"><use href="#i-ellipsis"/></svg></button>
       </div>

@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { FORMAT_LABELS, fetchSources, inLibrary, preferredFile, type CatalogBook, type CatalogEntry, type Feed, type Source } from './catalog'
 import { el } from 'reader-core'
+import { icon } from './icons'
 
 /** A page the reader went to, kept so Back shows it again without a refetch. */
 interface Page {
@@ -136,8 +137,7 @@ export function createCatalogView(deps: CatalogViewDeps) {
     const cover = el('div', { className: 'cover' })
     if (book.cover) loadCover(cover, book.cover)
     const action = el('button', { className: 'download' })
-    const actionLabel = (text: string) =>
-      action.replaceChildren(el('span', { innerHTML: '<svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>' }), text)
+    const actionLabel = (text: string) => action.replaceChildren(icon('download'), text)
     // Only a hint (same title and author): downloading checks the content.
     const known = inLibrary(book, deps.library())
     if (file) {

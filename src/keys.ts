@@ -26,11 +26,13 @@ type Key = Pick<KeyboardEvent, 'key' | 'shiftKey' | 'ctrlKey' | 'altKey' | 'meta
 const BY_POSITION: Record<string, string> = { Comma: ',', Equal: '=', Minus: '-' }
 
 /**
- * The key as the shortcuts name it: letters and the few punctuation keys by
- * their place on the keyboard (T is T in a Ukrainian layout too), letters in
- * lower case; other keys (arrows, Space, F11, numpad +) by what they are.
+ * The key as the shortcuts name it: what it types when that is Latin (so
+ * AZERTY's or QWERTZ's letters stay theirs), else its place on a US keyboard
+ * (T is T in a Ukrainian layout too); letters in lower case; other keys
+ * (arrows, Space, F11, numpad +) by what they are.
  */
 function shortcutKey(e: Key) {
+  if (/^[\x20-\x7e]$/.test(e.key)) return e.key.toLowerCase()
   const code = e.code ?? ''
   if (code.startsWith('Key')) return code.slice(3).toLowerCase()
   if (code in BY_POSITION) return BY_POSITION[code]
