@@ -1,0 +1,48 @@
+# Shared CI setup: Node.js, the Rust toolchain with its targets, optionally
+# Java for Gradle builds, and the npm dependencies. Keeps the three
+# workflows (android.yml, windows.yml, release.yml) from drifting apart.
+name: Setup build tools
+description: Installs Node.js and Rust (with targets), optionally Java 17, and runs npm ci.
+inputs:
+  targets:
+    description: Rust targets for dtolnay/rust-toolchain, comma-separated.
+    required: true
+  cache-key:
+    description: Cache key for Swatinem/rust-cache; empty skips caching.
+    required: false
+    default: ''
+  java:
+    description: Install Java 17 and point NDK_HOME at the runner's NDK (Android builds).
+    required: false
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 24
+        cache: npm
+
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ inputs.targets }}
+
+    - uses: Swatinem/rust-cache@v2
+      if: inputs.cache-key != ''
+      with:
+        workspaces: src-tauri
+        key: ${{ inputs.cache-key }}
+
+    - uses: actions/setup-java@v6
+      if: inputs.java == 'true'
+      with:
+        distribution: temurin
+        java-version: 17
+        cache: gradle
+
+    - run: echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+      if: inputs.java == 'true'
+      shell: bash
+
+    - run: npm ci
+      shell: bash
