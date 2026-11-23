@@ -10,7 +10,6 @@ use crate::windows::{show_book, ReaderWindows};
 use crate::CmdResult;
 use serde::Serialize;
 use serde_json::{Map, Value};
-use std::collections::HashMap;
 use tauri::{Emitter, Manager, State, Window, ipc::Response};
 
 #[derive(Serialize)]
@@ -138,20 +137,16 @@ pub(crate) fn recent_books(store: State<Store>, library: State<LibraryBooks>) ->
         let fraction = |r: &RecentBook| s.positions.get(&r.fingerprint).map(|p| p.fraction);
         s.recent.iter().map(|r| (r.clone(), fraction(r))).collect::<Vec<_>>()
     });
-    // The library's covers, by the books' content (a history entry may lie anywhere).
-    let covers: HashMap<String, String> = library_root(&store)
-        .map(|root| library.snapshot(&store, &root))
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|e| e.cover.is_some())
-        .map(|e| (e.fingerprint, e.path))
-        .collect();
-    // Checked outside the store lock: a slow drive shouldn't hold up other windows.
+    // The library's covers, by the books' content (a history entry may lie anywhere):
+    // from the scan, or from the disk cache before the first scan in the run.
+    let covers = library_root(&store).map(|root| library.covers(&store, &root)).unwrap_or_default();
+    // `exists` trusts the last scan; anything else is checked on disk, outside
+    // the store lock: a slow drive shouldn't hold up other windows.
     books
         .into_iter()
         .map(|(r, fraction)| RecentView {
             file_name: paths::file_name(&r.path),
-            exists: r.path.is_file(),
+            exists: library.is_present(&r.fingerprint, &r.path) || r.path.is_file(),
             cover_key: covers.get(&r.fingerprint).cloned(),
             key: r.fingerprint,
             title: r.title,
