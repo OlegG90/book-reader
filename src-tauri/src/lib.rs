@@ -129,6 +129,10 @@ pub fn run() {
             WindowEvent::CloseRequested { .. } => {
                 let _ = windows::remember_geometry(window);
             }
+            #[cfg(desktop)]
+            WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+                let _ = windows::remember_geometry_throttled(window);
+            }
             WindowEvent::Destroyed => {
                 window.state::<windows::ReaderWindows>().remove(window.label());
             }

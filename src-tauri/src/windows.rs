@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+#[cfg(desktop)]
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, Window};
 
 #[cfg(desktop)]
@@ -228,6 +230,20 @@ fn theme_script(theme: Option<&str>) -> String {
 fn is_on_screen(window: &tauri::WebviewWindow) -> tauri::Result<bool> {
     let pos = window.outer_position()?;
     Ok(window.monitor_from_point(pos.x.into(), pos.y.into())?.is_some())
+}
+
+/// Saves the geometry at most every few seconds while the window moves or
+/// resizes (those events fire continuously); a close always saves.
+#[cfg(desktop)]
+pub(crate) fn remember_geometry_throttled(window: &Window) -> tauri::Result<()> {
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    const EVERY: Duration = Duration::from_secs(2);
+    let due = LAST.lock().unwrap().is_none_or(|at| at.elapsed() >= EVERY);
+    if !due {
+        return Ok(());
+    }
+    *LAST.lock().unwrap() = Some(Instant::now());
+    remember_geometry(window)
 }
 
 #[cfg(desktop)]
