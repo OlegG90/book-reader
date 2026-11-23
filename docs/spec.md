@@ -154,7 +154,7 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 - **Native pieces** (All files access, credential stores, keep-screen-on, volume keys) via small app-level Tauri plugins in Kotlin (`SystemPlugin.kt`) called from Rust (`platform_android.rs`).
 - **One crate for both platforms:** `src-tauri` builds the Windows exe and the Android library; desktop-only parts (file associations, the console, single-instance, the command line, window placement) are behind `cfg(desktop)` / `cfg(windows)`.
 - **Build:** Windows locally, `npm run build:win` → portable `breader.exe`. Android in GitHub Actions only (workflow *Android*): the Android SDK and NDK have no Windows-on-ARM64 builds. Each push that touches the app builds an arm64 release APK (an artifact), signed with a personal release key kept in the repository's secrets (`ANDROID_KEYSTORE`, `ANDROID_KEYSTORE_PASSWORD`; alias `book-reader`, one password for the store and the key; a backup copy lives outside the repo; without the secrets the build fails), so a new APK installs over the previous one with `adb install -r`. The Gradle project (`src-tauri/gen/android`) was made by `tauri android init` and is kept in the repo, changed by hand from there.
-- **Version control:** private GitHub repository `OlegG90/book-reader`.
+- **Version control:** GitHub repository `OlegG90/book-reader`.
 
 ## Testing
 
