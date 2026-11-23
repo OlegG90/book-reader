@@ -62,7 +62,7 @@ Inherited from Simple Reader unless noted:
 ### Library screen
 
 - **Continue reading** and **Library** are separate pages. Continue reading shows the last books read (1–5, a setting; 3 by default; the app remembers the last 10) as cover cards; the library opens on it when there is a history, else on the books. A book there opens at its saved place, without a question.
-- Library: a grid of books with covers and how far each is read as a line under the cover (`New`, `NN%`, `Finished`); search (title, author, series); sort by author (series in reading order), title or recently added; a switch by reading status with counts: all, not started, reading, finished (98% or more, since books often end in notes).
+- Library: a grid of books with covers and how far each is read as a line under the cover (`New`, `NN%`, `Finished`); a book in a series shows the series and its number in it, and a long series name is cut short so the number always shows; search (title, author, series); sort by author (series in reading order), title or recently added; a switch by reading status with counts: all, not started, reading, finished (98% or more, since books often end in notes).
 - Opening a book from Library: a book already started asks first — **Continue · NN%** or **Start from the beginning** (the saved position stays until reading on saves a new one; a window already showing the book reads it again from the start). A new book just opens.
 - A book's menu (right click on Windows, long press on the phone) has the same choices plus **Delete from library…**, which asks first: on Windows the file goes to the Recycle Bin, on the phone it is deleted. The reading position and bookmarks stay (they belong to the book's content), so the book picks up where it was if it comes back; Continue reading forgets it.
 - **Series**: a page listing the library's series as cover cards (the first book's cover, how many books, how many of them finished, with a line for that); a series opens to its books in reading order, with a breadcrumb back to the list. Books without a series aren't there.
@@ -103,7 +103,7 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 
 ### Sources
 
-- A list of OPDS sources, kept in **Settings → Catalogs**: name, server address, user name, password. Expected: CWA as the main library, the Calibre Content Server as a secondary one.
+- A list of OPDS sources, kept in **Settings → Catalogs**: name, server address, user name, password. Each catalog is a row like the other settings: its name and address, then **Edit** and **Remove**. Expected: CWA as the main library, the Calibre Content Server as a secondary one.
 - The reader types the **server's address** (`http://host:8083`); saving finds the OPDS catalog behind it (the address itself, else `/opds`, where CWA, Calibre-Web and the Calibre Content Server keep it) and keeps that address. A refused login is reported on saving.
 - One source is marked as the **progress-sync source** (KOSync; in practice CWA).
 - Authentication: HTTP Basic sent with the first request (what CWA expects), Digest when the server answers with a Digest challenge (the Calibre Content Server).

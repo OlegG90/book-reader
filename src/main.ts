@@ -584,6 +584,15 @@ function renderLibrary() {
   if (view === 'series') seriesView.show()
 }
 
+/** A card's series line: the number in the series always shows, a long name is cut short before it. */
+function seriesLine(book: LibraryBook) {
+  const line = el('span', { className: 'series' })
+  if (!book.series) return line
+  line.append(el('span', { className: 'series-name', textContent: book.series }))
+  if (book.seriesIndex) line.append(el('span', { className: 'series-index', textContent: `#${book.seriesIndex}` }))
+  return line
+}
+
 function bookCard(book: LibraryBook) {
   const status = statusOf(book)
   const progress =
@@ -612,7 +621,7 @@ function bookCard(book: LibraryBook) {
     coverWithProgress(book.title, book.hasCover ? book.key : null, book.fraction),
     el('span', { className: 'title', textContent: book.title }),
     el('span', { className: 'author', textContent: book.authors.join(', ') }),
-    el('span', { className: 'series', textContent: seriesLabel(book) }),
+    seriesLine(book),
     el('span', { className: 'meta', textContent: [book.format, progress].filter(Boolean).join(' · ') }),
   )
   onLongPress(button, at => showMenu(at, withDelete))
