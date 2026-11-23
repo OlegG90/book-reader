@@ -1,5 +1,4 @@
-import { addPluginListener, invoke } from '@tauri-apps/api/core'
-import { onBackButtonPress } from '@tauri-apps/api/app'
+import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import {
@@ -49,6 +48,7 @@ import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
 import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
 import { HISTORY_LENGTHS, UI_FONTS, createAppearancePanel, createSettingsPage, type PanelValues, type SettingsSection } from './settings-panel'
+import { deleteFileNote, initBackButton, initIncoming, initVolumeKeys, setReading } from './platform'
 
 interface Position {
   cfi: string
@@ -107,9 +107,6 @@ const TOP_EDGE_PX = 48
 const BOTTOM_EDGE_PX = 56
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
-// Hides what only the other platform does (`.desktop-only`, `.android-only` in style.css).
-const isAndroid = /Android/.test(navigator.userAgent)
-document.documentElement.classList.toggle('android', isAndroid)
 const appWindow = getCurrentWindow()
 const topbar = $('topbar')
 
@@ -227,13 +224,8 @@ async function openCurrentBook() {
     return []
   })
   renderBookmarks()
-  setReading(true)
+  setReading(true, settings.volumeKeys)
   void pullSync()
-}
-
-/** Android, while a book is open: screen on, status bar hidden, volume keys (if set) turn pages. */
-function setReading(on: boolean) {
-  if (isAndroid) void invoke('set_reading', { on, volumeKeys: settings.volumeKeys }).catch(console.error)
 }
 
 // ---- Progress sync ----------------------------------------------------------
@@ -411,7 +403,7 @@ async function addToLibrary(mode: AddMode) {
 }
 
 function closeBook() {
-  if (book) setReading(false)
+  if (book) setReading(false, settings.volumeKeys)
   void pushSync()
   syncDocument = null
   syncDirty = false
@@ -639,7 +631,7 @@ function menuPlace(e: MouseEvent, button: HTMLElement) {
 async function deleteBook(book: LibraryBook) {
   const ok = await confirmDialog({
     title: `Delete “${book.title}” from the library?`,
-    text: `${isAndroid ? 'The file is deleted from the phone.' : 'The file goes to the Recycle Bin.'} Its reading position and bookmarks are kept, should it come back.`,
+    text: `${deleteFileNote()} Its reading position and bookmarks are kept, should it come back.`,
     confirm: 'Delete',
   })
   if (!ok) return
@@ -1150,7 +1142,7 @@ function applySettings(changes: Partial<Settings>) {
     book.flow = settings.flow
     updateFlowButton()
   }
-  if ('volumeKeys' in changes) setReading(!!book)
+  if ('volumeKeys' in changes) setReading(!!book, settings.volumeKeys)
   if ('historyLength' in changes && !book) void refreshRecent()
   if ('uiFont' in changes) applyTheme()
 }
@@ -1365,17 +1357,12 @@ $('progress-track').addEventListener('pointercancel', () => {
 })
 
 appWindow.listen('book-changed', () => openCurrentBook())
-// Listening takes Back over from Android, which would otherwise leave the app on every press.
-if (isAndroid) {
-  void onBackButtonPress(handleBack).catch(console.error)
-  // A book handed over by "Open with" or "Share", at startup or later.
-  const openIncoming = () => void invoke('open_incoming').catch(e => showError(undefined, e))
-  openIncoming()
-  void addPluginListener('system', 'incoming', openIncoming).catch(console.error)
-  void addPluginListener<{ direction: 'next' | 'prev' }>('system', 'volumeKey', ({ direction }) => {
-    if (book) void runCommand(direction)
-  }).catch(console.error)
-}
+initBackButton(handleBack)
+// A book handed over by "Open with" or "Share", at startup or later.
+initIncoming(() => void invoke('open_incoming').catch(e => showError(undefined, e)))
+initVolumeKeys(direction => {
+  if (book) void runCommand(direction)
+})
 // Another window changed a setting: apply it here too (it is already saved).
 appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
   const valid = readSettings({ ...settings, ...payload })
