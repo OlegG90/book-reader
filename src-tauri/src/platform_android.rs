@@ -9,7 +9,7 @@
 //! - catalog passwords, encrypted with a key in the Android Keystore;
 //! - reading: screen on, status bar hidden, volume keys.
 
-use crate::Outside;
+use crate::system_cmds::Outside;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
