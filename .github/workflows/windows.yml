@@ -24,21 +24,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup
         with:
           targets: x86_64-pc-windows-msvc, aarch64-pc-windows-msvc
+          cache-key: windows
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          key: windows
-
-      - run: npm ci
       - run: npm test
       - run: npm run build:x64
       - run: npm run build:arm64

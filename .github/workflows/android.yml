@@ -24,30 +24,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: 17
-          cache: gradle
-
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup
         with:
           targets: aarch64-linux-android
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          key: android
-
-      # The runner has the SDK and an NDK.
-      - run: echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
-
-      - run: npm ci
+          cache-key: android
+          java: 'true'
 
       # A release build, signed with the personal release key (repository
       # secrets), so each new APK installs over the previous one. An APK signed
