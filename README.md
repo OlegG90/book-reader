@@ -40,6 +40,17 @@ npm run build            # this machine's architecture: src-tauri/target/release
 npm run clean            # remove build outputs (dist, src-tauri/target)
 ```
 
+### Windows builds and releases
+
+GitHub Actions builds `breader.exe` for x64 and ARM64 on every push that touches the app
+([windows.yml](.github/workflows/windows.yml), artifact `book-reader-windows`).
+
+The version lives in `src-tauri/Cargo.toml` (About and `breader --version` show it; Android's
+version code follows it). A release: bump the version on a branch, merge it, then tag `main`
+with `vX.Y.Z` and push the tag; [release.yml](.github/workflows/release.yml) checks the tag
+matches the version and publishes `breader-x64.exe`, `breader-arm64.exe` and the signed
+`book-reader-android.apk` to a GitHub Release.
+
 ### Android
 
 The Android SDK and NDK have no Windows-on-ARM64 builds, so the APK is built in GitHub Actions
