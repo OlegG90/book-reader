@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { fetchSources, type Source } from './catalog'
 import { el } from 'reader-core'
+import { row } from './settings-panel'
 
 /**
  * The Catalogs part of the settings: the OPDS servers, with a form to add or
@@ -26,21 +27,15 @@ export function createSourcesPanel(host: HTMLElement) {
       ...sources.map(source =>
         el(
           'li',
-          { className: 'row' },
-          el(
-            'div',
-            { className: 'row-text' },
+          {},
+          row(
             el(
               'span',
-              { className: 'row-label' },
+              {},
               source.name,
               source.sync ? el('span', { className: 'badge', textContent: 'sync', title: 'Syncs reading progress' }) : '',
             ),
-            el('span', { className: 'hint', textContent: source.url }),
-          ),
-          el(
-            'div',
-            { className: 'row-controls' },
+            source.url,
             el('button', { type: 'button', textContent: 'Edit', onclick: () => edit(source) }),
             el('button', { type: 'button', textContent: 'Remove', onclick: () => void remove(source) }),
           ),

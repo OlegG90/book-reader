@@ -137,12 +137,13 @@ export function createAppearancePanel(
 }
 
 /** A settings row's parts: what it is (and a hint: text, or an element the page updates) on the left, its controls on the right. */
-function rowParts(label: string, hint: string | HTMLElement, controls: HTMLElement[]) {
+function rowParts(label: string | Node, hint: string | HTMLElement, controls: HTMLElement[]) {
   const hintEl = typeof hint === 'string' ? el('span', { className: 'hint', textContent: hint }) : hint
-  return [el('div', { className: 'row-text' }, el('span', { className: 'row-label', textContent: label }), hintEl), el('div', { className: 'row-controls' }, ...controls)]
+  return [el('div', { className: 'row-text' }, el('span', { className: 'row-label' }, label), hintEl), el('div', { className: 'row-controls' }, ...controls)]
 }
 
-function row(label: string, hint: string | HTMLElement, ...controls: HTMLElement[]) {
+/** A settings row: what it is and a hint on the left, its controls on the right. */
+export function row(label: string | Node, hint: string | HTMLElement, ...controls: HTMLElement[]) {
   return el('div', { className: 'row' }, ...rowParts(label, hint, controls))
 }
 

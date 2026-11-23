@@ -343,10 +343,6 @@ body.library-mode .reader-only {
   margin: var(--space-3) 0;
 }
 
-#settings .add-source button {
-  border-color: var(--line);
-}
-
 #settings .badge {
   margin-inline-start: 6px;
   padding: 0 6px;
@@ -1428,6 +1424,7 @@ button:hover {
 
 #settings .row-label {
   font-size: 14px;
+  overflow-wrap: anywhere;
 }
 
 #settings .hint {
@@ -1442,7 +1439,8 @@ button:hover {
   flex: none;
 }
 
-#settings .row-controls button {
+#settings .row-controls button,
+#settings .add-source button {
   border-color: var(--line);
 }
 
