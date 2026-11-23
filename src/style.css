@@ -1682,7 +1682,7 @@ body.library-mode #topbar {
   bottom: 0;
   z-index: 15;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   padding: 6px 8px calc(6px + var(--safe-bottom));
   background: var(--bg);
   border-top: 1px solid var(--line);
@@ -1831,4 +1831,68 @@ body.library-mode #topbar {
 
 #catalog-list .download:hover {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* A small menu at a book (open: continue / from the beginning; delete) */
+.popup-menu {
+  position: fixed;
+  z-index: 40;
+  display: grid;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+.popup-menu button {
+  text-align: left;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 14px;
+}
+
+.popup-menu .danger,
+dialog.confirm .danger {
+  color: #c0392b;
+}
+
+:root[data-theme='dark'] :is(.popup-menu, dialog.confirm) .danger {
+  color: #ff7b72;
+}
+
+dialog.confirm .danger {
+  border-color: currentColor;
+}
+
+/* Asking before a delete */
+dialog.confirm {
+  width: min(440px, calc(100vw - 32px));
+  padding: 20px 24px;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+dialog.confirm::backdrop {
+  background: color-mix(in srgb, #2d2b2b 30%, transparent);
+}
+
+dialog.confirm h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+dialog.confirm .buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin: 16px 0 0;
+}
+
+dialog.confirm button {
+  border-color: var(--line);
 }

@@ -18,6 +18,7 @@
         <ul>
           <li><button type="button" class="side-item" data-nav="recent"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg><span>Continue reading</span></button></li>
           <li><button type="button" class="side-item" data-nav="library"><svg class="icon" aria-hidden="true"><use href="#i-library"/></svg><span>Library</span></button></li>
+          <li><button type="button" class="side-item" data-nav="series"><svg class="icon" aria-hidden="true"><use href="#i-layers"/></svg><span>Series</span></button></li>
           <li><button type="button" class="side-item" data-nav="catalogs"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>Catalogs</span></button></li>
         </ul>
         <h3><button type="button" class="section-head" aria-expanded="false" aria-controls="settings-nav" title="Settings (Ctrl+,)"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span><svg class="icon" aria-hidden="true"><use href="#i-chevron"/></svg></button></h3>
@@ -34,6 +35,7 @@
       <nav id="bottom-nav" class="android-only" aria-label="Library, catalogs and settings">
         <button type="button" data-nav="recent"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg><span>Reading</span></button>
         <button type="button" data-nav="library"><svg class="icon" aria-hidden="true"><use href="#i-library"/></svg><span>Library</span></button>
+        <button type="button" data-nav="series"><svg class="icon" aria-hidden="true"><use href="#i-layers"/></svg><span>Series</span></button>
         <button type="button" data-nav="catalogs"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>Catalogs</span></button>
         <button type="button" data-nav="settings:reading" data-nav-group="settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></button>
       </nav>
@@ -58,6 +60,13 @@
           <p id="recent-empty" class="muted" hidden>No books read yet. Open one from the library.</p>
           <p id="library-message" class="muted" hidden></p>
           <ul id="library-books" class="book-grid" aria-label="Books"></ul>
+        </div>
+        <!-- The library's series: their list, or one series' books in order -->
+        <div id="series-view" hidden>
+          <nav id="series-crumbs" class="crumbs" aria-label="Series"></nav>
+          <p id="series-empty" class="muted" hidden>No series in the library: books show here when their metadata names one.</p>
+          <ul id="series-list" class="book-grid" aria-label="Series"></ul>
+          <ul id="series-books" class="book-grid" aria-label="The series' books"></ul>
         </div>
         <div id="catalog-view" hidden>
           <div class="library-bar">
@@ -86,6 +95,7 @@
       <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
       <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
       <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></symbol>
       <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
       <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></symbol>
       <symbol id="i-keyboard" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01"/><path d="M10 8h.01"/><path d="M14 8h.01"/><path d="M18 8h.01"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/><path d="M7 16h10"/></symbol>

@@ -47,6 +47,8 @@ tauri-plugin-single-instance = "2.4.5"
 tauri-plugin-dialog = "2.7.3"
 # Catalog passwords live in the OS credential store (the Windows Credential Manager...).
 keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }
+# A book deleted from the library goes to the Recycle Bin.
+trash = "5"
 
 [dev-dependencies]
 tempfile = "3"

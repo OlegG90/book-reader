@@ -34,7 +34,7 @@ use cli::Launch;
 use clock::now_ms;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -170,10 +170,12 @@ enum Offer {
 }
 
 #[tauri::command(async)]
-fn current_book(window: Window, windows: State<ReaderWindows>, store: State<Store>) -> Result<Option<BookInfo>, String> {
+fn current_book(window: Window, windows: State<ReaderWindows>, store: State<Store>, start_over: State<StartOver>) -> Result<Option<BookInfo>, String> {
     let Launch { file: Some(path), no_save } = windows.get(window.label()) else {
         return Ok(None);
     };
+    // "From the beginning" in the library: this time without the saved position.
+    let from_start = start_over.0.lock().unwrap().remove(&path);
     let file_name = paths::file_name(&path);
     let fingerprint = fingerprint::fingerprint(&path).map_err(|e| format!("{file_name}: {e}"))?;
     let (position, offer) = store.read(|s| {
@@ -183,7 +185,7 @@ fn current_book(window: Window, windows: State<ReaderWindows>, store: State<Stor
             Some(root) if !paths::is_inside(root, &path) && !s.declined.contains(&fingerprint) => Some(Offer::Add),
             Some(_) => None,
         };
-        (s.positions.get(&fingerprint).cloned(), offer)
+        (s.positions.get(&fingerprint).cloned().filter(|_| !from_start), offer)
     });
     Ok(Some(BookInfo { file_name, fingerprint, position, no_save, offer }))
 }
@@ -532,8 +534,38 @@ fn library_cover(store: State<Store>, books: State<LibraryBooks>, key: String) -
 
 /// Opens a library book: in a window of its own, or on a phone in its one window.
 #[tauri::command(async)]
-fn open_library_book(window: Window, store: State<Store>, books: State<LibraryBooks>, key: String) -> Result<(), String> {
-    show_book(&window, books.path_of(&store, &key)?);
+fn open_library_book(
+    window: Window,
+    store: State<Store>,
+    books: State<LibraryBooks>,
+    start_over: State<StartOver>,
+    key: String,
+    from_start: Option<bool>,
+) -> Result<(), String> {
+    let path = books.path_of(&store, &key)?;
+    if from_start == Some(true) {
+        start_over.0.lock().unwrap().insert(path.clone());
+    }
+    show_book(&window, path);
+    Ok(())
+}
+
+/// Books to open from the beginning, by path, until their window reads them
+/// (the position stays saved; reading on saves the new one).
+#[derive(Default)]
+struct StartOver(Mutex<HashSet<PathBuf>>);
+
+/// Deletes a book from the library: the file goes to the Recycle Bin (a phone
+/// deletes it). Its reading position and bookmarks stay, by its content, so
+/// the book picks up where it was if it comes back; the history forgets it.
+#[tauri::command(async)]
+fn delete_library_book(app: AppHandle, store: State<Store>, books: State<LibraryBooks>, key: String) -> Result<(), String> {
+    let entry = books.entry(&key)?;
+    let path = books.path_of(&store, &key)?;
+    platform::delete_book(&path).map_err(|e| format!("{}: {e}", paths::file_name(&path)))?;
+    books.0.lock().unwrap().retain(|b| b.path != key);
+    store.update(|s| s.recent.retain(|r| r.fingerprint != entry.fingerprint)).map_err(|e| e.to_string())?;
+    let _ = app.emit("library-updated", ());
     Ok(())
 }
 
@@ -1098,6 +1130,7 @@ pub fn run() {
         .manage(LibraryBooks::default())
         .manage(SearchTemplates::default())
         .manage(Originals::default())
+        .manage(StartOver::default())
         .invoke_handler(tauri::generate_handler![
             current_book,
             read_book,
@@ -1114,6 +1147,7 @@ pub fn run() {
             file_types_registered,
             app_version,
             open_incoming,
+            delete_library_book,
             set_reading,
             pick_book,
             library_info,

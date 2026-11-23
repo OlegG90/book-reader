@@ -2,7 +2,7 @@
 
 use crate::{data_dir, Outside};
 use tauri_plugin_dialog::{DialogExt, FileDialogBuilder};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Builder, Manager, Window, Wry};
 
 /// File dialogs (books, the library folder).
@@ -42,6 +42,11 @@ pub fn take_incoming() -> Result<Option<Outside>, String> {
 /// Desktop books are moved as files, so there is no original to delete.
 pub fn delete_original(_original: &str) -> bool {
     false
+}
+
+/// Deletes a book file from the library: to the Recycle Bin, so it can come back.
+pub fn delete_book(path: &Path) -> Result<(), String> {
+    trash::delete(path).map_err(|e| e.to_string())
 }
 
 /// The desktop has no screen timeout, status bar or volume keys to manage while reading.
