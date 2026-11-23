@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filterBooks, seriesLabel, sortBooks, statusOf, type LibraryBook } from './library'
+import { filterBooks, groupSeries, seriesLabel, sortBooks, statusOf, type LibraryBook } from './library'
 
 const book = (overrides: Partial<LibraryBook>): LibraryBook => ({
   key: overrides.title ?? 'key',
@@ -70,4 +70,21 @@ it('labels series with their number', () => {
   expect(seriesLabel(book({ series: 'Discworld', seriesIndex: '3' }))).toBe('Discworld #3')
   expect(seriesLabel(book({ series: 'Discworld' }))).toBe('Discworld')
   expect(seriesLabel(book({}))).toBe('')
+})
+
+describe('groupSeries', () => {
+  it('gathers each series in reading order and counts the books finished', () => {
+    const books = [
+      book({ title: 'Small Gods', series: 'Discworld', seriesIndex: '13', fraction: 1 }),
+      book({ title: 'The Colour of Magic', series: 'Discworld', seriesIndex: '1' }),
+      book({ title: 'Mort', series: 'Discworld', seriesIndex: '4', fraction: 0.3 }),
+      book({ title: 'Dune', series: 'Dune', seriesIndex: '1', fraction: 1 }),
+      book({ title: 'Solaris' }),
+    ]
+    const groups = groupSeries(books)
+    expect(groups.map(g => g.name)).toEqual(['Discworld', 'Dune'])
+    expect(titles(groups[0].books)).toEqual(['The Colour of Magic', 'Mort', 'Small Gods'])
+    expect(groups[0].read).toBe(1)
+    expect(groups[1].read).toBe(1)
+  })
 })

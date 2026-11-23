@@ -42,6 +42,8 @@ import {
   type Status,
 } from './library'
 import { createCatalogView } from './catalog-view'
+import { createSeriesView } from './series-view'
+import { closePopup, confirmDialog, onLongPress, showMenu, type MenuItem } from './book-menu'
 import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
@@ -579,17 +581,33 @@ function renderLibrary() {
     showLibraryMessage(shown.length ? '' : 'No books match.')
   }
   $('library-books').replaceChildren(...shown.map(bookCard))
+  if (view === 'series') seriesView.show()
 }
 
 function bookCard(book: LibraryBook) {
   const status = statusOf(book)
   const progress =
     status === 'finished' ? 'Finished' : status === 'reading' ? percent(book.fraction ?? 0) : 'New'
+  const open = (fromStart = false) =>
+    void invoke('open_library_book', { key: book.key, fromStart }).catch(e => showError(book.title, e))
+  // A book read before: continue where it was, or start over (asked); a new one just opens.
+  const choices: MenuItem[] =
+    status === 'new'
+      ? [{ label: 'Open', action: () => open() }]
+      : [
+          { label: `Continue · ${percent(book.fraction ?? 0)}`, action: () => open() },
+          { label: 'Start from the beginning', action: () => open(true) },
+        ]
+  const withDelete = [...choices, { label: 'Delete from library…', danger: true, action: () => void deleteBook(book) }]
   const button = el(
     'button',
     {
       title: [book.title, book.authors.join(', '), seriesLabel(book)].filter(Boolean).join('\n'),
-      onclick: () => void invoke('open_library_book', { key: book.key }).catch(e => showError(book.title, e)),
+      onclick: (e: MouseEvent) => (status === 'new' ? open() : showMenu(menuPlace(e, button), choices)),
+      oncontextmenu: (e: MouseEvent) => {
+        e.preventDefault()
+        showMenu({ x: e.clientX, y: e.clientY }, withDelete)
+      },
     },
     coverWithProgress(book.title, book.hasCover ? book.key : null, book.fraction),
     el('span', { className: 'title', textContent: book.title }),
@@ -597,7 +615,27 @@ function bookCard(book: LibraryBook) {
     el('span', { className: 'series', textContent: seriesLabel(book) }),
     el('span', { className: 'meta', textContent: [book.format, progress].filter(Boolean).join(' · ') }),
   )
+  onLongPress(button, at => showMenu(at, withDelete))
   return el('li', {}, button)
+}
+
+/** Where a menu opened by a click shows: at the mouse, or under the button for a key press. */
+function menuPlace(e: MouseEvent, button: HTMLElement) {
+  if (e.detail) return { x: e.clientX, y: e.clientY }
+  const rect = button.getBoundingClientRect()
+  return { x: rect.left, y: rect.bottom }
+}
+
+/** Deletes a book from the library, after asking: the file goes to the Recycle Bin (a phone deletes it). */
+async function deleteBook(book: LibraryBook) {
+  const ok = await confirmDialog({
+    title: `Delete “${book.title}” from the library?`,
+    text: `${isAndroid ? 'The file is deleted from the phone.' : 'The file goes to the Recycle Bin.'} Its reading position and bookmarks are kept, should it come back.`,
+    confirm: 'Delete',
+  })
+  if (!ok) return
+  // The library redraws on "library-updated".
+  await invoke('delete_library_book', { key: book.key }).catch(e => showError(book.title, e))
 }
 
 /** Cover images by book key, kept for the window's life so redraws don't reload them. */
@@ -777,6 +815,7 @@ async function runCommand(command: Command) {
 
 /** Closes the footnote, or else any open panel; false when there was none. */
 function closeTopLayer() {
+  if (closePopup()) return true
   if (book?.footnoteOpen) book.hideFootnote()
   else if (tocOpen() || organizeOpen() || settingsOpen() || scrimlessOpen()) closePanels()
   else return false
@@ -795,6 +834,7 @@ async function handleEscape() {
 function stepBackInLibrary() {
   if (book || !settingsEmbedded()) return false
   if (view === 'catalogs' && catalogView.back()) return true
+  if (view === 'series' && seriesView.back()) return true
   if (view === 'recent' || view === 'library') return false
   showView(homeView())
   return true
@@ -975,12 +1015,18 @@ function showSettings() {
   settingsPage.show(settings)
   appearancePanel.show(settings, book?.flow)
 }
+const seriesView = createSeriesView({
+  library: () => libraryBooks,
+  bookCard,
+  cover: coverWithProgress,
+  scrollTop: () => ($('start-main').scrollTop = 0),
+})
 const catalogView = createCatalogView({ library: () => libraryBooks, openSettings: () => openSettings('catalogs') })
 
 // ---- The library's navigation (the desktop's pane, the phone's bottom bar) ----------
 
 /** What the library window shows: the reading history, the books, the catalogs, or a settings section. */
-type View = 'recent' | 'library' | 'catalogs' | `settings:${SettingsSection}`
+type View = 'recent' | 'library' | 'series' | 'catalogs' | `settings:${SettingsSection}`
 /** Unset until the library first shows: then the history if there is one, else the books. */
 let view: View | null = null
 /** The pane's and the bottom bar's items; the pane's Settings heading. */
@@ -1020,7 +1066,7 @@ function showView(to: View) {
     if (!wasSettings) void refreshFileTypesStatus()
     foldSettingsNav(false)
   } else if (libraryReady) {
-    showTab(to === 'catalogs' ? 'catalogs' : 'books')
+    showTab(to === 'catalogs' || to === 'series' ? to : 'books')
     // The history and the books are separate pages here (the phone shows both on one).
     $('books-view').dataset.show = to === 'recent' ? 'recent' : 'all'
   }
@@ -1037,11 +1083,13 @@ function foldSettingsNav(fold: boolean) {
   settingsHead.setAttribute('aria-expanded', String(!fold))
 }
 
-/** The library's two parts: the books on disk, and the catalogs to get more from. */
-function showTab(tab: 'books' | 'catalogs') {
+/** The library's parts: the books on disk, their series, and the catalogs to get more from. */
+function showTab(tab: 'books' | 'series' | 'catalogs') {
   $('books-view').hidden = tab !== 'books'
+  $('series-view').hidden = tab !== 'series'
   $('catalog-view').hidden = tab !== 'catalogs'
   if (tab === 'catalogs') void catalogView.show()
+  if (tab === 'series') seriesView.show()
 }
 
 const resolvedTheme = (): ResolvedTheme =>

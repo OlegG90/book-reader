@@ -79,6 +79,11 @@ impl ReaderWindows {
         self.0.lock().unwrap().entry(label.to_string()).or_default().file = Some(path);
     }
 
+    /// Takes the window's "from the beginning" request: it holds for one load.
+    fn take_from_start(&self, label: &str) -> bool {
+        self.0.lock().unwrap().get_mut(label).is_some_and(|w| std::mem::take(&mut w.from_start))
+    }
+
     /// The window, other than `except`, already showing `path`.
     fn showing(&self, path: &Path, except: Option<&str>) -> Option<String> {
         let windows = self.0.lock().unwrap();
@@ -119,33 +124,42 @@ fn focus_showing(app: &AppHandle, path: &Path, except: Option<&str>) -> bool {
     focus_window(app, app.state::<ReaderWindows>().showing(path, except))
 }
 
-/// Shows `path` in `window` and tells its frontend to load it, unless another
-/// window already shows that book; then that window comes forward instead.
-/// The library window stays the library: the book gets a window of its own.
-/// A phone has one window, so there the book opens in it.
-fn show_book(window: &Window, path: PathBuf) {
+/// Shows `path` in `window` and tells its frontend to load it (`from_start`:
+/// at the beginning, not the saved position), unless another window already
+/// shows that book; then that window comes forward instead (and, from the
+/// start, reads it again). The library window stays the library: the book gets
+/// a window of its own. A phone has one window, so there the book opens in it.
+fn show_book(window: &Window, path: PathBuf, from_start: bool) {
     if cfg!(mobile) {
-        return show_here(window, Some(path));
+        return show_here(window, Some(path), from_start);
     }
-    let current = window.state::<ReaderWindows>().get(window.label());
+    let windows = window.state::<ReaderWindows>();
+    let current = windows.get(window.label());
+    if let Some(label) = windows.showing(&path, current.file.is_some().then(|| window.label())) {
+        if from_start {
+            let no_save = windows.get(&label).no_save;
+            windows.insert(&label, Launch { file: Some(path), no_save, from_start });
+            let _ = window.emit_to(label.as_str(), "book-changed", ());
+        }
+        focus_window(window.app_handle(), Some(label));
+        return;
+    }
+    // A `--no-save` library window passes that on to the books it opens.
+    let launch = Launch { file: Some(path), no_save: current.no_save, from_start };
     if current.file.is_none() {
-        // A `--no-save` library window passes that on to the books it opens.
-        let _ = open_or_focus(window.app_handle(), Launch { file: Some(path), no_save: current.no_save });
+        let _ = open_window(window.app_handle(), launch);
         return;
     }
-    if focus_showing(window.app_handle(), &path, Some(window.label())) {
-        return;
-    }
-    window.state::<ReaderWindows>().set_path(window.label(), path);
+    windows.insert(window.label(), launch);
     let _ = window.emit_to(window.label(), "book-changed", ());
 }
 
 /// Shows a book, or the library for `None`, in `window` itself. A phone has
 /// one window, so everything opens there and Back returns to the library.
-fn show_here(window: &Window, file: Option<PathBuf>) {
+fn show_here(window: &Window, file: Option<PathBuf>, from_start: bool) {
     let windows = window.state::<ReaderWindows>();
     let no_save = windows.get(window.label()).no_save;
-    windows.insert(window.label(), Launch { file, no_save });
+    windows.insert(window.label(), Launch { file, no_save, from_start });
     let _ = window.emit_to(window.label(), "book-changed", ());
 }
 
@@ -171,9 +185,11 @@ enum Offer {
 
 #[tauri::command(async)]
 fn current_book(window: Window, windows: State<ReaderWindows>, store: State<Store>) -> Result<Option<BookInfo>, String> {
-    let Launch { file: Some(path), no_save } = windows.get(window.label()) else {
+    let Launch { file: Some(path), no_save, .. } = windows.get(window.label()) else {
         return Ok(None);
     };
+    // "From the beginning" in the library: this time without the saved position.
+    let from_start = windows.take_from_start(window.label());
     let file_name = paths::file_name(&path);
     let fingerprint = fingerprint::fingerprint(&path).map_err(|e| format!("{file_name}: {e}"))?;
     let (position, offer) = store.read(|s| {
@@ -183,7 +199,7 @@ fn current_book(window: Window, windows: State<ReaderWindows>, store: State<Stor
             Some(root) if !paths::is_inside(root, &path) && !s.declined.contains(&fingerprint) => Some(Offer::Add),
             Some(_) => None,
         };
-        (s.positions.get(&fingerprint).cloned(), offer)
+        (s.positions.get(&fingerprint).cloned().filter(|_| !from_start), offer)
     });
     Ok(Some(BookInfo { file_name, fingerprint, position, no_save, offer }))
 }
@@ -238,7 +254,7 @@ fn remember_book(
     title: String,
     author: String,
 ) -> Result<(), String> {
-    let Launch { file: Some(path), no_save: false } = windows.get(window.label()) else {
+    let Launch { file: Some(path), no_save: false, .. } = windows.get(window.label()) else {
         return Ok(());
     };
     let book = RecentBook { path, title, author, fingerprint };
@@ -302,7 +318,7 @@ fn open_recent(window: Window, store: State<Store>, key: String) -> Result<(), S
     let path = store
         .read(|s| s.recent.iter().find(|r| r.fingerprint == key).map(|r| r.path.clone()))
         .ok_or("That book is no longer in the recent list")?;
-    show_book(&window, path);
+    show_book(&window, path, false);
     Ok(())
 }
 
@@ -376,7 +392,7 @@ fn open_outside(window: &Window, originals: &Originals, book: Outside) {
     if let Some(original) = book.original {
         originals.0.lock().unwrap().insert(book.path.clone(), original);
     }
-    show_book(window, book.path);
+    show_book(window, book.path, false);
 }
 
 /// A book is open (or not): on a phone the screen stays on, the status bar
@@ -418,6 +434,11 @@ impl LibraryBooks {
 
     fn path_of(&self, store: &Store, key: &str) -> Result<PathBuf, String> {
         Ok(self.entry(key)?.absolute(&library_root(store)?))
+    }
+
+    /// Takes a deleted book out of the list.
+    fn forget(&self, key: &str) {
+        self.0.lock().unwrap().retain(|b| b.path != key);
     }
 
     /// The last scan's books; before any scan in this run, the cached ones.
@@ -532,8 +553,30 @@ fn library_cover(store: State<Store>, books: State<LibraryBooks>, key: String) -
 
 /// Opens a library book: in a window of its own, or on a phone in its one window.
 #[tauri::command(async)]
-fn open_library_book(window: Window, store: State<Store>, books: State<LibraryBooks>, key: String) -> Result<(), String> {
-    show_book(&window, books.path_of(&store, &key)?);
+fn open_library_book(
+    window: Window,
+    store: State<Store>,
+    books: State<LibraryBooks>,
+    key: String,
+    from_start: bool,
+) -> Result<(), String> {
+    show_book(&window, books.path_of(&store, &key)?, from_start);
+    Ok(())
+}
+
+/// Deletes a book from the library: the file goes to the Recycle Bin (a phone
+/// deletes it). Its reading position and bookmarks stay, by its content, so
+/// the book picks up where it was if it comes back; the history forgets it.
+#[tauri::command(async)]
+fn delete_library_book(app: AppHandle, store: State<Store>, books: State<LibraryBooks>, key: String) -> Result<(), String> {
+    let entry = books.entry(&key)?;
+    let path = entry.absolute(&library_root(&store)?);
+    platform::delete_book(&path).map_err(|e| format!("{}: {e}", paths::file_name(&path)))?;
+    books.forget(&key);
+    if store.read(|s| s.recent.iter().any(|r| r.fingerprint == entry.fingerprint)) {
+        store.update(|s| s.recent.retain(|r| r.fingerprint != entry.fingerprint)).map_err(|e| e.to_string())?;
+    }
+    let _ = app.emit("library-updated", ());
     Ok(())
 }
 
@@ -960,7 +1003,7 @@ fn organize_apply(app: AppHandle, store: State<Store>, books: State<LibraryBooks
 #[tauri::command(async)]
 fn show_library(window: Window) -> Result<(), String> {
     if cfg!(mobile) {
-        show_here(&window, None);
+        show_here(&window, None, false);
         return Ok(());
     }
     open_or_focus(window.app_handle(), Launch::default()).map_err(|e| e.to_string())
@@ -1114,6 +1157,7 @@ pub fn run() {
             file_types_registered,
             app_version,
             open_incoming,
+            delete_library_book,
             set_reading,
             pick_book,
             library_info,
@@ -1151,7 +1195,7 @@ pub fn run() {
             #[cfg(desktop)]
             WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) => {
                 if let Some(path) = paths.first() {
-                    show_book(window, path.clone());
+                    show_book(window, path.clone(), false);
                 }
             }
             _ => {}

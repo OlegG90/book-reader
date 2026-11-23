@@ -7,6 +7,9 @@ pub struct Launch {
     pub file: Option<PathBuf>,
     /// Don't save the reading position (or the recent list) for this window.
     pub no_save: bool,
+    /// Open the book at its beginning this once, not at the saved position
+    /// ("Start from the beginning" in the library).
+    pub from_start: bool,
 }
 
 /// What the app was asked to do.
@@ -76,7 +79,7 @@ mod tests {
 
     fn open(file: Option<&str>, no_save: bool, data_dir: Option<&str>) -> Command {
         Command::Open {
-            launch: Launch { file: file.map(PathBuf::from), no_save },
+            launch: Launch { file: file.map(PathBuf::from), no_save, from_start: false },
             data_dir: data_dir.map(PathBuf::from),
         }
     }

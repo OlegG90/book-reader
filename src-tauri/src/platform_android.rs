@@ -132,6 +132,12 @@ pub fn delete_original(original: &str) -> bool {
     run::<Deleted>("deleteDocument", json!({ "uri": original })).is_ok_and(|d| d.deleted)
 }
 
+/// Deletes a book file from the library (a phone has no Recycle Bin for it;
+/// the app asked first).
+pub fn delete_book(path: &std::path::Path) -> Result<(), String> {
+    std::fs::remove_file(path).map_err(|e| e.to_string())
+}
+
 // ---- Reading ------------------------------------------------------------------------
 
 /// A book is open (`on`) or closed: the screen stays on, the status bar

@@ -20,6 +20,7 @@
   /* Panels, drawers and pop-ups over the page */
   --panel: #f8f4f4;
   --accent: #b68235;
+  --danger: #c0392b;
   /* The accent as text (darker, to read on the page) */
   --accent-text: #7d5411;
   --link: var(--accent-text);
@@ -60,6 +61,7 @@
   --surface: #3a3838;
   --panel: #363434;
   --accent: #c28d41;
+  --danger: #ff7b72;
   --accent-text: #e1ad66;
   --line: color-mix(in srgb, var(--fg) 14%, transparent);
   --shadow-sm: 0 1px 2px #0000004d;
@@ -703,12 +705,16 @@ button.link:hover {
   border-color: var(--accent);
 }
 
-/* The "more" menu under its button */
+/* The "more" menu under its button; a book's menu (book-menu.ts) looks the same */
 #more-menu {
   position: absolute;
   top: calc(100% + 4px);
   right: 12px;
   z-index: 25;
+}
+
+#more-menu,
+.popup-menu {
   display: grid;
   min-width: 180px;
   padding: 4px;
@@ -718,7 +724,7 @@ button.link:hover {
   box-shadow: var(--shadow);
 }
 
-#more-menu button {
+:is(#more-menu, .popup-menu) button {
   justify-content: space-between;
   text-align: left;
   font-family: var(--font-body);
@@ -1682,7 +1688,7 @@ body.library-mode #topbar {
   bottom: 0;
   z-index: 15;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   padding: 6px 8px calc(6px + var(--safe-bottom));
   background: var(--bg);
   border-top: 1px solid var(--line);
@@ -1831,4 +1837,51 @@ body.library-mode #topbar {
 
 #catalog-list .download:hover {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* A book's menu sits where it was asked for */
+.popup-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 200px;
+}
+
+.popup-menu .danger,
+dialog.confirm .danger {
+  color: var(--danger);
+}
+
+dialog.confirm .danger {
+  border-color: currentColor;
+}
+
+/* Asking before a delete */
+dialog.confirm {
+  width: min(440px, calc(100vw - 32px));
+  padding: 20px 24px;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+dialog.confirm::backdrop {
+  background: color-mix(in srgb, #2d2b2b 30%, transparent);
+}
+
+dialog.confirm h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+dialog.confirm .buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin: 16px 0 0;
+}
+
+dialog.confirm button {
+  border-color: var(--line);
 }

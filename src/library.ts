@@ -89,3 +89,28 @@ export function seriesLabel(book: LibraryBook): string {
   if (!book.series) return ''
   return book.seriesIndex ? `${book.series} #${book.seriesIndex}` : book.series
 }
+
+/** A series in the library: its books in reading order, and how many of them are finished. */
+export interface SeriesGroup {
+  name: string
+  books: LibraryBook[]
+  read: number
+}
+
+/** The library's series by name, each one's books in reading order (books without a series aren't in any). */
+export function groupSeries(books: LibraryBook[]): SeriesGroup[] {
+  const byName = new Map<string, LibraryBook[]>()
+  for (const book of books) {
+    if (!book.series) continue
+    const list = byName.get(book.series)
+    if (list) list.push(book)
+    else byName.set(book.series, [book])
+  }
+  return [...byName]
+    .map(([name, list]) => ({
+      name,
+      books: list.sort((a, b) => seriesNumber(a) - seriesNumber(b) || compareText(a.title, b.title)),
+      read: list.filter(b => statusOf(b) === 'finished').length,
+    }))
+    .sort((a, b) => compareText(a.name, b.name))
+}

@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { FORMAT_LABELS, fetchSources, inLibrary, preferredFile, type CatalogBook, type CatalogEntry, type Feed, type Source } from './catalog'
 import { el } from 'reader-core'
+import { crumbs } from './crumbs'
 import { icon } from './icons'
 
 /** A page the reader went to, kept so Back shows it again without a refetch. */
@@ -108,15 +109,7 @@ export function createCatalogView(deps: CatalogViewDeps) {
     // Where in the catalog: every page on the way, each one a step back to it. The
     // first is the catalog itself, by its current name (also before it answers).
     const titles = pages.length ? pages.map(p => (p.start && source ? source.name : p.title)) : source ? [source.name] : []
-    $('catalog-title').replaceChildren(
-      ...titles.flatMap((title, i) => {
-        const last = i === titles.length - 1
-        const crumb = last
-          ? el('span', { className: 'here', textContent: title, ariaCurrent: 'page' })
-          : el('button', { type: 'button', textContent: title, onclick: () => backTo(i) })
-        return i ? [el('span', { className: 'sep', textContent: '›', ariaHidden: 'true' }), crumb] : [crumb]
-      }),
-    )
+    $('catalog-title').replaceChildren(...crumbs(titles, backTo))
     more.hidden = !page?.next
     list.replaceChildren(...(page?.entries ?? []).map(entryRow))
   }
