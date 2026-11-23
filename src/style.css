@@ -1700,3 +1700,16 @@ button:hover {
 #settings .about p {
   margin: var(--space-3) 0 0;
 }
+
+/* Desktop library window: the history and the books are separate pages */
+:root:not(.android) #books-view[data-show='recent'] :is(.library-bar, #library-message, #library-books) {
+  display: none !important;
+}
+
+:root:not(.android) #books-view[data-show='all'] :is(#recent-title, #recent, #recent-empty) {
+  display: none !important;
+}
+
+.android #recent-empty {
+  display: none;
+}

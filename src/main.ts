@@ -455,18 +455,20 @@ async function showLibraryScreen() {
   $('start').hidden = false
   const info = await loadLibraryInfo()
   libraryReady = !!info.folder
-  // The desktop keeps what its pane showed; the phone shows its books or the first-run choice.
-  if (settingsEmbedded()) showView(view)
-  else {
+  // The phone shows its books or the first-run choice.
+  if (!settingsEmbedded()) {
     $('setup').hidden = libraryReady
     $('library').hidden = !libraryReady
   }
   if (!info.folder) {
+    if (settingsEmbedded()) showView(view ?? 'library')
     $('setup-suggested').textContent = info.suggested
     $('setup-default').focus()
     return
   }
   await refreshLibraryScreen()
+  // The desktop keeps what its pane showed; at first, the history if there is one.
+  if (settingsEmbedded()) showView(view ?? (hasRecent ? 'recent' : 'library'))
 }
 
 /** Reads the library folder (and the first-run suggestion), and shows it in the settings. */
@@ -489,7 +491,12 @@ async function refreshRecent() {
   })
   $('recent').replaceChildren(...books.map(recentItem))
   $('recent-title').hidden = !books.length
+  $('recent-empty').hidden = books.length > 0
+  hasRecent = books.length > 0
 }
+
+/** The reading history isn't empty (the desktop then opens on it). */
+let hasRecent = false
 
 /** Uses the suggested library folder, or asks for another one. */
 async function chooseLibrary(pick: boolean) {
@@ -686,7 +693,7 @@ async function runCommand(command: Command) {
     case 'settings':
       // S / Ctrl+, and the Aa button: the appearance while reading, the settings in the library.
       if (book) return appearanceOpen() ? closePanels() : openAppearance()
-      if (settingsEmbedded()) return showView(view.startsWith('settings') ? 'library' : 'settings:reading')
+      if (settingsEmbedded()) return showView(view?.startsWith('settings') ? 'library' : 'settings:reading')
       return settingsOpen() ? closePanels() : openSettings()
     case 'cycleTheme':
       return changeSettings({ theme: nextTheme(settings.theme) })
@@ -739,7 +746,7 @@ function closeTopLayer() {
 async function handleEscape() {
   if (closeTopLayer()) return
   // In the library window, Esc goes back from the settings or the catalogs to the books.
-  if (settingsEmbedded() && view !== 'library') return showView('library')
+  if (settingsEmbedded() && view !== 'library' && view !== 'recent') return showView('library')
   if (await appWindow.isFullscreen()) await appWindow.setFullscreen(false)
 }
 
@@ -916,9 +923,10 @@ const catalogView = createCatalogView({ library: () => libraryBooks, openSetting
 /** The library window's two tabs: the books on disk, and the catalogs to get more from. */
 // ---- The library window's navigation (desktop) ----------------------------------
 
-/** What the library window shows: the books, the catalogs, or a settings section. */
-type View = 'library' | 'catalogs' | `settings:${SettingsSection}`
-let view: View = 'library'
+/** What the library window shows: the reading history, the books, the catalogs, or a settings section. */
+type View = 'recent' | 'library' | 'catalogs' | `settings:${SettingsSection}`
+/** Unset until the library first shows: then the history if there is one, else the books. */
+let view: View | null = null
 /** A library folder is chosen (else the first-run choice shows). */
 let libraryReady = false
 
@@ -948,6 +956,8 @@ function showView(to: View) {
     foldSettingsNav(false)
   } else if (libraryReady) {
     showTab(to === 'catalogs' ? 'catalogs' : 'books')
+    // The history and the books are separate pages here (the phone shows both on one).
+    $('books-view').dataset.show = to === 'recent' ? 'recent' : 'all'
   }
   for (const item of document.querySelectorAll<HTMLElement>('#sidebar [data-nav]')) {
     item.setAttribute('aria-current', String(item.dataset.nav === to))
