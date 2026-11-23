@@ -15,3 +15,7 @@ breader.json
 *.log
 Thumbs.db
 .DS_Store
+
+# Agent instructions, kept local for now
+AGENTS.md
+CLAUDE.md
