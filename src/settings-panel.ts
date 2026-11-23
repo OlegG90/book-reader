@@ -9,7 +9,13 @@ export interface PanelValues extends Appearance {
   volumeKeys: boolean
   /** How many books "Continue reading" shows (1–5). */
   historyLength: number
+  /** The interface's font: "classic" (Lora, Cormorant Garamond for headings) or one of the system fonts. */
+  uiFont: UiFont
 }
+
+/** The interface fonts: the bundled pair, or one font everywhere. */
+export const UI_FONTS = ['classic', 'Georgia', 'Cambria', 'Segoe UI', 'Calibri'] as const
+export type UiFont = (typeof UI_FONTS)[number]
 
 /** The choices for `historyLength`. */
 export const HISTORY_LENGTHS = [1, 2, 3, 4, 5] as const
@@ -189,6 +195,12 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     ...HISTORY_LENGTHS.map(n => el('option', { value: String(n), textContent: n === 1 ? '1 book' : `${n} books` })),
   )
   historyLength.onchange = () => onChange({ historyLength: Number(historyLength.value) })
+  const uiFont = el(
+    'select',
+    { ariaLabel: 'Interface font' },
+    ...UI_FONTS.map(f => el('option', { value: f, textContent: f === 'classic' ? 'Classical (Lora)' : f })),
+  )
+  uiFont.onchange = () => onChange({ uiFont: uiFont.value as UiFont })
   fileTypesRow.querySelector('.hint')?.replaceWith(fileTypesStatus)
 
   const content: Record<SettingsSection, HTMLElement[]> = {
@@ -202,6 +214,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       libraryRow,
       checkRow('Offer to add books opened from elsewhere', 'Shows Move / Copy to library when a file is outside the library folder.', offerLibrary),
       fileTypesRow,
+      row('Interface font', 'The library and the panels; the book has its own (Reading).', uiFont),
       row('Continue reading', 'How many of the last books read it shows.', historyLength),
       row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory })),
     ],
@@ -250,6 +263,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     offerLibrary.checked = values.offerLibrary
     volumeKeys.checked = values.volumeKeys
     historyLength.value = String(values.historyLength)
+    uiFont.value = values.uiFont
   }
 
   function setFileTypesRegistered(registered: boolean) {

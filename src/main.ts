@@ -45,7 +45,7 @@ import { createCatalogView } from './catalog-view'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
 import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
-import { HISTORY_LENGTHS, createAppearancePanel, createSettingsPage, type PanelValues, type SettingsSection } from './settings-panel'
+import { HISTORY_LENGTHS, UI_FONTS, createAppearancePanel, createSettingsPage, type PanelValues, type SettingsSection } from './settings-panel'
 
 interface Position {
   cfi: string
@@ -91,6 +91,7 @@ function readSettings(stored: Record<string, unknown>): Settings {
     offerLibrary: stored.offerLibrary !== false,
     volumeKeys: stored.volumeKeys === true,
     historyLength: HISTORY_LENGTHS.find(n => n === stored.historyLength) ?? 3,
+    uiFont: oneOf(stored.uiFont, UI_FONTS, 'classic'),
   }
 }
 
@@ -458,11 +459,6 @@ async function showLibraryScreen() {
   $('start').hidden = false
   const info = await loadLibraryInfo()
   libraryReady = !!info.folder
-  // The phone shows its books or the first-run choice.
-  if (!settingsEmbedded()) {
-    $('setup').hidden = libraryReady
-    $('library').hidden = !libraryReady
-  }
   if (!info.folder) {
     if (settingsEmbedded()) showView(view ?? 'library')
     $('setup-suggested').textContent = info.suggested
@@ -769,10 +765,10 @@ async function handleEscape() {
  */
 function handleBack() {
   if (closeTopLayer()) return
-  // In the catalogs, Back goes up a folder, and from the top to the books.
-  if (!book && !$('catalog-view').hidden) {
-    if (!catalogView.back()) showTab('books')
-    return
+  if (!book) {
+    // In the catalogs, Back goes up a folder; from the top, and from the settings, to the books.
+    if (view === 'catalogs' && catalogView.back()) return
+    if (view !== 'recent' && view !== 'library') return showView(hasRecent ? 'recent' : 'library')
   }
   void invoke(book ? 'show_library' : 'leave_app').catch(console.error)
 }
@@ -943,12 +939,12 @@ let view: View | null = null
 /** A library folder is chosen (else the first-run choice shows). */
 let libraryReady = false
 
-/** Desktop library window: the settings sit in the content beside the pane, not over the window. */
+/** The library (the desktop's window, the phone's screen): the settings sit in its content, not over it. */
 const settingsEmbedded = () => $('settings').classList.contains('embedded')
 
-/** Puts the settings in the library window's content (`true`) or back over the window. */
+/** Puts the settings in the library's content (`true`) or back over the window. */
 function embedSettings(embed: boolean) {
-  if (isAndroid || embed === settingsEmbedded()) return
+  if (embed === settingsEmbedded()) return
   const settingsEl = $('settings')
   settingsEl.classList.toggle('embedded', embed)
   settingsEl.hidden = true
@@ -972,8 +968,10 @@ function showView(to: View) {
     // The history and the books are separate pages here (the phone shows both on one).
     $('books-view').dataset.show = to === 'recent' ? 'recent' : 'all'
   }
-  for (const item of document.querySelectorAll<HTMLElement>('#sidebar [data-nav]')) {
-    item.setAttribute('aria-current', String(item.dataset.nav === to))
+  for (const item of document.querySelectorAll<HTMLElement>('[data-nav]')) {
+    // The phone's Settings stands for all its sections.
+    const group = item.dataset.navGroup
+    item.setAttribute('aria-current', String(item.dataset.nav === to || (!!group && to.startsWith(`${group}:`))))
   }
 }
 
@@ -997,6 +995,16 @@ const resolvedTheme = (): ResolvedTheme =>
 /** Sets the app theme (style.css defines the colours per data-theme). */
 function applyTheme() {
   document.documentElement.dataset.theme = resolvedTheme()
+  // The interface font: the bundled pair by default (style.css), or one font everywhere.
+  const root = document.documentElement.style
+  if (settings.uiFont === 'classic') {
+    root.removeProperty('--font-body')
+    root.removeProperty('--font-heading')
+  } else {
+    const stack = `'${settings.uiFont}', system-ui, sans-serif`
+    root.setProperty('--font-body', stack)
+    root.setProperty('--font-heading', stack)
+  }
 }
 
 /** The book is drawn with the app theme's colours, so the two always match. */
@@ -1029,6 +1037,7 @@ function applySettings(changes: Partial<Settings>) {
   }
   if ('volumeKeys' in changes) setReading(!!book)
   if ('historyLength' in changes && !book) void refreshRecent()
+  if ('uiFont' in changes) applyTheme()
 }
 
 /** Applies changes made in this window, and saves them after a pause. */
@@ -1186,7 +1195,7 @@ $('organize-cancel').addEventListener('click', closePanels)
 $('tab-books').addEventListener('click', () => showTab('books'))
 $('tab-catalogs').addEventListener('click', () => showTab('catalogs'))
 // The library window's pane (desktop): its items, Settings folding out, its width.
-for (const item of document.querySelectorAll<HTMLElement>('#sidebar [data-nav]')) {
+for (const item of document.querySelectorAll<HTMLElement>('[data-nav]')) {
   item.addEventListener('click', () => showView(item.dataset.nav as View))
 }
 document.querySelector('#sidebar .section-head')?.addEventListener('click', () => foldSettingsNav(!$('settings-nav').hidden))

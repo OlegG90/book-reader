@@ -1502,8 +1502,10 @@ button:hover {
 /* ---- Desktop library window: a WinUI-style navigation pane ---------------------
    The pane on the window's ground; the content on a lighter layer with a
    rounded corner beside it; the chosen item marked by an accent pill. */
-:root:not(.android) body.library-mode #topbar,
-:root:not(.android) .library-tabs {
+/* The library has its own navigation (the pane, or the phone's bottom bar):
+   no top bar, no tabs */
+body.library-mode #topbar,
+.library-tabs {
   display: none !important;
 }
 
@@ -1656,17 +1658,13 @@ button:hover {
   margin: var(--space-3) 0 0;
 }
 
-/* Desktop library window: the history and the books are separate pages */
-:root:not(.android) #books-view[data-show='recent'] :is(.library-bar, #library-message, #library-books) {
+/* The library: the history and the books are separate pages */
+#books-view[data-show='recent'] :is(.library-bar, #library-message, #library-books) {
   display: none !important;
 }
 
-:root:not(.android) #books-view[data-show='all'] :is(#recent-title, #recent, #recent-empty) {
+#books-view[data-show='all'] :is(#recent-title, #recent, #recent-empty) {
   display: none !important;
-}
-
-.android #recent-empty {
-  display: none;
 }
 
 /* How far a book is read: a hairline under its cover */
@@ -1693,4 +1691,62 @@ button:hover {
 
 #recent {
   margin-bottom: 24px;
+}
+
+/* ---- Phone library: navigation at the bottom ---------------------------------- */
+.android #start {
+  padding: calc(16px + var(--safe-top)) 16px calc(76px + var(--safe-bottom));
+}
+
+#bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 15;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 6px 8px calc(6px + var(--safe-bottom));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+
+#bottom-nav button {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-height: 52px;
+  padding: 4px;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#bottom-nav .icon {
+  width: 22px;
+  height: 22px;
+}
+
+#bottom-nav button[aria-current='true'] {
+  color: var(--accent-text);
+}
+
+/* The settings inside the phone's library: the section chips stay, as tabs */
+.android #settings.embedded .sections {
+  display: flex;
+}
+
+.android #settings.embedded .page-body {
+  display: grid;
+}
+
+.android #settings.embedded .page-content {
+  padding: 0;
+}
+
+/* The book grid: three across on a phone */
+.android .book-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px 12px;
 }

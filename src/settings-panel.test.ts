@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_APPEARANCE } from 'reader-core'
 import { createAppearancePanel, createSettingsPage, type PanelValues } from './settings-panel'
 
-const initial: PanelValues = { ...DEFAULT_APPEARANCE, savePositions: true, offerLibrary: true, volumeKeys: false, historyLength: 3 }
+const initial: PanelValues = { ...DEFAULT_APPEARANCE, savePositions: true, offerLibrary: true, volumeKeys: false, historyLength: 3, uiFont: 'classic' }
 
 const buttonIn = (host: HTMLElement) => (text: string) => {
   const found = [...host.querySelectorAll('button')].find(b => b.textContent === text)

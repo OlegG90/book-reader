@@ -30,6 +30,13 @@
         </ul>
         <div id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="sidebar" aria-label="Navigation pane width" title="Drag to change the pane's width; double-click for the usual one" tabindex="0"></div>
       </nav>
+      <!-- Phone: the library's navigation at the bottom (the desktop has the pane) -->
+      <nav id="bottom-nav" class="android-only" aria-label="Library, catalogs and settings">
+        <button type="button" data-nav="recent"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg><span>Reading</span></button>
+        <button type="button" data-nav="library"><svg class="icon" aria-hidden="true"><use href="#i-library"/></svg><span>Library</span></button>
+        <button type="button" data-nav="catalogs"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>Catalogs</span></button>
+        <button type="button" data-nav="settings:reading" data-nav-group="settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></button>
+      </nav>
       <div id="start-main">
       <div id="error" role="alert" hidden></div>
       <section id="setup" hidden>
