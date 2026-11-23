@@ -5,7 +5,9 @@ import { icon } from './icons'
 
 /** A page the reader went to, kept so Back shows it again without a refetch. */
 interface Page {
+  /** The page's name in the breadcrumbs; the catalog's start (`start`) shows the catalog's current name. */
   title: string
+  start?: boolean
   entries: CatalogEntry[]
   next: string | null
 }
@@ -51,9 +53,12 @@ export function createCatalogView(deps: CatalogViewDeps) {
       return
     }
     const kept = sources.find(s => s.id === source?.id)
+    // Another catalog, or this one moved to another address: start over there.
+    if (!kept || kept.url !== source?.url) pages = []
     source = kept ?? sources[0]
-    if (!kept) pages = []
     sourceSelect.value = source.id
+    // Renamed meanwhile: the way shows the new name even if the server doesn't answer.
+    render()
     if (!pages.length) await open(null)
   }
 
@@ -71,7 +76,7 @@ export function createCatalogView(deps: CatalogViewDeps) {
       // Servers often give every page the same feed title (CWA does), so a page is named
       // after the folder it was opened from; the start, after the catalog.
       const title = query ? `Search: ${query}` : (label ?? source.name)
-      pages.push({ title, entries: feed.entries, next: feed.next })
+      pages.push({ title, entries: feed.entries, next: feed.next, start: !href && !query })
       message(feed.entries.length ? '' : 'Nothing here.')
       render()
     } catch (e) {
@@ -100,13 +105,15 @@ export function createCatalogView(deps: CatalogViewDeps) {
 
   function render() {
     const page = pages.at(-1)
-    // Where in the catalog: every page on the way, each one a step back to it.
+    // Where in the catalog: every page on the way, each one a step back to it. The
+    // first is the catalog itself, by its current name (also before it answers).
+    const titles = pages.length ? pages.map(p => (p.start && source ? source.name : p.title)) : source ? [source.name] : []
     $('catalog-title').replaceChildren(
-      ...pages.flatMap((p, i) => {
-        const last = i === pages.length - 1
+      ...titles.flatMap((title, i) => {
+        const last = i === titles.length - 1
         const crumb = last
-          ? el('span', { className: 'here', textContent: p.title, ariaCurrent: 'page' })
-          : el('button', { type: 'button', textContent: p.title, onclick: () => backTo(i) })
+          ? el('span', { className: 'here', textContent: title, ariaCurrent: 'page' })
+          : el('button', { type: 'button', textContent: title, onclick: () => backTo(i) })
         return i ? [el('span', { className: 'sep', textContent: '›', ariaHidden: 'true' }), crumb] : [crumb]
       }),
     )
