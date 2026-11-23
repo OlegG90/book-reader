@@ -18,10 +18,19 @@ function appearance(extras = {}) {
   return { host, onChange, panel, button: buttonIn(host) }
 }
 
-function page() {
+function page(found: Promise<{ latest: string; newer: boolean }> = Promise.resolve({ latest: '0.7.0', newer: false })) {
   const host = document.createElement('section')
   const onChange = vi.fn()
-  const actions = { clearHistory: vi.fn(), toggleFileTypes: vi.fn(), changeLibrary: vi.fn(), organizeLibrary: vi.fn(), close: vi.fn() }
+  const actions = {
+    clearHistory: vi.fn(),
+    toggleFileTypes: vi.fn(),
+    changeLibrary: vi.fn(),
+    organizeLibrary: vi.fn(),
+    close: vi.fn(),
+    openRepository: vi.fn(),
+    checkForUpdate: vi.fn(() => found),
+    openLatestRelease: vi.fn(),
+  }
   const panel = createSettingsPage(host, initial, onChange, actions)
   return { host, onChange, actions, panel, button: buttonIn(host) }
 }
@@ -140,5 +149,33 @@ describe('settings page', () => {
     expect(onChange).toHaveBeenCalledWith({ historyLength: 5 })
     panel.show({ ...initial, historyLength: 1 })
     expect(select.value).toBe('1')
+  })
+
+  it('opens the repository from About', () => {
+    const { actions, button } = page()
+    button('Open on GitHub').click()
+    expect(actions.openRepository).toHaveBeenCalled()
+  })
+
+  it('says when this is the latest version', async () => {
+    const { host, button } = page()
+    button('Check for updates').click()
+    await vi.waitFor(() => expect(host.textContent).toContain('This is the latest version.'))
+    expect(button('Open the release').hidden).toBe(true)
+  })
+
+  it('offers the release page for a newer version', async () => {
+    const { host, actions, button } = page(Promise.resolve({ latest: '0.8.0', newer: true }))
+    button('Check for updates').click()
+    await vi.waitFor(() => expect(host.textContent).toContain('Version 0.8.0 is out.'))
+    button('Open the release').click()
+    expect(actions.openLatestRelease).toHaveBeenCalled()
+  })
+
+  it('shows why the check failed', async () => {
+    const { host, button } = page(Promise.reject('Cannot reach GitHub: check the connection'))
+    button('Check for updates').click()
+    await vi.waitFor(() => expect(host.textContent).toContain('Cannot reach GitHub'))
+    expect(button('Check for updates').disabled).toBe(false)
   })
 })

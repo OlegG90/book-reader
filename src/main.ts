@@ -887,6 +887,12 @@ function openToc() {
   ;(current ?? $('toc-tree').querySelector<HTMLElement>('[role="treeitem"]'))?.focus()
 }
 
+/** Opens the app's GitHub page (or a page under it, such as the latest release) in the browser. */
+async function openRepository(page = '') {
+  const repository = await invoke<string>('app_repository')
+  await openUrl(repository + page).catch(console.error)
+}
+
 /** Info panels open without the scrim, like the settings. */
 function openInfoPanel(id: 'about' | 'shortcuts') {
   closePanels()
@@ -994,6 +1000,9 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
     void invoke(command).then(refreshFileTypesStatus, console.error)
   },
   changeLibrary: () => void chooseLibrary(true),
+  openRepository: () => void openRepository(),
+  checkForUpdate: () => invoke('check_for_update'),
+  openLatestRelease: () => void openRepository('/releases/latest'),
   organizeLibrary: () => void openOrganize(),
   close: closePanels,
 })

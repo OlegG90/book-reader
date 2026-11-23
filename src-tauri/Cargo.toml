@@ -4,6 +4,7 @@ version = "0.7.0"
 description = "A compact e-book reader with a local library"
 authors = ["OlegG90"]
 license = "MIT"
+repository = "https://github.com/OlegG90/book-reader"
 edition = "2021"
 rust-version = "1.85"
 

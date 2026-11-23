@@ -24,6 +24,7 @@ mod register;
 #[cfg_attr(mobile, path = "platform_android.rs")]
 mod platform;
 mod store;
+mod updates;
 #[cfg(desktop)]
 mod version;
 mod xml;
@@ -355,6 +356,19 @@ fn file_types_registered() -> bool {
 #[tauri::command]
 fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// Where the app's source lives, opened from Settings → About (with
+/// `/releases/latest` for a newer version).
+#[tauri::command]
+fn app_repository() -> &'static str {
+    updates::REPOSITORY
+}
+
+/// Asks GitHub for the latest release and compares it with this copy.
+#[tauri::command(async)]
+fn check_for_update() -> Result<updates::UpdateCheck, String> {
+    updates::check()
 }
 
 /// Ctrl+O (on a phone, "Add book…"): asks for a book and opens it in this window.
@@ -1156,6 +1170,8 @@ pub fn run() {
             unregister_file_types,
             file_types_registered,
             app_version,
+            app_repository,
+            check_for_update,
             open_incoming,
             delete_library_book,
             set_reading,
