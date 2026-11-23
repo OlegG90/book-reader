@@ -1003,6 +1003,9 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
     void invoke(command).then(refreshFileTypesStatus, console.error)
   },
   changeLibrary: () => void chooseLibrary(true),
+  openRepository: () => void invoke('open_repository').catch(console.error),
+  checkForUpdate: () => invoke('check_for_update'),
+  openLatestRelease: () => void invoke('open_latest_release').catch(console.error),
   organizeLibrary: () => void openOrganize(),
   close: closePanels,
 })

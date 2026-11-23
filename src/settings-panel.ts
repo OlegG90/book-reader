@@ -34,6 +34,12 @@ export interface PanelActions {
   organizeLibrary(): void
   /** Closes the settings page. */
   close(): void
+  /** Opens the app's source on GitHub in the browser. */
+  openRepository(): void
+  /** Asks GitHub for the latest release: its version, and whether it is newer than this copy. */
+  checkForUpdate(): Promise<{ latest: string; newer: boolean }>
+  /** Opens the latest release's page, with its files, in the browser. */
+  openLatestRelease(): void
 }
 
 const THEME_LABELS: Record<Theme, string> = { system: 'System', light: 'Light', dark: 'Dark', sepia: 'Sepia' }
@@ -188,6 +194,9 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const catalogs = el('div', { className: 'catalogs' })
   const shortcuts = el('div', { className: 'shortcuts' })
   const about = el('div', { className: 'about' })
+  const updateStatus = el('span', { className: 'hint', textContent: 'Asks GitHub for the latest release.' })
+  const openRelease = el('button', { type: 'button', textContent: 'Open the release', hidden: true, onclick: actions.openLatestRelease })
+  const checkUpdate = el('button', { type: 'button', textContent: 'Check for updates', onclick: () => void checkForUpdate() })
 
   const libraryRow = row(
     'Library folder',
@@ -234,7 +243,11 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory })),
     ],
     shortcuts: [shortcuts],
-    about: [about],
+    about: [
+      about,
+      row('Source code', 'Book Reader on GitHub.', el('button', { type: 'button', textContent: 'Open on GitHub', onclick: actions.openRepository })),
+      row('Updates', updateStatus, openRelease, checkUpdate),
+    ],
   }
 
   const sections = SECTIONS.map(({ id, title }) =>
@@ -277,6 +290,23 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     volumeKeys.checked = values.volumeKeys
     historyLength.value = String(values.historyLength)
     uiFont.value = values.uiFont
+  }
+
+  /** Asks for the latest release and says what it found; a newer one gets a button to its page. */
+  async function checkForUpdate() {
+    checkUpdate.disabled = true
+    updateStatus.textContent = 'Asking GitHub…'
+    try {
+      const found = await actions.checkForUpdate()
+      updateStatus.textContent = found.newer ? `Version ${found.latest} is out.` : 'This is the latest version.'
+      openRelease.hidden = !found.newer
+    } catch (e) {
+      updateStatus.textContent = String(e)
+    } finally {
+      checkUpdate.disabled = false
+      // Disabling the button dropped the keyboard focus: put it on what comes next.
+      ;(openRelease.hidden ? checkUpdate : openRelease).focus()
+    }
   }
 
   function setFileTypesRegistered(registered: boolean) {
