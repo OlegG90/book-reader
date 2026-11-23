@@ -4,7 +4,7 @@ use crate::catalog;
 use crate::clock;
 use crate::library_cmds::{put_in_library, AddMode, Added, LibraryBooks, CACHE_DIR};
 use crate::opds;
-use crate::platform;
+use crate::platform::{Active, Platform};
 use crate::store::Store;
 use crate::CmdResult;
 use serde::{Deserialize, Serialize};
@@ -27,7 +27,7 @@ pub(crate) struct SourceView {
 #[tauri::command(async)]
 pub(crate) fn catalog_sources(store: State<Store>) -> Vec<SourceView> {
     let sources = store.read(|s| s.sources.clone());
-    sources.into_iter().map(|source| SourceView { has_password: platform::has_password(&source.id), source }).collect()
+    sources.into_iter().map(|source| SourceView { has_password: Active::has_password(&source.id), source }).collect()
 }
 
 #[derive(Deserialize)]
@@ -72,7 +72,7 @@ pub(crate) fn save_catalog_source(
     let url = catalog::discover(&source, catalog::login_with(&source, password.as_deref()).as_ref())?;
     source.url = url.to_string();
     if let Some(password) = password {
-        platform::save_password(&id, &password)?;
+        Active::save_password(&id, &password)?;
     }
     store
         .update(|s| {
@@ -93,7 +93,7 @@ pub(crate) fn save_catalog_source(
 #[tauri::command(async)]
 pub(crate) fn delete_catalog_source(app: AppHandle, store: State<Store>, id: String) -> CmdResult<()> {
     store.update(|s| s.sources.retain(|source| source.id != id)).map_err(|e| e.to_string())?;
-    platform::forget_password(&id);
+    Active::forget_password(&id);
     let _ = app.emit("catalogs-changed", ());
     Ok(())
 }

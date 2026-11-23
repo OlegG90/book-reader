@@ -1,7 +1,7 @@
 //! One-off system commands: file types, updates, outside books, the library screen.
 
 use crate::cli::Launch;
-use crate::platform;
+use crate::platform::{Active, Platform};
 use crate::register;
 use crate::updates;
 use crate::windows::{open_or_focus, show_book, show_here};
@@ -57,7 +57,7 @@ pub(crate) fn check_for_update() -> CmdResult<updates::UpdateCheck> {
 /// Ctrl+O (on a phone, "Add book…"): asks for a book and opens it in this window.
 #[tauri::command(async)]
 pub(crate) fn pick_book(window: Window, originals: State<Originals>) -> CmdResult<()> {
-    if let Some(book) = platform::pick_book(&window)? {
+    if let Some(book) = Active::pick_book(&window)? {
         open_outside(&window, &originals, book);
     }
     Ok(())
@@ -66,7 +66,7 @@ pub(crate) fn pick_book(window: Window, originals: State<Originals>) -> CmdResul
 /// Opens a book handed to the app ("Open with", "Share" on a phone), if one waits.
 #[tauri::command(async)]
 pub(crate) fn open_incoming(window: Window, originals: State<Originals>) -> CmdResult<()> {
-    if let Some(book) = platform::take_incoming()? {
+    if let Some(book) = Active::take_incoming()? {
         open_outside(&window, &originals, book);
     }
     Ok(())
@@ -96,7 +96,7 @@ fn open_outside(window: &Window, originals: &Originals, book: Outside) {
 /// hides, and the volume keys turn pages if that setting is on.
 #[tauri::command(async)]
 pub(crate) fn set_reading(on: bool, volume_keys: bool) -> CmdResult<()> {
-    platform::set_reading(on, volume_keys)
+    Active::set_reading(on, volume_keys)
 }
 
 /// Brings the library window forward, opening it if needed; on a phone,
@@ -116,5 +116,5 @@ pub(crate) fn show_library(window: Window) -> CmdResult<()> {
 /// as Android apps do. Nothing happens on the desktop.
 #[tauri::command(async)]
 pub(crate) fn leave_app(app: AppHandle) -> CmdResult<()> {
-    platform::leave(&app)
+    Active::leave(&app)
 }

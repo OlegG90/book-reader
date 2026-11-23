@@ -20,8 +20,7 @@ mod paths;
 #[cfg_attr(not(windows), path = "register_unsupported.rs")]
 mod register;
 // Where the library lives: a folder of the reader's choice, or Documents/Books on Android.
-#[cfg_attr(desktop, path = "platform_desktop.rs")]
-#[cfg_attr(mobile, path = "platform_android.rs")]
+// The trait both platforms implement; `Active` is the one running now.
 mod platform;
 mod store;
 mod updates;
@@ -43,6 +42,7 @@ pub(crate) type CmdResult<T> = Result<T, String>;
 use cli::Command;
 #[cfg(mobile)]
 use cli::Launch;
+use platform::Platform;
 use std::path::Path;
 use store::Store;
 use tauri::Manager;
@@ -72,7 +72,7 @@ pub fn run() {
             let _ = windows::open_or_focus(app, launch);
         }
     }));
-    platform::plugins(builder)
+    platform::Active::plugins(builder)
         .plugin(tauri_plugin_opener::init())
         .manage(windows::ReaderWindows::default())
         .manage(library_cmds::LibraryBooks::default())
