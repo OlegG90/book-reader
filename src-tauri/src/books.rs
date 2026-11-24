@@ -3,6 +3,7 @@
 use crate::cli::Launch;
 use crate::clock::now_ms;
 use crate::fingerprint;
+use crate::formats;
 use crate::library_cmds::{library_root, LibraryBooks};
 use crate::modules;
 use crate::paths;
@@ -55,8 +56,12 @@ pub(crate) fn current_book(window: Window, windows: State<ReaderWindows>, store:
 }
 
 #[tauri::command(async)]
-pub(crate) fn read_book(window: Window, windows: State<ReaderWindows>) -> CmdResult<Response> {
+pub(crate) fn read_book(window: Window, windows: State<ReaderWindows>, store: State<Store>) -> CmdResult<Response> {
+    // The backstop for every way to open a book: a disabled format refuses here.
     let path = windows.path_of(window.label())?;
+    if let Some(reader) = formats::of(&path) {
+        store.read(|s| formats::check(s, reader))?;
+    }
     std::fs::read(path).map(Response::new).map_err(|e| e.to_string())
 }
 
@@ -173,6 +178,9 @@ pub(crate) fn open_recent(window: Window, store: State<Store>, key: String) -> C
     let path = store
         .read(|s| s.recent.iter().find(|r| r.fingerprint == key).map(|r| r.path.clone()))
         .ok_or("That book is no longer in the recent list")?;
+    if let Some(reader) = formats::of(&path) {
+        store.read(|s| formats::check(s, reader))?;
+    }
     show_book(&window, path, false);
     Ok(())
 }

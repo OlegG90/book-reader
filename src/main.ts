@@ -22,6 +22,7 @@ import '@fontsource/lora/cyrillic-600.css'
 import { commandFor, type Command } from './keys'
 import { SORTS, SORT_LABELS, type Sort } from './library'
 import { createCatalogView } from './catalog-view'
+import { setFormats } from './catalog'
 import { createSeriesView } from './series-view'
 import { closePopup } from './book-menu'
 import { icon } from './icons'
@@ -515,7 +516,13 @@ async function flushSettings() {
 
 /** Reloads the Modules section from the backend (switches and their reasons). */
 function refreshModules() {
-  void invoke<ModuleInfo[]>('list_modules').then(modules => settingsPage.setModules(modules), console.error)
+  void invoke<ModuleInfo[]>('list_modules').then(
+    modules => {
+      settingsPage.setModules(modules)
+      setFormats(modules)
+    },
+    console.error,
+  )
 }
 
 /** Turns a layer-1 module off or back on, then refreshes its row. */

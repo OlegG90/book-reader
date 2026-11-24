@@ -2,6 +2,7 @@
 
 use crate::catalog;
 use crate::clock;
+use crate::formats;
 use crate::library_cmds::{put_in_library, AddMode, Added, LibraryBooks, CACHE_DIR};
 use crate::opds;
 use crate::platform::{Active, Platform};
@@ -143,6 +144,8 @@ pub(crate) fn catalog_download(
     format: opds::FileFormat,
 ) -> CmdResult<Added> {
     let source = source_by_id(&store, &id)?;
+    let reader = formats::by_module(format.module()).ok_or("Not a book file")?;
+    store.read(|s| formats::check(s, reader))?;
     let downloads = store.dir().join(CACHE_DIR).join("downloads");
     let file = catalog::download(&source, &url, format, &downloads)?;
     let result = put_in_library(&store, &books, &file, AddMode::Move);

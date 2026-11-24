@@ -75,7 +75,7 @@ impl Platform for Android {
     }
 
     /// Android's document picker (`None` when cancelled).
-    fn pick_book(_window: &Window) -> Result<Option<Outside>, String> {
+    fn pick_book(_window: &Window, _extensions: &[&str]) -> Result<Option<Outside>, String> {
         Ok(run::<Copied>("pickBook", ())?.outside())
     }
 

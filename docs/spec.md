@@ -20,8 +20,10 @@ Guiding principles: **no installation step on the desktop, small size, fast star
 
 ### Supported formats
 
-- `.fb2` and `.fb2.zip` — encoding taken from the XML declaration (UTF-8, windows-1251 and others)
+- `.fb2`, `.fb2.zip` and `.fbz` — encoding taken from the XML declaration (UTF-8, windows-1251 and others)
 - `.epub` — EPUB 2 and EPUB 3, reflowable
+
+Both are layer-1 modules (`format:epub`, `format:fb2`) and can be turned off in Settings › Modules. A disabled format is skipped by the scan, refused by picking, opening and catalog downloads with a sentence, and left out of the file dialog; books already in the library stay visible but refuse to open.
 
 ### Out of scope
 
