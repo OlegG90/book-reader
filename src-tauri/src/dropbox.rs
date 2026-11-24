@@ -12,7 +12,24 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::TcpListener;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+/// The last sync failure, if any: a dead transport stays quiet, but the
+/// settings show what went wrong instead of failing silently.
+static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+/// Remembers the outcome for the settings: failures stay visible there,
+/// successes clear them.
+fn track<T>(result: Result<T, String>) -> Result<T, String> {
+    *LAST_ERROR.lock().unwrap() = result.as_ref().err().cloned();
+    result
+}
+
+/// The last sync failure, if any.
+pub fn last_error() -> Option<String> {
+    LAST_ERROR.lock().unwrap().clone()
+}
 
 /// The Dropbox app key: the "BookReader Sync" scoped app in the App Console
 /// with app-folder access (files.content.read + files.content.write).
@@ -297,20 +314,36 @@ fn upload(access: &str, positions: &HashMap<String, RemoteRecord>) -> Result<(),
 /// The open book's remote position, if any: a dead transport reports
 /// nothing instead of failing the pull.
 pub fn pull(fingerprint: &str) -> Option<kosync::Progress> {
-    let access = access_token().ok()?;
+    track(pull_inner(fingerprint)).ok().flatten()
+}
+
+fn pull_inner(fingerprint: &str) -> Result<Option<kosync::Progress>, String> {
+    let access = access_token()?;
+    let remote = download(&access)?;
     // `time` is ms here like locally; KOSync counts seconds.
-    download(&access).ok()??.get(fingerprint).map(|r| kosync::Progress {
+    Ok(remote.as_ref().and_then(|positions| positions.get(fingerprint)).map(|r| kosync::Progress {
         progress: r.cfi.clone(),
         percentage: r.fraction,
         device: r.device.clone(),
         device_id: r.device_id.clone(),
         timestamp: r.time / 1000,
-    })
+    }))
 }
 
 /// Merges the local positions (with the open book's fresh one) over the
 /// cloud file and uploads it when anything changed.
 pub fn push(
+    local: &HashMap<String, crate::store::Position>,
+    fingerprint: &str,
+    cfi: &str,
+    fraction: f64,
+    device: &str,
+    device_id: &str,
+) -> Result<(), String> {
+    track(push_inner(local, fingerprint, cfi, fraction, device, device_id))
+}
+
+fn push_inner(
     local: &HashMap<String, crate::store::Position>,
     fingerprint: &str,
     cfi: &str,
@@ -361,6 +394,15 @@ mod tests {
         assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A51943%2Fdropbox"));
         assert!(url.contains("state=state"));
         assert!(url.contains("token_access_type=offline"));
+    }
+
+    #[test]
+    fn failures_are_remembered_until_a_success() {
+        assert_eq!(last_error(), None);
+        let _ = track::<()>(Err("gone".into()));
+        assert_eq!(last_error().as_deref(), Some("gone"));
+        let _ = track::<()>(Ok(()));
+        assert_eq!(last_error(), None);
     }
 
     #[test]

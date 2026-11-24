@@ -10,6 +10,7 @@ use crate::register;
 use crate::updates;
 use crate::windows::{open_or_focus, show_book, show_here};
 use crate::CmdResult;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -36,10 +37,18 @@ pub(crate) fn file_types_registered() -> bool {
     register::registered()
 }
 
-/// Whether Dropbox is connected (a refresh token is kept).
+/// Dropbox: whether a refresh token is kept, and the last sync failure,
+/// if any (sync stays quiet, but the settings show what went wrong).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DropboxStatus {
+    connected: bool,
+    last_error: Option<String>,
+}
+
 #[tauri::command(async)]
-pub(crate) fn dropbox_connected() -> bool {
-    dropbox::is_connected()
+pub(crate) fn dropbox_status() -> DropboxStatus {
+    DropboxStatus { connected: dropbox::is_connected(), last_error: dropbox::last_error() }
 }
 
 /// Connects Dropbox: opens its login in the browser, waits for the answer

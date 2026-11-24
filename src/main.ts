@@ -585,14 +585,14 @@ async function refreshFileTypesStatus() {
   settingsPage.setFileTypesRegistered(registered)
 }
 
-/** Shows whether Dropbox is connected (a refresh token is kept). */
+/** Shows whether Dropbox is connected, and its last sync failure, if any. */
 async function refreshDropboxStatus() {
-  const connected = await invoke<boolean>('dropbox_connected').catch(e => {
+  const status = await invoke<{ connected: boolean; lastError: string | null }>('dropbox_status').catch(e => {
     console.error(e)
-    return false
+    return { connected: false, lastError: String(e) }
   })
-  dropboxConnected = connected
-  settingsPage.setDropboxConnected(connected)
+  dropboxConnected = status.connected
+  settingsPage.setDropboxConnected(status.connected, status.lastError)
 }
 
 // ---- Edge controls ----------------------------------------------------------

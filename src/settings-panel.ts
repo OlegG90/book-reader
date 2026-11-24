@@ -435,8 +435,9 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     dropboxRow.hidden = !visible
   }
 
-  function setDropboxConnected(connected: boolean) {
-    dropboxStatus.textContent = connected ? 'Connected — reading positions sync through it' : 'Not connected'
+  function setDropboxConnected(connected: boolean, error: string | null = null) {
+    dropboxStatus.textContent = !connected ? 'Not connected' : (error ?? 'Connected — reading positions sync through it')
+    dropboxStatus.title = error ?? ''
     dropboxButton.textContent = connected ? 'Disconnect' : 'Connect…'
   }
 

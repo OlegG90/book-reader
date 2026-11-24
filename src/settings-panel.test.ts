@@ -267,8 +267,10 @@ describe('settings page', () => {
   it('shows the Dropbox connection state', () => {
     const { host, panel, button } = page()
     expect(host.textContent).toContain('Not connected')
-    panel.setDropboxConnected(true)
+    panel.setDropboxConnected(true, null)
     expect(host.textContent).toContain('Connected')
+    panel.setDropboxConnected(true, 'Dropbox upload failed (401)')
+    expect(host.textContent).toContain('Dropbox upload failed (401)')
     expect(button('Disconnect')).toBeDefined()
     panel.setDropboxVisible(false)
     expect(button('Disconnect').closest<HTMLElement>('.row')?.hidden).toBe(true)
