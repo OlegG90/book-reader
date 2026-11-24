@@ -23,6 +23,12 @@ export interface SyncDeps {
   syncOff: () => boolean
 }
 
+/** What one push round achieved, per transport. */
+export interface PushReport {
+  transport: string
+  error: string | null
+}
+
 export interface SyncManager {
   /** Asks the sync server whether another device read on, and offers to jump there. */
   pull(): Promise<void>
@@ -53,8 +59,10 @@ export function createSyncManager(deps: SyncDeps): SyncManager {
   let offer: SyncOffer | null = null
   /** The open book's id on the sync server; null when it doesn't sync. */
   let document: string | null = null
-  /** The position moved since the last push. */
+  /** The position moved since every transport acked it. */
   let dirty = false
+  /** Transports that still owe an ack; only they are retried. */
+  let pending = new Set<string>()
 
   async function pull() {
     if (deps.syncOff()) return
@@ -82,13 +90,19 @@ export function createSyncManager(deps: SyncDeps): SyncManager {
     if (deps.syncOff()) return
     const location = deps.book()?.view.lastLocation
     const synced = document
-    if (!dirty || !location || !synced) return
+    if ((!dirty && pending.size === 0) || !location || !synced) return
     dirty = false
-    await invoke('sync_push', { document: synced, cfi: location.cfi, fraction: location.fraction }).catch(e => {
+    // A retry goes only to the transports that still owe an ack.
+    const only = pending.size ? [...pending] : undefined
+    try {
+      const reports = await invoke<PushReport[]>('sync_push', { document: synced, cfi: location.cfi, fraction: location.fraction, only })
+      pending = new Set(reports.filter(r => r.error).map(r => r.transport))
+      if (pending.size) dirty = true
+    } catch (e) {
       // Retried next time, unless another book has opened meanwhile.
       if (document === synced) dirty = true
       console.warn('sync:', e)
-    })
+    }
   }
 
   async function jump() {
@@ -116,6 +130,7 @@ export function createSyncManager(deps: SyncDeps): SyncManager {
     reset: () => {
       document = null
       dirty = false
+      pending.clear()
       hide()
     },
   }
