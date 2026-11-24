@@ -190,6 +190,11 @@ function checkRow(label: string, hint: string, box: HTMLInputElement) {
   return el('label', { className: 'row' }, ...rowParts(label, hint, [box]))
 }
 
+/** A titled group of settings rows, as in Modules (kind) and System (Library, History, Sync). */
+function group(title: string, ...rows: HTMLElement[]) {
+  return el('div', { className: 'group' }, el('h3', { textContent: title }), ...rows)
+}
+
 const SECTIONS = [
   { id: 'reading', title: 'Reading' },
   { id: 'catalogs', title: 'Catalogs' },
@@ -283,6 +288,10 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     ),
   )
   uiFont.onchange = () => onChange({ uiFont: uiFont.value as UiFont })
+  const offerRow = checkRow('Offer to add books opened from elsewhere', 'Shows Move / Copy to library when a file is outside the library folder.', offerLibrary)
+  const interfaceRow = row('Interface font', 'The library and the panels; the book has its own (Reading).', uiFont)
+  const continueRow = row('Continue reading', 'How many of the last books read it shows.', historyLength)
+  const clearRow = row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory }))
   // The volume keys are a phone's.
   const volumeKeysRow = checkRow('Volume keys turn pages', 'While a book is open.', volumeKeys)
   volumeKeysRow.classList.add('android-only')
@@ -327,14 +336,11 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       modules,
     ],
     system: [
-      libraryRow,
-      checkRow('Offer to add books opened from elsewhere', 'Shows Move / Copy to library when a file is outside the library folder.', offerLibrary),
+      group('Library', libraryRow, offerRow),
+      group('History', continueRow, clearRow),
+      group('Sync', cloudRow, cloudAddRow),
       fileTypesRow,
-      cloudRow,
-      cloudAddRow,
-      row('Interface font', 'The library and the panels; the book has its own (Reading).', uiFont),
-      row('Continue reading', 'How many of the last books read it shows.', historyLength),
-      row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory })),
+      interfaceRow,
     ],
     shortcuts: [shortcuts],
     about: [

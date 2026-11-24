@@ -263,6 +263,23 @@ describe('settings page', () => {
     expect(actions.close).toHaveBeenCalledOnce()
   })
 
+  it('groups the System rows into Library, History and Sync', () => {
+    const { host, panel } = page()
+    panel.showSection('system')
+    const section = host.querySelector('#settings-system')
+    if (!section) throw new Error('no system section')
+    const groups = [...section.querySelectorAll('.group')]
+    expect(groups.map(g => g.querySelector('h3')?.textContent)).toEqual(['Library', 'History', 'Sync'])
+    const rowsOf = (title: string) => {
+      const found = groups.find(g => g.querySelector('h3')?.textContent === title)
+      if (!found) throw new Error(`no group "${title}"`)
+      return [...found.querySelectorAll('.row-label')].map(l => l.textContent)
+    }
+    expect(rowsOf('Library')).toEqual(['Library folder', 'Offer to add books opened from elsewhere'])
+    expect(rowsOf('History')).toEqual(['Continue reading', 'History'])
+    expect(rowsOf('Sync')).toEqual(['Cloud connection', 'Add cloud'])
+  })
+
   it('shows the library folder', () => {
     const { host, panel } = page()
     expect(host.textContent).toContain('Not chosen yet')
