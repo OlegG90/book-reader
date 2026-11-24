@@ -131,13 +131,18 @@ fn auth_url(app_key: &str, challenge: &str, state: &str) -> String {
         .finish()
 }
 
-/// Binds the loopback address and builds the Dropbox authorize address.
-/// The port is fixed: it must match the URI registered in the App Console.
+/// Binds the loopback address (dual-stack where possible, else IPv4) and
+/// builds the Dropbox authorize address. The port is fixed: it must match
+/// the URI registered in the App Console.
 pub fn begin() -> Result<PendingLogin, String> {
     let app_key = app_key()?;
     let verifier = random_string(64);
     let state = random_string(16);
-    let listener = TcpListener::bind("127.0.0.1:51943").map_err(|e| format!("login: the redirect port is busy ({e})"))?;
+    // `localhost` may resolve to ::1 or 127.0.0.1 depending on the device;
+    // listen on both where the stack allows it, so the browser always lands.
+    let listener = TcpListener::bind("[::]:51943")
+        .or_else(|_| TcpListener::bind("127.0.0.1:51943"))
+        .map_err(|e| format!("login: the redirect port is busy ({e})"))?;
     let url = auth_url(app_key, &challenge(&verifier), &state);
     Ok(PendingLogin { verifier, state, listener, url })
 }
