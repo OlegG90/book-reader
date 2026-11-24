@@ -120,6 +120,13 @@ pub(crate) fn google_finish(answer: String, store: State<Store>) -> CmdResult<()
     google::finish_answer(&answer)
 }
 
+/// A Google sign-in answer waiting on a phone, if one arrived. The settings drain
+/// it at startup and on every oauth event, so a cold start cannot lose it.
+#[tauri::command(async)]
+pub(crate) fn google_take_answer() -> CmdResult<Option<String>> {
+    Active::take_oauth_answer()
+}
+
 /// The app version (from Cargo.toml), shown in the About panel.
 #[tauri::command]
 pub(crate) fn app_version() -> String {

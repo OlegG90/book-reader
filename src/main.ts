@@ -820,19 +820,25 @@ initIncoming(() => void invoke('open_incoming').catch(e => showError(undefined, 
 initVolumeKeys(direction => {
   if (reading.book) void runCommand(direction)
 })
-// A Google sign-in answer back from the phone's browser: finish the login.
-initOauthAnswer(url =>
-  void invoke('google_finish', { answer: url }).then(
-    () => {
-      void refreshCloudStatus()
-      void sourcesPanel.refresh()
-    },
-    e => {
-      showError(undefined, e)
-      void refreshCloudStatus()
-    },
-  ),
-)
+// A Google sign-in answer back from the phone's browser, or one stashed
+// while the app started: finish the login (draining takes it exactly once).
+async function drainOauthAnswer() {
+  const answer = await invoke<string | null>('google_take_answer').catch(e => {
+    console.error(e)
+    return null
+  })
+  if (!answer) return
+  try {
+    await invoke('google_finish', { answer })
+    void refreshCloudStatus()
+    void sourcesPanel.refresh()
+  } catch (e) {
+    showError(undefined, e)
+    void refreshCloudStatus()
+  }
+}
+initOauthAnswer(() => void drainOauthAnswer())
+void drainOauthAnswer()
 // Another window changed a setting: apply it here too (it is already saved).
 appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
   const valid = readSettings({ ...settings, ...payload })

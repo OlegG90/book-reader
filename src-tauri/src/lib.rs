@@ -106,6 +106,7 @@ pub fn run() {
             system_cmds::google_connect_android,
             system_cmds::google_disconnect,
             system_cmds::google_finish,
+            system_cmds::google_take_answer,
             system_cmds::app_version,
             system_cmds::open_repository,
             system_cmds::check_for_update,

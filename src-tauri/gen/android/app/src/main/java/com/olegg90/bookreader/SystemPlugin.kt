@@ -92,6 +92,9 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
   /** A book handed to the app ("Open with", "Share") and not yet opened. */
   @Volatile private var pending: Uri? = null
 
+  /** A Google sign-in answer not yet finished, if one arrived. */
+  @Volatile private var oauthAnswer: String? = null
+
   override fun load(webView: WebView) {
     instance = this
     if (!takeOauth(activity.intent)) takeBook(activity.intent)
@@ -104,18 +107,29 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
 
   /**
    * A Google sign-in answer for `google_finish` (the browser back on the
-   * app's scheme): handed to the settings as an `oauth` event. False for
-   * anything else; a book intent still goes to `takeBook`.
+   * app's scheme). Stashed like a handed-over book: the frontend drains it
+   * at startup and on every `oauth` event, so a cold start cannot lose it.
+   * False for anything else; a book intent still goes to `takeBook`.
    */
   private fun takeOauth(intent: Intent?): Boolean {
     val uri = intent?.data
     if (intent?.action != Intent.ACTION_VIEW || uri?.scheme != "com.olegg90.bookreader") return false
     // Reopened from the recent apps: the answer was handed over before.
     if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return false
-    trigger("oauth", JSObject().put("url", uri.toString()))
+    oauthAnswer = uri.toString()
+    trigger("oauth", JSObject())
     // Handled once: a recreated activity must not answer it again.
     activity.intent = Intent(Intent.ACTION_MAIN)
     return true
+  }
+
+  /** The stashed sign-in answer: `{ url }`, or `{}` when none is waiting. */
+  @Command
+  fun takeOauthAnswer(invoke: Invoke) {
+    val url = oauthAnswer
+    oauthAnswer = null
+    if (url == null) invoke.resolve(JSObject())
+    else invoke.resolve(JSObject().put("url", url))
   }
 
   /** Keeps a book intent for `takeIncoming`; false for any other intent. */
