@@ -1,4 +1,5 @@
 import { FONTS, LINE_HEIGHT, LINE_LENGTH, THEMES, el, stepFontSize, type Appearance, type Flow, type Font, type Range, type Theme } from 'reader-core'
+import { icon } from './icons'
 
 /** Everything the settings edit. */
 export interface PanelValues extends Appearance {
@@ -317,7 +318,31 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       onclick: () => showSection(id),
     }),
   )
+  const navEl = el('nav', { className: 'sections', ariaLabel: 'Sections', role: 'tablist' }, ...nav)
+  const prevArrow = el('button', { type: 'button', className: 'sections-arrow', ariaLabel: 'Earlier sections', hidden: true, onclick: () => scrollSections(-1) }, icon('chevron-left'))
+  const nextArrow = el('button', { type: 'button', className: 'sections-arrow', ariaLabel: 'More sections', hidden: true, onclick: () => scrollSections(1) }, icon('chevron-right'))
   sections.forEach(section => section.setAttribute('role', 'tabpanel'))
+
+  /** Scrolls the section strip by most of its width. */
+  function scrollSections(direction: -1 | 1) {
+    navEl.scrollBy({ left: (direction * navEl.clientWidth * 4) / 5, behavior: 'smooth' })
+  }
+
+  /** Shows an arrow on each edge that hides more sections. */
+  function updateArrows() {
+    const overflowing = navEl.scrollWidth > navEl.clientWidth + 1
+    prevArrow.hidden = !(overflowing && navEl.scrollLeft > 1)
+    nextArrow.hidden = !(overflowing && navEl.scrollLeft + navEl.clientWidth < navEl.scrollWidth - 1)
+  }
+
+  /** Keeps the current tab visible in the strip. */
+  function revealTab(i: number) {
+    const tab = nav[i]
+    if (tab.offsetLeft < navEl.scrollLeft) navEl.scrollLeft = tab.offsetLeft
+    else if (tab.offsetLeft + tab.offsetWidth > navEl.scrollLeft + navEl.clientWidth) {
+      navEl.scrollLeft = tab.offsetLeft + tab.offsetWidth - navEl.clientWidth
+    }
+  }
 
   host.append(
     el(
@@ -326,8 +351,12 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       el('button', { type: 'button', className: 'back', textContent: '← Back', onclick: actions.close }),
       el('h1', { textContent: 'Settings' }),
     ),
-    el('div', { className: 'page-body' }, el('nav', { className: 'sections', ariaLabel: 'Sections', role: 'tablist' }, ...nav), el('div', { className: 'page-content' }, ...sections)),
+    el('div', { className: 'page-body' }, el('div', { className: 'sections-wrap' }, prevArrow, navEl, nextArrow), el('div', { className: 'page-content' }, ...sections)),
   )
+
+  navEl.addEventListener('scroll', updateArrows)
+  // Fonts, rotation and hidden tabs change what fits; jsdom has no ResizeObserver.
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(updateArrows).observe(navEl)
 
   /** Hides the Organize button (the organize module is off). */
   function setOrganizeVisible(visible: boolean) {
@@ -348,10 +377,14 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   function setSectionVisible(id: SettingsSection, visible: boolean) {
     const i = SECTIONS.findIndex(section => section.id === id)
     nav[i].hidden = !visible
+    updateArrows()
   }
 
   /** Shows one section (a tab) and marks it in the list. */
   function showSection(id: SettingsSection) {
+    const shown = SECTIONS.findIndex(section => section.id === id)
+    if (shown >= 0) revealTab(shown)
+    updateArrows()
     SECTIONS.forEach((section, i) => {
       const current = section.id === id
       nav[i].setAttribute('aria-selected', String(current))

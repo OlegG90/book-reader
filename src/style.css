@@ -1383,6 +1383,32 @@ button:hover {
   border-color: var(--accent);
 }
 
+/* The section strip keeps its grid place on the desktop; on a phone the
+   arrows flank it, each shown only while its edge hides more sections. */
+#settings .sections-wrap {
+  display: contents;
+}
+
+#settings .sections-arrow {
+  display: none;
+  border: none;
+  padding: 6px;
+  color: var(--muted);
+}
+
+.android #settings .sections-wrap {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.android #settings .sections-arrow:not([hidden]) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 #settings .page-content {
   overflow-y: auto;
   padding: 32px 4px calc(48px + var(--safe-bottom));
