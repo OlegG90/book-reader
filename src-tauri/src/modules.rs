@@ -33,6 +33,8 @@ pub struct Module {
     pub optional: bool,
     pub enabled: bool,
     pub in_use: bool,
+    /// Why the switch is locked, for the settings to show; `None` when free.
+    pub in_use_reason: Option<String>,
 }
 
 /// One layer-1 module and everything about it that never changes at runtime.
@@ -154,7 +156,7 @@ pub fn list(state: &store::State) -> Vec<Module> {
         .into_iter()
         .map(|def| {
             let enabled = !disabled.contains(def.id);
-            let in_use = use_reason(state, def.id).is_some();
+            let in_use_reason = use_reason(state, def.id);
             Module {
                 id: def.id,
                 kind: def.kind,
@@ -164,7 +166,8 @@ pub fn list(state: &store::State) -> Vec<Module> {
                 needs_network: def.needs_network,
                 optional: def.optional,
                 enabled,
-                in_use,
+                in_use: in_use_reason.is_some(),
+                in_use_reason,
             }
         })
         .collect()
@@ -245,6 +248,24 @@ mod tests {
         assert!(!is_off(&state, "format:fb2"));
         let state = state_with(Map::from_iter([("disabledModules".into(), json!([42]))]));
         assert!(!is_off(&state, "format:fb2"));
+    }
+
+    #[test]
+    fn list_names_the_in_use_reason() {
+        let all = list(&state_with(Map::new()));
+        let catalogs = all.iter().find(|m| m.id == "capability:catalogs").unwrap();
+        assert!(catalogs.in_use);
+        assert_eq!(catalogs.in_use_reason.as_deref(), Some("turn off \"Progress sync\" first"));
+    }
+
+    #[test]
+    fn list_serializes_camel_case_for_the_settings() {
+        // The settings read these keys; renaming one breaks the Modules section.
+        let json = serde_json::to_value(list(&state_with(Map::new()))).unwrap();
+        for key in ["id", "kind", "label", "hint", "extensions", "needsNetwork", "optional", "enabled", "inUse", "inUseReason"] {
+            assert!(json[0].get(key).is_some(), "missing {key}");
+        }
+        assert_eq!(json[0]["kind"], "format");
     }
 
     #[test]

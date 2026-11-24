@@ -2,6 +2,8 @@ import { FONTS, LINE_HEIGHT, LINE_LENGTH, THEMES, el, stepFontSize, type Appeara
 
 /** Everything the settings edit. */
 export interface PanelValues extends Appearance {
+  /** Layer-1 module ids turned off in Settings › Modules (backend-owned). */
+  disabledModules: string[]
   savePositions: boolean
   /** Offer to copy or move books opened from outside the library into it. */
   offerLibrary: boolean
@@ -22,8 +24,24 @@ export type UiFont = (typeof UI_FONTS)[number]
 /** The choices for `historyLength`. */
 export const HISTORY_LENGTHS = [1, 2, 3, 4, 5] as const
 
+/** One layer-1 module as `list_modules` reports it; the label and hint come from the backend. */
+export interface ModuleInfo {
+  id: string
+  kind: 'format' | 'capability'
+  label: string
+  hint: string
+  extensions: string[]
+  needsNetwork: boolean
+  optional: boolean
+  enabled: boolean
+  inUse: boolean
+  inUseReason: string | null
+}
+
 /** Buttons in the settings page that act instead of changing a value. */
 export interface PanelActions {
+  /** Turns a layer-1 module off (or back on) in Settings › Modules. */
+  toggleModule(id: string, off: boolean): void
   /** Forgets the recent books list (reading positions are kept). */
   clearHistory(): void
   /** Registers or unregisters the app for its book file types. */
@@ -161,6 +179,7 @@ function checkRow(label: string, hint: string, box: HTMLInputElement) {
 const SECTIONS = [
   { id: 'reading', title: 'Reading' },
   { id: 'catalogs', title: 'Catalogs' },
+  { id: 'modules', title: 'Modules' },
   { id: 'system', title: 'System' },
   { id: 'shortcuts', title: 'Shortcuts', desktopOnly: true },
   { id: 'about', title: 'About' },
@@ -170,8 +189,8 @@ export type SettingsSection = (typeof SECTIONS)[number]['id']
 
 /**
  * The settings page: a back button, the sections' names on the left as tabs,
- * and one section at a time (Reading with the appearance, Catalogs, System
- * with the library folder, Shortcuts). Every change goes to `onChange` with just the changed values;
+ * and one section at a time (Reading with the appearance, Catalogs, Modules,
+ * System with the library folder, Shortcuts). Every change goes to `onChange` with just the changed values;
  * button presses go to `actions`. `catalogs`, `shortcuts` and `about` are
  * the hosts the app fills in (the sources panel, the key list, the version).
  */
@@ -192,6 +211,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const fileTypesStatus = el('span', { className: 'hint' })
   const fileTypesButton = el('button', { type: 'button', onclick: actions.toggleFileTypes })
   const catalogs = el('div', { className: 'catalogs' })
+  const modules = el('div', { className: 'modules' })
+  const moduleBoxes = new Map<string, HTMLInputElement>()
   const shortcuts = el('div', { className: 'shortcuts' })
   const about = el('div', { className: 'about' })
   const updateStatus = el('span', { className: 'hint', textContent: 'Asks GitHub for the latest release.' })
@@ -227,6 +248,34 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const volumeKeysRow = checkRow('Volume keys turn pages', 'While a book is open.', volumeKeys)
   volumeKeysRow.classList.add('android-only')
 
+  /** Shows the backend's modules, grouped by kind, with toggle switches. */
+  function setModules(list: ModuleInfo[]) {
+    modules.replaceChildren()
+    moduleBoxes.clear()
+    const groups = [
+      ['format', 'Formats'],
+      ['capability', 'Capabilities'],
+    ] as const
+    for (const [kind, title] of groups) {
+      const items = list.filter(m => m.kind === kind)
+      if (!items.length) continue
+      const group = el('div', { className: 'group' }, el('h3', { textContent: title }))
+      for (const item of items) {
+        const box = el('input', { type: 'checkbox' })
+        box.checked = item.enabled
+        box.disabled = !item.optional || item.inUse
+        box.onchange = () => actions.toggleModule(item.id, !box.checked)
+        const notes = [
+          item.inUse && item.inUseReason ? `In use: ${item.inUseReason}.` : '',
+          !item.optional ? 'Built in: cannot be turned off.' : '',
+        ].filter(Boolean)
+        group.append(checkRow(item.label, notes.length ? `${item.hint} ${notes.join(' ')}` : item.hint, box))
+        moduleBoxes.set(item.id, box)
+      }
+      modules.append(group)
+    }
+  }
+
   const content: Record<SettingsSection, HTMLElement[]> = {
     reading: [
       appearance,
@@ -234,6 +283,10 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       volumeKeysRow,
     ],
     catalogs: [catalogs],
+    modules: [
+      el('p', { className: 'muted', textContent: "Turn off what this install doesn't need. A disabled module hides from the interface." }),
+      modules,
+    ],
     system: [
       libraryRow,
       checkRow('Offer to add books opened from elsewhere', 'Shows Move / Copy to library when a file is outside the library folder.', offerLibrary),
@@ -290,6 +343,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     volumeKeys.checked = values.volumeKeys
     historyLength.value = String(values.historyLength)
     uiFont.value = values.uiFont
+    for (const [id, box] of moduleBoxes) box.checked = !values.disabledModules.includes(id)
   }
 
   /** Asks for the latest release and says what it found; a newer one gets a button to its page. */
@@ -323,5 +377,5 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   setFileTypesRegistered(false)
   setLibraryFolder(null)
   showSection('reading')
-  return { show, setFileTypesRegistered, setLibraryFolder, showSection, catalogs, shortcuts, about }
+  return { show, setFileTypesRegistered, setLibraryFolder, showSection, setModules, catalogs, shortcuts, about }
 }

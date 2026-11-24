@@ -27,7 +27,7 @@ import { closePopup } from './book-menu'
 import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
-import { createAppearancePanel, createSettingsPage, type SettingsSection } from './settings-panel'
+import { createAppearancePanel, createSettingsPage, type ModuleInfo, type SettingsSection } from './settings-panel'
 import { initBackButton, initIncoming, initVolumeKeys, setReading } from './platform'
 import { createReadingView, type AddMode, type Offer } from './reading-view'
 import { createLibraryView, type View } from './library-view'
@@ -318,6 +318,7 @@ function openSettings(section?: SettingsSection) {
   closePanels()
   $('settings').hidden = false
   void refreshFileTypesStatus()
+  refreshModules()
   if (section) settingsPage.showSection(section)
   $('settings').querySelector<HTMLElement>('button')?.focus()
 }
@@ -359,6 +360,7 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
     void invoke(command).then(refreshFileTypesStatus, console.error)
   },
   changeLibrary: () => void library.chooseLibrary(true),
+  toggleModule: (id, off) => void toggleModule(id, off),
   openRepository: () => void invoke('open_repository').catch(console.error),
   checkForUpdate: () => invoke('check_for_update'),
   openLatestRelease: () => void invoke('open_latest_release').catch(console.error),
@@ -411,8 +413,11 @@ function showView(to: View) {
   $('library').hidden = !library.isReady() || settingsView
   if (library.isSettingsEmbedded()) $('settings').hidden = !settingsView
   if (settingsView) {
+    if (!wasSettings) {
+      refreshModules()
+      void refreshFileTypesStatus()
+    }
     settingsPage.showSection(to.slice('settings:'.length) as SettingsSection)
-    if (!wasSettings) void refreshFileTypesStatus()
     foldSettingsNav(false)
   } else if (library.isReady()) {
     showTab(to === 'catalogs' || to === 'series' ? to : 'books')
@@ -506,6 +511,25 @@ async function flushSettings() {
   const changes = pendingSettings
   pendingSettings = {}
   if (Object.keys(changes).length) await invoke('update_settings', { changes }).catch(console.error)
+}
+
+/** Reloads the Modules section from the backend (switches and their reasons). */
+function refreshModules() {
+  void invoke<ModuleInfo[]>('list_modules').then(modules => settingsPage.setModules(modules), console.error)
+}
+
+/** Turns a layer-1 module off or back on, then refreshes its row. */
+async function toggleModule(id: string, off: boolean) {
+  const disabledModules = off ? [...new Set([...settings.disabledModules, id])] : settings.disabledModules.filter(m => m !== id)
+  try {
+    await invoke('update_settings', { changes: { disabledModules } })
+  } catch (e) {
+    showError(undefined, e)
+    refreshModules()
+    return
+  }
+  changeSettings({ disabledModules })
+  refreshModules()
 }
 
 /** Shows whether the app is registered for its book file types. */
