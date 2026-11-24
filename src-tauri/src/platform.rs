@@ -21,8 +21,9 @@ pub(crate) trait Platform {
     /// files access off); nothing to check on the desktop.
     fn check_library_access(app: &AppHandle) -> Result<(), String>;
 
-    /// A book file the reader picks (`None` when cancelled).
-    fn pick_book(window: &Window) -> Result<Option<Outside>, String>;
+    /// A book file the reader picks (`None` when cancelled); the dialog
+    /// offers only `extensions` (without dots), so disabled formats stay out.
+    fn pick_book(window: &Window, extensions: &[&str]) -> Result<Option<Outside>, String>;
 
     /// A book handed to the app from outside ("Open with", "Share" on a
     /// phone); nothing waits on the desktop.

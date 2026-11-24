@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import { FORMAT_LABELS, fetchSources, inLibrary, preferredFile, type CatalogBook, type CatalogEntry, type Feed, type Source } from './catalog'
+import { fetchSources, formatLabel, inLibrary, preferredFile, type CatalogBook, type CatalogEntry, type Feed, type Source } from './catalog'
 import { el } from 'reader-core'
 import { crumbs } from './crumbs'
 import { icon } from './icons'
@@ -138,8 +138,10 @@ export function createCatalogView(deps: CatalogViewDeps) {
     const actionLabel = (text: string) => action.replaceChildren(icon('download'), text)
     // Only a hint (same title and author): downloading checks the content.
     const known = inLibrary(book, deps.library())
+    // No enabled format: nothing to download, so no button either.
+    action.hidden = !file
     if (file) {
-      const label = `Download ${FORMAT_LABELS[file.format]}`
+      const label = `Download ${formatLabel(file.format)}`
       actionLabel(label)
       action.onclick = async () => {
         if (!source) return
@@ -170,7 +172,7 @@ export function createCatalogView(deps: CatalogViewDeps) {
         { className: 'about' },
         el('span', { className: 'title', textContent: book.title }, ...(known ? [el('span', { className: 'tag', textContent: 'In library' })] : [])),
         el('span', { className: 'author', textContent: book.authors.join(', ') }),
-        el('span', { className: 'meta', textContent: [...new Set(book.files.map(f => FORMAT_LABELS[f.format]))].join(' · ') }),
+        el('span', { className: 'meta', textContent: [...new Set(book.files.map(f => formatLabel(f.format)))].join(' · ') }),
       ),
       action,
     )

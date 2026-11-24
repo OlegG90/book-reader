@@ -5,8 +5,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use crate::xml::{attr, invalid, last_two, local_name, walk_xml, Xml};
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{self, BufReader, Read, Seek};
+use std::io::{self, Read, Seek};
 use std::path::Path;
 use zip::ZipArchive;
 
@@ -73,83 +72,11 @@ pub struct Metadata {
     pub cover: Option<Cover>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Format {
-    Epub,
-    Fb2,
-    Fb2Zip,
-}
-
-/// The file name endings the reader opens (case-insensitive).
-const SUFFIXES: &[(&str, Format)] =
-    &[(".epub", Format::Epub), (".fb2.zip", Format::Fb2Zip), (".fbz", Format::Fb2Zip), (".fb2", Format::Fb2)];
-
-/// The same endings without the dot, for a file dialog's filter.
-#[cfg_attr(mobile, allow(dead_code))]
-pub fn extensions() -> Vec<&'static str> {
-    SUFFIXES.iter().map(|(suffix, _)| &suffix[1..]).collect()
-}
-
-impl Format {
-    /// Splits a file name (or path) into the part before its book extension
-    /// and the format; `None` for files the reader doesn't open.
-    pub fn split(name: &str) -> Option<(&str, Format)> {
-        SUFFIXES.iter().find_map(|&(suffix, format)| {
-            let cut = name.len().checked_sub(suffix.len())?;
-            let tail = name.get(cut..)?;
-            tail.eq_ignore_ascii_case(suffix).then(|| (&name[..cut], format))
-        })
-    }
-
-    /// The format, by file name; `None` for files the reader doesn't open.
-    pub fn of(path: &Path) -> Option<Format> {
-        Format::split(&path.file_name()?.to_string_lossy()).map(|(_, format)| format)
-    }
-
-    /// The extension the library uses for this format.
-    pub fn extension(self) -> &'static str {
-        match self {
-            Format::Epub => "epub",
-            Format::Fb2 => "fb2",
-            Format::Fb2Zip => "fb2.zip",
-        }
-    }
-
-    /// The format's name, for showing.
-    pub fn label(self) -> &'static str {
-        match self {
-            Format::Epub => "EPUB",
-            Format::Fb2 | Format::Fb2Zip => "FB2",
-        }
-    }
-}
-
-pub fn read(path: &Path) -> io::Result<Metadata> {
-    let format = Format::of(path).ok_or_else(|| invalid("not a book file"))?;
-    let mut file = BufReader::new(File::open(path)?);
-    match format {
-        Format::Epub => epub(file),
-        Format::Fb2 => {
-            let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes)?;
-            fb2(&bytes)
-        }
-        Format::Fb2Zip => {
-            let mut zip = ZipArchive::new(file).map_err(zip_error)?;
-            let name = (0..zip.len())
-                .filter_map(|i| zip.name_for_index(i)?.ok().map(|n| n.into_owned()))
-                .find(|n| n.to_lowercase().ends_with(".fb2"))
-                .ok_or_else(|| invalid("no .fb2 file inside"))?;
-            fb2(&read_entry(&mut zip, &name)?)
-        }
-    }
-}
-
-fn zip_error(e: zip::result::ZipError) -> io::Error {
+pub(crate) fn zip_error(e: zip::result::ZipError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, e)
 }
 
-fn read_entry<R: Read + Seek>(zip: &mut ZipArchive<R>, name: &str) -> io::Result<Vec<u8>> {
+pub(crate) fn read_entry<R: Read + Seek>(zip: &mut ZipArchive<R>, name: &str) -> io::Result<Vec<u8>> {
     let mut entry = zip.by_name(name).map_err(zip_error)?;
     let mut bytes = Vec::new();
     entry.read_to_end(&mut bytes)?;
@@ -177,7 +104,7 @@ fn in_title_info(stack: &[String]) -> Option<&[String]> {
     (stack.len() >= 3 && stack[1] == "description" && stack[2] == "title-info").then(|| &stack[3..])
 }
 
-fn fb2(bytes: &[u8]) -> io::Result<Metadata> {
+pub(crate) fn fb2(bytes: &[u8]) -> io::Result<Metadata> {
     let xml = decode_fb2(bytes);
     let mut meta = Metadata::default();
     let mut cover_id: Option<String> = None;
@@ -272,7 +199,7 @@ struct Creator {
     name: String,
 }
 
-fn epub<R: Read + Seek>(file: R) -> io::Result<Metadata> {
+pub(crate) fn epub<R: Read + Seek>(file: R) -> io::Result<Metadata> {
     let mut zip = ZipArchive::new(file).map_err(zip_error)?;
     let container = String::from_utf8_lossy(&read_entry(&mut zip, "META-INF/container.xml")?).into_owned();
     let mut opf_path = None;
@@ -404,37 +331,12 @@ mod tests {
     use std::io::{Cursor, Write};
     use zip::write::SimpleFileOptions;
 
-    fn samples() -> std::path::PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../samples")
-    }
-
     #[test]
     fn authors_parse_both_name_orders() {
         assert_eq!(Author::parse("Carroll, Lewis"), Author { first: "Lewis".into(), last: "Carroll".into() });
         assert_eq!(Author::parse("Jane  Austen"), Author { first: "Jane".into(), last: "Austen".into() });
         assert_eq!(Author::parse("Homer"), Author { first: String::new(), last: "Homer".into() });
         assert_eq!(Author::parse("Arthur Conan Doyle").sort_name(), "Doyle Arthur Conan");
-    }
-
-    #[test]
-    fn formats_by_name() {
-        assert_eq!(Format::of(Path::new("A.EPUB")), Some(Format::Epub));
-        assert_eq!(Format::of(Path::new("a.fb2")), Some(Format::Fb2));
-        assert_eq!(Format::of(Path::new("a.FB2.zip")), Some(Format::Fb2Zip));
-        assert_eq!(Format::of(Path::new("a.fbz")), Some(Format::Fb2Zip));
-        assert_eq!(Format::of(Path::new("a.zip")), None);
-        assert_eq!(Format::of(Path::new("a.md")), None);
-    }
-
-    #[test]
-    fn reads_the_sample_books() {
-        let alice = read(&samples().join("alice-in-wonderland.epub")).unwrap();
-        assert!(alice.book.title.contains("Alice"), "{}", alice.book.title);
-        assert_eq!(alice.book.authors[0].last, "Carroll");
-        let fb2 = read(&samples().join("sample-windows-1251.fb2")).unwrap();
-        assert!(fb2.book.title.chars().any(|c| ('а'..='я').contains(&c)), "{}", fb2.book.title);
-        assert!(!fb2.book.authors.is_empty());
-        assert!(!read(&samples().join("sample-utf8.fb2.zip")).unwrap().book.title.is_empty());
     }
 
     const FB2: &str = r##"<?xml version="1.0" encoding="utf-8"?>

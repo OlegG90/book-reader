@@ -66,7 +66,7 @@ fn definitions() -> Vec<Def> {
             kind: ModuleKind::Format,
             label: "FB2",
             hint: "Books as FB2, including .fb2.zip and .fbz archives.",
-            extensions: &["fb2", "fb2.zip", "fbz"],
+            extensions: &["fb2.zip", "fbz", "fb2"],
             needs_network: false,
             optional: true,
         },
@@ -266,6 +266,22 @@ mod tests {
             assert!(json[0].get(key).is_some(), "missing {key}");
         }
         assert_eq!(json[0]["kind"], "format");
+    }
+
+    #[test]
+    fn format_modules_match_the_registry() {
+        // The Modules section and the readers stay one list: same ids,
+        // labels and endings in the same order.
+        let defs = definitions();
+        let formats: Vec<_> = defs.iter().filter(|d| d.kind == ModuleKind::Format).collect();
+        let readers = crate::formats::registry();
+        assert_eq!(formats.len(), readers.len());
+        for (def, reader) in formats.iter().zip(readers.iter()) {
+            assert_eq!(def.id, reader.module());
+            assert_eq!(def.label, reader.label());
+            let endings: Vec<String> = reader.suffixes().iter().map(|s| s[1..].to_string()).collect();
+            assert_eq!(def.extensions, endings.iter().map(String::as_str).collect::<Vec<_>>());
+        }
     }
 
     #[test]

@@ -6,6 +6,7 @@
 //! that one stays the user's to make. `.fb2.zip` can't be associated: Windows
 //! only looks at the last extension, and taking over `.zip` is not an option.
 
+use crate::formats;
 use std::io;
 use std::path::Path;
 use winreg::enums::{HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, KEY_ALL_ACCESS};
@@ -13,7 +14,16 @@ use winreg::RegKey;
 
 const PROG_ID: &str = "BookReader.Book";
 const APP_KEY: &str = r"Applications\breader.exe";
-pub const EXTENSIONS: &[&str] = &[".epub", ".fb2", ".fbz"];
+
+/// The extensions Windows associates: the registry's single-dot endings
+/// (`.fb2.zip` can't be associated: Windows only looks at the last one).
+pub fn extensions() -> Vec<&'static str> {
+    formats::registry()
+        .iter()
+        .flat_map(|r| r.suffixes().iter().copied())
+        .filter(|s| !s[1..].contains('.'))
+        .collect()
+}
 
 fn user_classes() -> io::Result<RegKey> {
     RegKey::predef(HKEY_CURRENT_USER).create_subkey(r"Software\Classes").map(|(key, _)| key)
@@ -64,8 +74,8 @@ fn register_in(classes: &RegKey, exe: &Path, current_default: impl Fn(&str) -> O
     app.create_subkey(r"shell\open\command")?.0.set_value("", &open)?;
     let (types, _) = app.create_subkey("SupportedTypes")?;
 
-    for ext in EXTENSIONS {
-        types.set_value(*ext, &"")?;
+    for ext in extensions() {
+        types.set_value(ext, &"")?;
         let (key, _) = classes.create_subkey(ext)?;
         key.create_subkey("OpenWithProgids")?.0.set_value(PROG_ID, &"")?;
         // Become the default only where no program is the default yet.
@@ -78,7 +88,7 @@ fn register_in(classes: &RegKey, exe: &Path, current_default: impl Fn(&str) -> O
 
 /// Removes what `register_in` added, leaving other apps' settings alone.
 fn unregister_in(classes: &RegKey) -> io::Result<()> {
-    for ext in EXTENSIONS {
+    for ext in extensions() {
         let Ok(key) = classes.open_subkey_with_flags(ext, KEY_ALL_ACCESS) else { continue };
         if let Ok(with) = key.open_subkey_with_flags("OpenWithProgids", KEY_ALL_ACCESS) {
             ignore_missing(with.delete_value(PROG_ID))?;
@@ -135,7 +145,7 @@ mod tests {
 
         let command: String = classes.open_subkey(format!(r"{PROG_ID}\shell\open\command")).unwrap().get_value("").unwrap();
         assert_eq!(command, format!("\"{EXE}\" \"%1\""));
-        for ext in EXTENSIONS {
+        for ext in extensions() {
             let key = classes.open_subkey(ext).unwrap();
             assert_eq!(key.get_value::<String, _>("").unwrap(), PROG_ID, "{ext}");
             assert!(key.open_subkey("OpenWithProgids").unwrap().get_raw_value(PROG_ID).is_ok(), "{ext}");
@@ -144,9 +154,25 @@ mod tests {
         unregister_in(&classes).unwrap();
         assert!(classes.open_subkey(PROG_ID).is_err());
         assert!(classes.open_subkey(APP_KEY).is_err());
-        for ext in EXTENSIONS {
+        for ext in extensions() {
             let key = classes.open_subkey(ext).unwrap();
             assert!(key.get_value::<String, _>("").is_err(), "{ext}");
+        }
+    }
+
+    #[test]
+    fn associations_follow_the_registry() {
+        let listed = extensions();
+        assert_eq!(listed, [".epub", ".fbz", ".fb2"]);
+        // Everything associated is a registry ending, and every single-dot
+        // registry ending is associated (`.fb2.zip` can't be: Windows only
+        // looks at the last extension).
+        let endings: Vec<&str> = formats::registry().iter().flat_map(|r| r.suffixes().iter().copied()).collect();
+        for ext in &listed {
+            assert!(endings.contains(ext), "{ext}");
+        }
+        for suffix in endings.iter().filter(|s| !s[1..].contains('.')) {
+            assert!(listed.contains(suffix), "{suffix}");
         }
     }
 

@@ -1,7 +1,10 @@
 //! One-off system commands: file types, updates, outside books, the library screen.
 
 use crate::cli::Launch;
+use crate::formats;
+use crate::modules;
 use crate::platform::{Active, Platform};
+use crate::store::Store;
 use crate::register;
 use crate::updates;
 use crate::windows::{open_or_focus, show_book, show_here};
@@ -56,8 +59,13 @@ pub(crate) fn check_for_update() -> CmdResult<updates::UpdateCheck> {
 
 /// Ctrl+O (on a phone, "Add book…"): asks for a book and opens it in this window.
 #[tauri::command(async)]
-pub(crate) fn pick_book(window: Window, originals: State<Originals>) -> CmdResult<()> {
-    if let Some(book) = Active::pick_book(&window)? {
+pub(crate) fn pick_book(window: Window, originals: State<Originals>, store: State<Store>) -> CmdResult<()> {
+    // The dialog offers only the enabled formats; a stale pick still refuses below.
+    let enabled = store.read(|s| formats::enabled_extensions(&modules::disabled_ids(s)));
+    if let Some(book) = Active::pick_book(&window, &enabled)? {
+        if let Some(reader) = formats::of(&book.path) {
+            store.read(|s| formats::check(s, reader))?;
+        }
         open_outside(&window, &originals, book);
     }
     Ok(())

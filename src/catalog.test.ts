@@ -1,11 +1,52 @@
 import { describe, expect, it } from 'vitest'
-import { inLibrary, preferredFile } from './catalog'
+import { formatLabel, formatOff, inLibrary, preferredFile, setFormats } from './catalog'
+import type { ModuleInfo } from './settings-panel'
+
+const module = (over: Partial<ModuleInfo> & { id: string }): ModuleInfo => ({
+  kind: 'format',
+  label: 'X',
+  hint: 'X.',
+  extensions: [],
+  needsNetwork: false,
+  optional: true,
+  enabled: true,
+  inUse: false,
+  inUseReason: null,
+  ...over,
+})
 
 describe('catalog', () => {
   it('prefers EPUB, then FB2', () => {
     expect(preferredFile([{ href: 'a', format: 'fb2' }, { href: 'b', format: 'epub' }])?.href).toBe('b')
     expect(preferredFile([{ href: 'a', format: 'fb2' }])?.href).toBe('a')
     expect(preferredFile([])).toBeUndefined()
+  })
+
+  it('takes the order and labels from the backend list', () => {
+    setFormats([
+      module({ id: 'format:fb2', label: 'X-FB2', extensions: ['fb2.zip', 'fbz', 'fb2'] }),
+      module({ id: 'format:epub', label: 'X-EPUB', extensions: ['epub'] }),
+    ])
+    expect(formatLabel('epub')).toBe('X-EPUB')
+    expect(preferredFile([{ href: 'a', format: 'fb2' }, { href: 'b', format: 'epub' }])?.href).toBe('a')
+    setFormats([
+      module({ id: 'format:epub', label: 'EPUB', extensions: ['epub'] }),
+      module({ id: 'format:fb2', label: 'FB2', extensions: ['fb2.zip', 'fbz', 'fb2'] }),
+    ])
+  })
+
+  it('skips a disabled format', () => {
+    setFormats([
+      module({ id: 'format:epub', label: 'EPUB', extensions: ['epub'], enabled: false }),
+      module({ id: 'format:fb2', label: 'FB2', extensions: ['fb2.zip', 'fbz', 'fb2'] }),
+    ])
+    expect(formatOff('epub')).toBe(true)
+    expect(preferredFile([{ href: 'a', format: 'epub' }, { href: 'b', format: 'fb2' }])?.href).toBe('b')
+    expect(preferredFile([{ href: 'a', format: 'epub' }])).toBeUndefined()
+    setFormats([
+      module({ id: 'format:epub', label: 'EPUB', extensions: ['epub'] }),
+      module({ id: 'format:fb2', label: 'FB2', extensions: ['fb2.zip', 'fbz', 'fb2'] }),
+    ])
   })
 
   it('spots books the library seems to hold', () => {

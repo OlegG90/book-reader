@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import type { ModuleInfo } from './settings-panel'
 /** What the backend reports about OPDS catalogs (see catalog.rs / opds.rs). */
 
 export interface Source {
@@ -43,12 +44,50 @@ export interface Feed {
   search: string | null
 }
 
-const FORMAT_ORDER: FileFormat[] = ['epub', 'fb2Zip', 'fb2']
-export const FORMAT_LABELS: Record<FileFormat, string> = { epub: 'EPUB', fb2: 'FB2', fb2Zip: 'FB2' }
+const EXTENSION_FORMAT: Record<string, FileFormat> = { epub: 'epub', fb2: 'fb2', 'fb2.zip': 'fb2Zip', fbz: 'fb2Zip' }
+let formatOrder: FileFormat[] = ['epub', 'fb2Zip', 'fb2']
+let formatLabels: Record<FileFormat, string> = { epub: 'EPUB', fb2: 'FB2', fb2Zip: 'FB2' }
+let formatModule: Record<FileFormat, string> = { epub: 'format:epub', fb2: 'format:fb2', fb2Zip: 'format:fb2' }
+let formatsOff = new Set<string>()
 
-/** The file downloaded by default: EPUB if the catalog has it, otherwise FB2. */
+/** Learns the formats from the backend's module list: order, labels and switches. */
+export function setFormats(modules: ModuleInfo[]) {
+  const order: FileFormat[] = []
+  const labels = {} as Record<FileFormat, string>
+  const owners = {} as Record<FileFormat, string>
+  const off = new Set<string>()
+  for (const m of modules) {
+    if (m.kind !== 'format') continue
+    if (!m.enabled) off.add(m.id)
+    for (const ext of m.extensions) {
+      const format = EXTENSION_FORMAT[ext]
+      if (!format || order.includes(format)) continue
+      order.push(format)
+      labels[format] = m.label
+      owners[format] = m.id
+    }
+  }
+  if (!order.length) return
+  formatOrder = order
+  formatLabels = labels
+  formatModule = owners
+  formatsOff = off
+}
+
+/** The label for a download button. */
+export function formatLabel(format: FileFormat): string {
+  return formatLabels[format]
+}
+
+/** Whether the format's module is turned off. */
+export function formatOff(format: FileFormat): boolean {
+  return formatsOff.has(formatModule[format])
+}
+
+/** The file downloaded by default: the enabled formats in backend order. */
 export function preferredFile(files: BookFile[]): BookFile | undefined {
-  for (const format of FORMAT_ORDER) {
+  for (const format of formatOrder) {
+    if (formatOff(format)) continue
     const file = files.find(f => f.format === format)
     if (file) return file
   }
