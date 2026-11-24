@@ -343,6 +343,7 @@ mod tests {
             ("capability:organize", "Organize"),
             ("capability:file-types", "File types"),
             ("capability:update-check", "Update check"),
+            ("capability:dropbox", "Dropbox"),
         ] {
             let off = state_with(disabled(&[id]));
             assert_eq!(require(&off, id), Err(format!("{label} is turned off in Settings > Modules")));

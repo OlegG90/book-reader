@@ -90,6 +90,7 @@ const fakeModules: ModuleInfo[] = [
   { id: 'format:fb2', kind: 'format', label: 'X-Fb2', hint: 'X-Fb2 books.', extensions: ['fb2'], needsNetwork: false, optional: true, enabled: false, inUse: false, inUseReason: null },
   { id: 'capability:catalogs', kind: 'capability', label: 'X-Catalogs', hint: 'X-Browse.', extensions: [], needsNetwork: true, optional: true, enabled: true, inUse: true, inUseReason: 'wipe the shelves first' },
   { id: 'capability:file-types', kind: 'capability', label: 'X-Types', hint: 'X-Open.', extensions: [], needsNetwork: false, optional: false, enabled: true, inUse: false, inUseReason: null },
+  { id: 'capability:dropbox', kind: 'capability', label: 'X-Dropbox', hint: 'X-Cloud.', extensions: [], needsNetwork: true, optional: true, enabled: false, inUse: false, inUseReason: null },
 ]
 
 function moduleBox(host: HTMLElement, label: string) {
@@ -183,6 +184,7 @@ describe('modules section', () => {
     expect(host.textContent).toContain('X-Fb2 books.')
     expect(moduleBox(host, 'X-Epub').checked).toBe(true)
     expect(moduleBox(host, 'X-Fb2').checked).toBe(false)
+    expect(moduleBox(host, 'X-Dropbox').checked).toBe(false)
   })
 
   it('toggles a module off and back on', () => {
