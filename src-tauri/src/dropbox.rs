@@ -166,7 +166,7 @@ pub fn begin() -> Result<PendingLogin, String> {
 /// keeps the refresh token like a catalog password.
 pub fn finish(login: PendingLogin) -> Result<(), String> {
     let code = wait_for_code(login.listener, &login.state)?;
-    let (_access, refresh) = exchange(app_key()?, &code, &login.verifier)?;
+    let (_access, refresh) = exchange(app_key()?, &code, &login.verifier, Active::password(TOKEN_ID))?;
     Active::save_password(TOKEN_ID, &refresh)
 }
 
@@ -230,7 +230,7 @@ fn respond(stream: &std::net::TcpStream, text: &str) {
 }
 
 /// Trades an auth code (or a refresh token) for tokens.
-fn exchange(app_key: &str, code: &str, verifier: &str) -> Result<(String, String), String> {
+fn exchange(app_key: &str, code: &str, verifier: &str, stored: Option<String>) -> Result<(String, String), String> {
     let body = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("code", code)
         .append_pair("grant_type", "authorization_code")
@@ -246,7 +246,7 @@ fn exchange(app_key: &str, code: &str, verifier: &str) -> Result<(String, String
     if reply.status != 200 {
         return Err(format!("Dropbox login failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
     }
-    tokens(&reply.body)
+    tokens(&reply.body, stored)
 }
 
 /// Trades the kept refresh token for an access token.
@@ -281,11 +281,18 @@ fn access_from(tokens: &serde_json::Value) -> Result<String, String> {
         .map(str::to_string)
 }
 
-fn tokens(body: &[u8]) -> Result<(String, String), String> {
+/// A re-authorization of an already approved app may come back without a
+/// new refresh token (no consent screen is shown): keep working with the one
+/// already kept instead of failing the login.
+fn pick_refresh(fresh: Option<String>, stored: Option<String>) -> Result<String, String> {
+    fresh.or(stored).ok_or_else(|| "login: Dropbox gave no refresh token (ask for offline access again)".into())
+}
+
+fn tokens(body: &[u8], stored: Option<String>) -> Result<(String, String), String> {
     let tokens = token_json(body)?;
-    let refresh =
-        tokens["refresh_token"].as_str().ok_or("login: Dropbox gave no refresh token (ask for offline access again)")?.to_string();
-    Ok((access_from(&tokens)?, refresh))
+    let access = access_from(&tokens)?;
+    let fresh = tokens["refresh_token"].as_str().map(str::to_string);
+    Ok((access, pick_refresh(fresh, stored)?))
 }
 
 /// Downloads the positions file; `None` when there is none yet.
@@ -422,7 +429,15 @@ mod tests {
         // What /oauth2/token answers to a refresh grant: access only.
         let body = br#"{"access_token": "sl.XXXX", "token_type": "bearer", "expires_in": 14400}"#;
         assert_eq!(access_from(&token_json(body).unwrap()).unwrap(), "sl.XXXX");
-        assert!(tokens(body).is_err(), "a code exchange without one still fails");
+        assert!(tokens(body, None).is_err(), "a code exchange without one still fails");
+        assert_eq!(tokens(body, Some("old".into())), Ok(("sl.XXXX".into(), "old".into())));
+    }
+
+    #[test]
+    fn reauth_without_a_new_token_keeps_the_kept_one() {
+        assert_eq!(pick_refresh(Some("new".into()), Some("old".into())), Ok("new".into()));
+        assert_eq!(pick_refresh(None, Some("old".into())), Ok("old".into()));
+        assert!(pick_refresh(None, None).is_err());
     }
 
     #[test]
