@@ -22,13 +22,14 @@ import '@fontsource/lora/cyrillic-600.css'
 import { commandFor, type Command } from './keys'
 import { SORTS, SORT_LABELS, type Sort } from './library'
 import { createCatalogView } from './catalog-view'
+import { setFormats } from './catalog'
 import { createSeriesView } from './series-view'
 import { closePopup } from './book-menu'
 import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
-import { createAppearancePanel, createSettingsPage, type SettingsSection } from './settings-panel'
-import { initBackButton, initIncoming, initVolumeKeys, setReading } from './platform'
+import { createAppearancePanel, createSettingsPage, type ModuleInfo, type SettingsSection } from './settings-panel'
+import { initBackButton, initIncoming, initVolumeKeys, isAndroid, setReading } from './platform'
 import { createReadingView, type AddMode, type Offer } from './reading-view'
 import { createLibraryView, type View } from './library-view'
 import { SYNC_EVERY_MS, SYNC_ON_CLOSE_MS } from './sync-manager'
@@ -55,6 +56,7 @@ const settingsReady = invoke<Record<string, unknown>>('get_settings')
     settings = readSettings(stored)
     applyTheme()
     showSettings()
+    applyCapabilities()
     library.showControls()
   })
 const library = createLibraryView({
@@ -318,6 +320,7 @@ function openSettings(section?: SettingsSection) {
   closePanels()
   $('settings').hidden = false
   void refreshFileTypesStatus()
+  refreshModules()
   if (section) settingsPage.showSection(section)
   $('settings').querySelector<HTMLElement>('button')?.focus()
 }
@@ -359,6 +362,7 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
     void invoke(command).then(refreshFileTypesStatus, console.error)
   },
   changeLibrary: () => void library.chooseLibrary(true),
+  toggleModule: (id, off) => void toggleModule(id, off),
   openRepository: () => void invoke('open_repository').catch(console.error),
   checkForUpdate: () => invoke('check_for_update'),
   openLatestRelease: () => void invoke('open_latest_release').catch(console.error),
@@ -370,7 +374,9 @@ const appearancePanel = createAppearancePanel($('appearance'), settings, changes
   allSettings: () => openSettings('reading'),
 })
 // The catalogs (OPDS servers), the key list and the version have their own sections in the settings.
-const sourcesPanel = createSourcesPanel(settingsPage.catalogs)
+const sourcesPanel = createSourcesPanel(settingsPage.catalogs, {
+  syncOff: () => settings.disabledModules.includes('capability:progress-sync'),
+})
 settingsPage.shortcuts.append($('shortcuts').querySelector('dl')!.cloneNode(true))
 const settingsVersion = el('span')
 settingsPage.about.append(
@@ -400,6 +406,8 @@ const navItems = [...document.querySelectorAll<HTMLElement>('[data-nav]')]
 const settingsHead = document.querySelector<HTMLElement>('#sidebar .section-head')!
 /** The last page that isn't a settings section, for S / Ctrl+, to go back to. */
 let lastPage: View = 'library'
+/** The disabled modules the capabilities UI was last drawn for. */
+let lastCapabilities = ''
 
 /** Shows `to` in the library window's content and marks it in the pane. */
 function showView(to: View) {
@@ -411,8 +419,11 @@ function showView(to: View) {
   $('library').hidden = !library.isReady() || settingsView
   if (library.isSettingsEmbedded()) $('settings').hidden = !settingsView
   if (settingsView) {
+    if (!wasSettings) {
+      refreshModules()
+      void refreshFileTypesStatus()
+    }
     settingsPage.showSection(to.slice('settings:'.length) as SettingsSection)
-    if (!wasSettings) void refreshFileTypesStatus()
     foldSettingsNav(false)
   } else if (library.isReady()) {
     showTab(to === 'catalogs' || to === 'series' ? to : 'books')
@@ -491,6 +502,7 @@ function applySettings(changes: Partial<Settings>) {
   if ('volumeKeys' in changes) setReading(!!open, settings.volumeKeys)
   if ('historyLength' in changes && !open) void library.refreshRecent()
   if ('uiFont' in changes) applyTheme()
+  applyCapabilities()
 }
 
 /** Applies changes made in this window, and saves them after a pause. */
@@ -506,6 +518,53 @@ async function flushSettings() {
   const changes = pendingSettings
   pendingSettings = {}
   if (Object.keys(changes).length) await invoke('update_settings', { changes }).catch(console.error)
+}
+
+/** Reloads the Modules section from the backend (switches and their reasons). */
+function refreshModules() {
+  void invoke<ModuleInfo[]>('list_modules').then(
+    modules => {
+      settingsPage.setModules(modules)
+      setFormats(modules)
+      applyCapabilities()
+    },
+    console.error,
+  )
+}
+
+/** Hides what disabled capability modules take away (catalogs UI, sync UI). */
+function applyCapabilities() {
+  const off = new Set(settings.disabledModules)
+  const catalogs = !off.has('capability:catalogs')
+  for (const item of navItems) {
+    if (item.dataset.nav === 'catalogs' || item.dataset.nav === 'settings:catalogs') item.hidden = !catalogs
+  }
+  settingsPage.setSectionVisible('catalogs', catalogs)
+  settingsPage.setOrganizeVisible(!off.has('capability:organize'))
+  settingsPage.setFileTypesVisible(!isAndroid && !off.has('capability:file-types'))
+  settingsPage.setUpdatesVisible(!off.has('capability:update-check'))
+  if (!catalogs && (view === 'catalogs' || view === 'settings:catalogs')) {
+    showView(view === 'catalogs' ? 'library' : 'settings:modules')
+  }
+  const key = [...off].sort().join(',')
+  if (key !== lastCapabilities) {
+    lastCapabilities = key
+    void sourcesPanel.refresh()
+  }
+}
+
+/** Turns a layer-1 module off or back on, then refreshes its row. */
+async function toggleModule(id: string, off: boolean) {
+  const disabledModules = off ? [...new Set([...settings.disabledModules, id])] : settings.disabledModules.filter(m => m !== id)
+  try {
+    await invoke('update_settings', { changes: { disabledModules } })
+  } catch (e) {
+    showError(undefined, e)
+    refreshModules()
+    return
+  }
+  changeSettings({ disabledModules })
+  refreshModules()
 }
 
 /** Shows whether the app is registered for its book file types. */

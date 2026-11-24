@@ -1,7 +1,10 @@
 //! One-off system commands: file types, updates, outside books, the library screen.
 
 use crate::cli::Launch;
+use crate::formats;
+use crate::modules;
 use crate::platform::{Active, Platform};
+use crate::store::Store;
 use crate::register;
 use crate::updates;
 use crate::windows::{open_or_focus, show_book, show_here};
@@ -14,13 +17,15 @@ use tauri_plugin_opener::OpenerExt;
 
 /// Registers the app for its book file types (see register::register).
 #[tauri::command(async)]
-pub(crate) fn register_file_types() -> CmdResult<()> {
+pub(crate) fn register_file_types(store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:file-types"))?;
     std::env::current_exe().and_then(|exe| register::register(&exe)).map_err(|e| e.to_string())
 }
 
 /// Removes the app's file associations again.
 #[tauri::command(async)]
-pub(crate) fn unregister_file_types() -> CmdResult<()> {
+pub(crate) fn unregister_file_types(store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:file-types"))?;
     register::unregister().map_err(|e| e.to_string())
 }
 
@@ -44,20 +49,27 @@ pub(crate) fn open_repository(app: AppHandle) -> CmdResult<()> {
 
 /// Opens the latest release's page, where its files are, in the browser.
 #[tauri::command]
-pub(crate) fn open_latest_release(app: AppHandle) -> CmdResult<()> {
+pub(crate) fn open_latest_release(app: AppHandle, store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:update-check"))?;
     app.opener().open_url(format!("{}/releases/latest", updates::REPOSITORY), None::<&str>).map_err(|e| e.to_string())
 }
 
 /// Asks GitHub for the latest release and compares it with this copy.
 #[tauri::command(async)]
-pub(crate) fn check_for_update() -> CmdResult<updates::UpdateCheck> {
+pub(crate) fn check_for_update(store: State<Store>) -> CmdResult<updates::UpdateCheck> {
+    store.read(|s| modules::require(s, "capability:update-check"))?;
     updates::check()
 }
 
 /// Ctrl+O (on a phone, "Add book…"): asks for a book and opens it in this window.
 #[tauri::command(async)]
-pub(crate) fn pick_book(window: Window, originals: State<Originals>) -> CmdResult<()> {
-    if let Some(book) = Active::pick_book(&window)? {
+pub(crate) fn pick_book(window: Window, originals: State<Originals>, store: State<Store>) -> CmdResult<()> {
+    // The dialog offers only the enabled formats; a stale pick still refuses below.
+    let enabled = store.read(|s| formats::enabled_extensions(&modules::disabled_ids(s)));
+    if let Some(book) = Active::pick_book(&window, &enabled)? {
+        if let Some(reader) = formats::of(&book.path) {
+            store.read(|s| formats::check(s, reader))?;
+        }
         open_outside(&window, &originals, book);
     }
     Ok(())

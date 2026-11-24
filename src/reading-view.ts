@@ -97,6 +97,7 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
   const sync = createSyncManager({
     book: () => book,
     fingerprint: () => fingerprint,
+    syncOff: () => deps.getSettings().disabledModules.includes('capability:progress-sync'),
   })
 
   /** Reads the window's book as a file for foliate-js. */

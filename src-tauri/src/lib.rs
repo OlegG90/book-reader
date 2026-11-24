@@ -10,9 +10,11 @@ mod console;
 #[cfg_attr(mobile, allow(dead_code))]
 mod data_dir;
 mod fingerprint;
+mod formats;
 mod kosync;
 mod library;
 mod metadata;
+mod modules;
 mod naming;
 mod net;
 mod opds;
@@ -84,6 +86,7 @@ pub fn run() {
             books::save_position,
             books::get_settings,
             books::update_settings,
+            modules::list_modules,
             books::remember_book,
             books::recent_books,
             books::open_recent,
@@ -173,7 +176,7 @@ fn run_command(command: Command) -> i32 {
             &format!(
                 "Book Reader is registered for {}.\nIf another app still opens them, right-click a file > Open with > \
                  Choose another app > Book Reader, and tick \"Always\".",
-                register::EXTENSIONS.join(", ")
+                register::extensions().join(", ")
             ),
         ),
         Command::Unregister => report(register::unregister(), "Book Reader is no longer registered for any file types."),

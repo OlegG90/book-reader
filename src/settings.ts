@@ -36,5 +36,8 @@ export function readSettings(stored: Record<string, unknown>): Settings {
     volumeKeys: stored.volumeKeys === true,
     historyLength: HISTORY_LENGTHS.find(n => n === stored.historyLength) ?? 3,
     uiFont: oneOf(stored.uiFont, UI_FONTS, 'classic'),
+    disabledModules: Array.isArray(stored.disabledModules)
+      ? (stored.disabledModules as unknown[]).filter((m): m is string => typeof m === 'string')
+      : [],
   }
 }

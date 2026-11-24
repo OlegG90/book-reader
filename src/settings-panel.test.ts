@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_APPEARANCE } from 'reader-core'
-import { createAppearancePanel, createSettingsPage, type PanelValues } from './settings-panel'
+import { createAppearancePanel, createSettingsPage, type ModuleInfo, type PanelValues } from './settings-panel'
 
-const initial: PanelValues = { ...DEFAULT_APPEARANCE, savePositions: true, offerLibrary: true, volumeKeys: false, historyLength: 3, uiFont: 'classic' }
+const initial: PanelValues = { ...DEFAULT_APPEARANCE, disabledModules: [], savePositions: true, offerLibrary: true, volumeKeys: false, historyLength: 3, uiFont: 'classic' }
 
 const buttonIn = (host: HTMLElement) => (text: string) => {
   const found = [...host.querySelectorAll('button')].find(b => b.textContent === text)
@@ -22,6 +22,7 @@ function page(found: Promise<{ latest: string; newer: boolean }> = Promise.resol
   const host = document.createElement('section')
   const onChange = vi.fn()
   const actions = {
+    toggleModule: vi.fn(),
     clearHistory: vi.fn(),
     toggleFileTypes: vi.fn(),
     changeLibrary: vi.fn(),
@@ -83,6 +84,77 @@ describe('appearance panel (Aa)', () => {
   })
 })
 
+const fakeModules: ModuleInfo[] = [
+  { id: 'format:epub', kind: 'format', label: 'X-Epub', hint: 'X-Epub books.', extensions: ['epub'], needsNetwork: false, optional: true, enabled: true, inUse: false, inUseReason: null },
+  { id: 'format:fb2', kind: 'format', label: 'X-Fb2', hint: 'X-Fb2 books.', extensions: ['fb2'], needsNetwork: false, optional: true, enabled: false, inUse: false, inUseReason: null },
+  { id: 'capability:catalogs', kind: 'capability', label: 'X-Catalogs', hint: 'X-Browse.', extensions: [], needsNetwork: true, optional: true, enabled: true, inUse: true, inUseReason: 'wipe the shelves first' },
+  { id: 'capability:file-types', kind: 'capability', label: 'X-Types', hint: 'X-Open.', extensions: [], needsNetwork: false, optional: false, enabled: true, inUse: false, inUseReason: null },
+]
+
+function moduleBox(host: HTMLElement, label: string) {
+  const row = [...host.querySelectorAll('label.row')].find(l => l.textContent?.includes(label))
+  const box = row?.querySelector('input')
+  if (!box) throw new Error(`no module "${label}"`)
+  return box as HTMLInputElement
+}
+
+describe('modules section', () => {
+  it('renders the backend modules grouped by kind', () => {
+    const { host, panel } = page()
+    panel.showSection('modules')
+    panel.setModules(fakeModules)
+    // Group titles are the page's chrome; module names come from the backend.
+    expect(host.textContent).toContain('Formats')
+    expect(host.textContent).toContain('Capabilities')
+    expect(host.textContent).toContain('X-Epub')
+    expect(host.textContent).toContain('X-Fb2 books.')
+    expect(moduleBox(host, 'X-Epub').checked).toBe(true)
+    expect(moduleBox(host, 'X-Fb2').checked).toBe(false)
+  })
+
+  it('toggles a module off and back on', () => {
+    const { host, actions, panel } = page()
+    panel.setModules(fakeModules)
+    const box = moduleBox(host, 'X-Epub')
+    box.checked = false
+    box.dispatchEvent(new Event('change'))
+    expect(actions.toggleModule).toHaveBeenCalledWith('format:epub', true)
+    box.checked = true
+    box.dispatchEvent(new Event('change'))
+    expect(actions.toggleModule).toHaveBeenCalledWith('format:epub', false)
+  })
+
+  it('locks a module that is in use and says why', () => {
+    const { host, panel } = page()
+    panel.setModules(fakeModules)
+    expect(moduleBox(host, 'X-Catalogs').disabled).toBe(true)
+    expect(host.textContent).toContain('wipe the shelves first')
+  })
+
+  it('locks a built-in module', () => {
+    const { host, panel } = page()
+    panel.setModules(fakeModules)
+    expect(moduleBox(host, 'X-Types').disabled).toBe(true)
+    expect(host.textContent).toContain('Built in')
+  })
+
+  it('follows disabledModules on show', () => {
+    const { host, panel } = page()
+    panel.setModules(fakeModules.map(m => ({ ...m, enabled: true })))
+    panel.show({ ...initial, disabledModules: ['format:epub'] })
+    expect(moduleBox(host, 'X-Epub').checked).toBe(false)
+    expect(moduleBox(host, 'X-Fb2').checked).toBe(true)
+  })
+
+  it('is a tab of its own', () => {
+    const { host, panel, button } = page()
+    panel.showSection('modules')
+    const shown = [...host.querySelectorAll<HTMLElement>('.section')].filter(s => !s.hidden).map(s => s.id)
+    expect(shown).toEqual(['settings-modules'])
+    expect(button('Modules').getAttribute('aria-selected')).toBe('true')
+  })
+})
+
 describe('settings page', () => {
   it('has the appearance and the reading switches', () => {
     const { host, onChange, button } = page()
@@ -125,6 +197,30 @@ describe('settings page', () => {
     panel.setFileTypesRegistered(false)
     expect(host.textContent).toContain('Not registered')
     expect(button('Register')).toBeDefined()
+  })
+
+  it('hides the capability rows', () => {
+    const { button, panel } = page()
+    panel.setOrganizeVisible(false)
+    expect(button('Organize…').hidden).toBe(true)
+    panel.setOrganizeVisible(true)
+    expect(button('Organize…').hidden).toBe(false)
+    panel.setFileTypesVisible(false)
+    expect(button('Register').closest<HTMLElement>('.row')?.hidden).toBe(true)
+    panel.setFileTypesVisible(true)
+    expect(button('Register').closest<HTMLElement>('.row')?.hidden).toBe(false)
+    panel.setUpdatesVisible(false)
+    expect(button('Check for updates').closest<HTMLElement>('.row')?.hidden).toBe(true)
+    panel.setUpdatesVisible(true)
+    expect(button('Check for updates').closest<HTMLElement>('.row')?.hidden).toBe(false)
+  })
+
+  it('hides a section tab', () => {
+    const { button, panel } = page()
+    panel.setSectionVisible('catalogs', false)
+    expect(button('Catalogs').hidden).toBe(true)
+    panel.setSectionVisible('catalogs', true)
+    expect(button('Catalogs').hidden).toBe(false)
   })
 
   it('shows one section at a time, as tabs', () => {

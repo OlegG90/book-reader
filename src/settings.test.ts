@@ -17,18 +17,24 @@ describe('readSettings', () => {
   })
 
   it('keeps what was stored', () => {
-    const settings = readSettings({ flow: 'scrolled', volumeKeys: true, historyLength: 5, librarySort: 'title' })
+    const settings = readSettings({ flow: 'scrolled', volumeKeys: true, historyLength: 5, librarySort: 'title', disabledModules: ['format:fb2'] })
     expect(settings.flow).toBe('scrolled')
     expect(settings.volumeKeys).toBe(true)
     expect(settings.historyLength).toBe(5)
     expect(settings.librarySort).toBe('title')
+    expect(settings.disabledModules).toEqual(['format:fb2'])
+  })
+
+  it('tolerates a corrupt disabledModules', () => {
+    expect(readSettings({ disabledModules: 'fb2' }).disabledModules).toEqual([])
+    expect(readSettings({ disabledModules: ['format:fb2', 42, null] }).disabledModules).toEqual(['format:fb2'])
   })
 
   it('covers exactly the known keys', () => {
     // A new key needs a default here (and only here): the backend stores
     // settings opaquely, and appearance keys default in reader-core.
     expect(Object.keys(readSettings({})).sort()).toEqual(
-      ['flow', 'font', 'fontSize', 'historyLength', 'libraryAddMode', 'librarySort', 'libraryStatus', 'lineHeight', 'lineLength', 'offerLibrary', 'savePositions', 'theme', 'uiFont', 'volumeKeys'],
+      ['disabledModules', 'flow', 'font', 'fontSize', 'historyLength', 'libraryAddMode', 'librarySort', 'libraryStatus', 'lineHeight', 'lineLength', 'offerLibrary', 'savePositions', 'theme', 'uiFont', 'volumeKeys'],
     )
   })
 

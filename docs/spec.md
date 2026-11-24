@@ -20,12 +20,34 @@ Guiding principles: **no installation step on the desktop, small size, fast star
 
 ### Supported formats
 
-- `.fb2` and `.fb2.zip` — encoding taken from the XML declaration (UTF-8, windows-1251 and others)
+- `.fb2`, `.fb2.zip` and `.fbz` — encoding taken from the XML declaration (UTF-8, windows-1251 and others)
 - `.epub` — EPUB 2 and EPUB 3, reflowable
+
+Both are layer-1 modules (`format:epub`, `format:fb2`) and can be turned off in Settings › Modules. A disabled format is skipped by the scan, refused by picking, opening and catalog downloads with a sentence, and left out of the file dialog; books already in the library stay visible but refuse to open.
 
 ### Out of scope
 
 Markdown, fixed-layout EPUB, DRM-protected books, PDF, MOBI/AZW3, TXT, highlights and notes, dictionary / translation, text-to-speech, format conversion, syncing bookmarks or appearance settings, more than one library folder. Full-text search comes later (second priority).
+
+### Optional modules
+
+Layer 0 (the core) is never modular: book identity and fingerprints, positions and bookmarks, the library scan and cache, the naming template, the network policy, the settings merge across windows. Layer 1 can be turned off in Settings › Modules. The section lists every module with its switch, grouped into formats and capabilities, and says why a switch is locked. The settings keep `disabledModules`: a list of module ids (missing or corrupt entries are tolerated on load, like every other setting; writes refuse unknown, mandatory and in-use modules with a sentence).
+
+A disabled module removes its interface entries and refuses its actions with a sentence (never a broken button):
+
+- `"<Label> is turned off in Settings > Modules"` — every refused action, e.g. `FB2 is turned off in Settings > Modules` when opening, picking, adding or downloading an FB2 book with the format off; `Catalogs is turned off in Settings > Modules` for every `catalog_*` action.
+- `"Catalogs is in use: delete its catalog sources first."`, `"Catalogs is in use: turn off \"Progress sync\" first."` — turning `catalogs` off is refused while sources exist or progress sync is still on.
+
+Off behavior per module:
+
+- `format:epub`, `format:fb2` (covers `.fb2/.fb2.zip/.fbz`) — reading formats (see [Supported formats](#supported-formats)).
+- `capability:catalogs` — OPDS browsing and downloads. Turned off, the Catalogs page, its navigation items and the settings tab are gone.
+- `capability:progress-sync` — KOSync positions. Turning it off stops push/pull and hides the sync badge and the jump offer; books still open, positions still save locally. A source marked for sync reports `Progress sync is turned off` instead of failing.
+- `capability:organize` — the Organize button leaves Settings › System; preview and apply refuse.
+- `capability:file-types` — the File types row leaves Settings › System (on a phone it is never offered); registering and unregistering refuse.
+- `capability:update-check` — the Updates row leaves Settings › About; the check and the release page refuse.
+
+No cloud stores, no `reader-core` changes: the modules only switch the app's own areas on and off.
 
 ## Reading
 
@@ -67,7 +89,7 @@ Inherited from Simple Reader unless noted:
 - A book's menu (right click on Windows, long press on the phone) has the same choices plus **Delete from library…**, which asks first: on Windows the file goes to the Recycle Bin, on the phone it is deleted. The reading position and bookmarks stay (they belong to the book's content), so the book picks up where it was if it comes back; Continue reading forgets it.
 - **Series**: a page listing the library's series as cover cards (the first book's cover, how many books, how many of them finished, with a line for that); a series opens to its books in reading order, with a breadcrumb back to the list. Books without a series aren't there.
 - "Recently added" is when the book came into the library (remembered by the scan cache), not the file date, which a copy keeps.
-- Navigation, desktop: the library window has a navigation pane (WinUI style) — Continue reading, Library, Series, Catalogs (see [Servers](#servers)), and Settings folding out to Reading, Catalogs, System, Shortcuts and About; the content beside it shows the one chosen. The pane's edge drags to resize it (the width is kept in this PC's WebView storage, not the config; a double click resets it). Esc closes a book's menu, goes up a catalog folder or from a series to the list of them, then back to the books; `S` / `Ctrl+,` open the settings and go back to the page they left.
+- Navigation, desktop: the library window has a navigation pane (WinUI style) — Continue reading, Library, Series, Catalogs (see [Servers](#servers)), and Settings folding out to Reading, Catalogs, Modules, System, Shortcuts and About; the content beside it shows the one chosen. The pane's edge drags to resize it (the width is kept in this PC's WebView storage, not the config; a double click resets it). Esc closes a book's menu, goes up a catalog folder or from a series to the list of them, then back to the books; `S` / `Ctrl+,` open the settings and go back to the page they left.
 - **Settings → About:** the version; **Open on GitHub** opens the repository in the browser; **Check for updates** asks GitHub's API for the latest release, only when pressed (GitHub sees the device's address and the app's name and version, `BookReader/X.Y.Z`, nothing else), and says whether this copy is the latest; for a newer one, **Open the release** opens its page, with the exe and APK files. The app itself downloads and installs nothing.
 - Navigation, phone: a bottom bar — Reading (the history), Library, Series, Catalogs, Settings (Back steps back the way Esc does); the settings' sections are chips at the top of their page.
 - Settings › System holds the library folder with **Change…** (pick another) and **Organize…**, the offer for books from elsewhere, file types, the interface font (Classical — Lora with Cormorant Garamond headings — or System, or Georgia, Cambria, Segoe UI, Calibri on Windows), how many books Continue reading shows, and clearing the history.

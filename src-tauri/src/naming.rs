@@ -3,7 +3,8 @@
 //! without a series, and `Unknown Author/...` without an author.
 
 use crate::fingerprint::fingerprint;
-use crate::metadata::{Author, Book, Format};
+use crate::formats;
+use crate::metadata::{Author, Book};
 use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -13,7 +14,7 @@ const UNKNOWN_AUTHOR: &str = "Unknown Author";
 const MAX_NAME: usize = 120;
 
 /// The book's path inside the library, with `/` separators.
-pub fn template_path(book: &Book, format: Format) -> String {
+pub fn template_path(book: &Book, extension: &str) -> String {
     let author = book.authors.first().map(Author::sort_name).filter(|a| !a.is_empty());
     let folder = sanitize(author.as_deref().unwrap_or(UNKNOWN_AUTHOR));
     let title = if book.title.trim().is_empty() { "Untitled" } else { &book.title };
@@ -24,7 +25,7 @@ pub fn template_path(book: &Book, format: Format) -> String {
         },
         None => title.to_string(),
     };
-    format!("{folder}/{}.{}", sanitize(&stem), format.extension())
+    format!("{folder}/{}.{}", sanitize(&stem), extension)
 }
 
 /// "3" -> "03", so books in a series list in order; "2.5" stays as is.
@@ -94,7 +95,7 @@ pub fn place(root: &Path, wanted: &str, source_fingerprint: &str, taken: &HashSe
 
 /// "A/B.fb2.zip" -> ("A/B", ".fb2.zip"): the book extension stays whole.
 fn split_ext(path: &str) -> (&str, &str) {
-    let stem = Format::split(path).map_or(path, |(stem, _)| stem);
+    let stem = formats::split(path).map_or(path, |(stem, _)| stem);
     path.split_at(stem.len())
 }
 
@@ -147,29 +148,29 @@ mod tests {
         Author { first: first.into(), last: last.into() }
     }
 
-    fn path(title: &str, authors: &[Author], series: Option<&str>, index: Option<&str>, format: Format) -> String {
+    fn path(title: &str, authors: &[Author], series: Option<&str>, index: Option<&str>, extension: &str) -> String {
         let book = Book {
             title: title.into(),
             authors: authors.to_vec(),
             series: series.map(Into::into),
             series_index: index.map(Into::into),
         };
-        template_path(&book, format)
+        template_path(&book, extension)
     }
 
     #[test]
     fn template_with_and_without_series() {
         let pratchett = [author("Terry", "Pratchett"), author("Neil", "Gaiman")];
-        assert_eq!(path("Guards! Guards!", &pratchett, Some("Discworld"), Some("8"), Format::Epub), "Pratchett Terry/Discworld 08 - Guards! Guards!.epub");
-        assert_eq!(path("Good Omens", &pratchett, None, None, Format::Fb2), "Pratchett Terry/Good Omens.fb2");
-        assert_eq!(path("Т", &[author("Іван", "Франко")], Some("С"), Some("2.5"), Format::Fb2Zip), "Франко Іван/С 2.5 - Т.fb2.zip");
-        assert_eq!(path("Saga", &[author("", "Homer")], Some("Epics"), None, Format::Epub), "Homer/Epics - Saga.epub");
+        assert_eq!(path("Guards! Guards!", &pratchett, Some("Discworld"), Some("8"), "epub"), "Pratchett Terry/Discworld 08 - Guards! Guards!.epub");
+        assert_eq!(path("Good Omens", &pratchett, None, None, "fb2"), "Pratchett Terry/Good Omens.fb2");
+        assert_eq!(path("Т", &[author("Іван", "Франко")], Some("С"), Some("2.5"), "fb2.zip"), "Франко Іван/С 2.5 - Т.fb2.zip");
+        assert_eq!(path("Saga", &[author("", "Homer")], Some("Epics"), None, "epub"), "Homer/Epics - Saga.epub");
     }
 
     #[test]
     fn missing_author_or_title() {
-        assert_eq!(path("Notes", &[], None, None, Format::Epub), "Unknown Author/Notes.epub");
-        assert_eq!(path(" ", &[author("A", "B")], None, None, Format::Epub), "B A/Untitled.epub");
+        assert_eq!(path("Notes", &[], None, None, "epub"), "Unknown Author/Notes.epub");
+        assert_eq!(path(" ", &[author("A", "B")], None, None, "epub"), "B A/Untitled.epub");
     }
 
     #[test]

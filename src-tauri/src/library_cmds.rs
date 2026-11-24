@@ -1,7 +1,9 @@
 //! The library folder: what it holds, and moving books into it.
 
+use crate::formats;
 use crate::library;
 use crate::metadata;
+use crate::modules;
 use crate::naming;
 use crate::paths;
 use crate::platform::{Active, Platform};
@@ -210,12 +212,19 @@ pub(crate) struct LibraryBook {
 pub(crate) fn scan_library(app: AppHandle, store: State<Store>, books: State<LibraryBooks>) -> CmdResult<Vec<LibraryBook>> {
     let root = library_root(&store)?;
     Active::check_library_access(&app)?;
+    // Books whose format module is off stay out until it is back on.
+    let disabled = store.read(modules::disabled_ids);
     // A file count while it runs, so the library screen shows the scan is moving.
-    let entries = library::scan(&root, &library_cache(&store), &mut |done| {
-        if done % 25 == 0 {
-            let _ = app.emit("scan-progress", done);
-        }
-    })
+    let entries = library::scan(
+        &root,
+        &library_cache(&store),
+        &mut |done| {
+            if done % 25 == 0 {
+                let _ = app.emit("scan-progress", done);
+            }
+        },
+        &library::keep_enabled(&disabled),
+    )
     .map_err(|e| format!("{}: {e}", root.display()))?;
     let views = store.read(|s| {
         entries
@@ -227,7 +236,7 @@ pub(crate) fn scan_library(app: AppHandle, store: State<Store>, books: State<Lib
                 author_sort: e.book.authors.first().map(metadata::Author::sort_name).unwrap_or_default(),
                 series: e.book.series.clone(),
                 series_index: e.book.series_index.clone(),
-                format: e.format().map_or("", metadata::Format::label),
+                format: e.reader().map_or("", |r| r.label()),
                 fraction: s.positions.get(&e.fingerprint).map(|p| p.fraction),
                 added: e.added,
                 has_cover: e.cover.is_some(),
@@ -261,7 +270,11 @@ pub(crate) fn open_library_book(
     key: String,
     from_start: bool,
 ) -> CmdResult<()> {
-    show_book(&window, books.path_of(&store, &key)?, from_start);
+    let path = books.path_of(&store, &key)?;
+    if let Some(reader) = formats::of(&path) {
+        store.read(|s| formats::check(s, reader))?;
+    }
+    show_book(&window, path, from_start);
     Ok(())
 }
 
@@ -340,13 +353,14 @@ pub(crate) struct Placed {
 pub(crate) fn put_in_library(store: &Store, books: &LibraryBooks, source: &Path, mode: AddMode) -> CmdResult<Placed> {
     let root = library_root(store)?;
     let err = |e: std::io::Error| format!("{}: {e}", paths::file_name(source));
-    let format = metadata::Format::of(source).ok_or("Not a book file")?;
+    let reader = formats::of(source).ok_or("Not a book file")?;
+    store.read(|s| formats::check(s, reader))?;
     let (fingerprint, meta) = library::read_book(source).map_err(err)?;
     let known = books.duplicate(store, &root, &fingerprint).map(naming::Placement::Exists);
     let placement = match known {
         Some(found) => found,
         None => {
-            let wanted = naming::template_path(&meta.book, format);
+            let wanted = naming::template_path(&meta.book, reader.extension_for(&paths::file_name(source)).unwrap_or("epub"));
             naming::place(&root, &wanted, &fingerprint, &Default::default()).map_err(err)?
         }
     };
@@ -385,6 +399,7 @@ pub(crate) struct Rename {
 /// The renames that would make the last scan's books follow the naming template.
 #[tauri::command(async)]
 pub(crate) fn organize_preview(store: State<Store>, books: State<LibraryBooks>) -> CmdResult<Vec<Rename>> {
+    store.read(|s| modules::require(s, "capability:organize"))?;
     let root = library_root(&store)?;
     let plan = library::organize_plan(&root, &books.snapshot(&store, &root)).map_err(|e| e.to_string())?;
     Ok(plan.into_iter().map(|(entry, to)| Rename { from: entry.path, to }).collect())
@@ -394,6 +409,7 @@ pub(crate) fn organize_preview(store: State<Store>, books: State<LibraryBooks>) 
 /// files). Returns how many books were renamed.
 #[tauri::command(async)]
 pub(crate) fn organize_apply(app: AppHandle, store: State<Store>, books: State<LibraryBooks>, windows: State<ReaderWindows>) -> CmdResult<usize> {
+    store.read(|s| modules::require(s, "capability:organize"))?;
     let root = library_root(&store)?;
     let plan = library::organize_plan(&root, &books.snapshot(&store, &root)).map_err(|e| e.to_string())?;
     let mut moved = Vec::new();

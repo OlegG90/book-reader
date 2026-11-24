@@ -35,8 +35,8 @@ impl Platform for Desktop {
     }
 
     /// Ctrl+O: a book file the reader picks (`None` when cancelled).
-    fn pick_book(window: &Window) -> Result<Option<Outside>, String> {
-        let picked = file_dialog(window).add_filter("Books", &crate::metadata::extensions()).blocking_pick_file();
+    fn pick_book(window: &Window, extensions: &[&str]) -> Result<Option<Outside>, String> {
+        let picked = file_dialog(window).add_filter("Books", extensions).blocking_pick_file();
         picked.map(|f| f.into_path().map(|path| Outside { path, original: None }).map_err(|e| e.to_string())).transpose()
     }
 

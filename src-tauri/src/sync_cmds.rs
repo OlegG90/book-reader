@@ -3,14 +3,19 @@
 use crate::catalog;
 use crate::clock::now_ms;
 use crate::kosync;
+use crate::modules;
 use crate::store::{Position, Store};
 use crate::windows::ReaderWindows;
 use crate::CmdResult;
 use serde::Serialize;
 use tauri::{Manager, State, Window};
 
-/// The source that syncs progress, if one is set.
+/// The source that syncs progress, if one is set and sync is on: with the
+/// module off the sync commands no-op (no network) instead of failing.
 fn sync_source(store: &Store) -> Option<catalog::Source> {
+    if store.read(|s| modules::is_off(s, "capability:progress-sync")) {
+        return None;
+    }
     store.read(|s| s.sources.iter().find(|source| source.sync).cloned())
 }
 
@@ -109,9 +114,9 @@ pub(crate) fn sync_push(store: State<Store>, document: String, cfi: String, frac
 
 #[cfg(test)]
 mod tests {
-    use super::compare_positions;
+    use super::{compare_positions, sync_source};
     use crate::kosync::Progress;
-    use crate::store::Position;
+    use crate::store::{Position, Store};
 
     fn here(cfi: &str, time: u64) -> Position {
         Position { cfi: cfi.into(), fraction: 0.5, time }
@@ -119,6 +124,35 @@ mod tests {
 
     fn server(cfi: &str, device_id: &str, timestamp: u64) -> Progress {
         Progress { progress: cfi.into(), percentage: 0.6, device: "phone".into(), device_id: device_id.into(), timestamp }
+    }
+
+    fn synced_store(disabled: &[&str]) -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::load(dir.path().join("breader.json"));
+        store
+            .update(|s| {
+                s.sources.push(crate::catalog::Source {
+                    id: "1".into(),
+                    name: "CWA".into(),
+                    url: "https://books.example/opds".into(),
+                    user: String::new(),
+                    sync: true,
+                });
+                s.settings.insert(
+                    "disabledModules".into(),
+                    serde_json::json!(disabled.iter().collect::<Vec<_>>()),
+                );
+            })
+            .unwrap();
+        (dir, store)
+    }
+
+    #[test]
+    fn no_sync_source_while_progress_sync_is_off() {
+        let (_dir, store) = synced_store(&[]);
+        assert!(sync_source(&store).is_some());
+        let (_dir, store) = synced_store(&["capability:progress-sync"]);
+        assert!(sync_source(&store).is_none(), "the sync commands no-op");
     }
 
     #[test]

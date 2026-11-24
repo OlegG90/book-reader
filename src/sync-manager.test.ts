@@ -18,10 +18,11 @@ describe('createSyncManager', () => {
     document.body.innerHTML = '<div id="sync-bar" hidden><span id="sync-text"></span></div>'
   })
 
-  const manager = () =>
+  const manager = (syncOff = false) =>
     createSyncManager({
       book: () => null,
       fingerprint: () => 'fp',
+      syncOff: () => syncOff,
     })
 
   it('hides the offer bar', () => {
@@ -38,6 +39,17 @@ describe('createSyncManager', () => {
     // No book, nothing dirty: pushing resolves quietly, without invoking.
     await expect(sync.push()).resolves.toBeUndefined()
     expect(document.getElementById('sync-bar')!.hidden).toBe(true)
+  })
+
+  it('stays quiet when progress sync is turned off', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const sync = manager(true)
+    sync.markDirty()
+    await expect(sync.pull()).resolves.toBeUndefined()
+    await expect(sync.push()).resolves.toBeUndefined()
+    expect(warn).not.toHaveBeenCalled()
+    expect(document.getElementById('sync-bar')!.hidden).toBe(true)
+    warn.mockRestore()
   })
 
   it('pull and jump resolve quietly with no book', async () => {

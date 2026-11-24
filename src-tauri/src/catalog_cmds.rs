@@ -2,7 +2,9 @@
 
 use crate::catalog;
 use crate::clock;
+use crate::formats;
 use crate::library_cmds::{put_in_library, AddMode, Added, LibraryBooks, CACHE_DIR};
+use crate::modules;
 use crate::opds;
 use crate::platform::{Active, Platform};
 use crate::store::Store;
@@ -25,12 +27,13 @@ pub(crate) struct SourceView {
 }
 
 #[tauri::command(async)]
-pub(crate) fn catalog_sources(store: State<Store>) -> Vec<SourceView> {
+pub(crate) fn catalog_sources(store: State<Store>) -> CmdResult<Vec<SourceView>> {
+    store.read(|s| modules::require(s, "capability:catalogs"))?;
     let sources = store.read(|s| s.sources.clone());
     // One bridge round-trip for all sources, not one per source.
     let ids: Vec<_> = sources.iter().map(|s| s.id.clone()).collect();
     let kept = Active::has_passwords(&ids);
-    sources.into_iter().zip(kept).map(|(source, has_password)| SourceView { has_password, source }).collect()
+    Ok(sources.into_iter().zip(kept).map(|(source, has_password)| SourceView { has_password, source }).collect())
 }
 
 #[derive(Deserialize)]
@@ -62,6 +65,7 @@ pub(crate) fn save_catalog_source(
     templates: State<SearchTemplates>,
     input: SourceInput,
 ) -> CmdResult<SavedSource> {
+    store.read(|s| modules::require(s, "capability:catalogs"))?;
     let url = catalog::check_url(&input.url)?;
     let id = input.id.filter(|id| !id.is_empty()).unwrap_or_else(|| format!("{:x}", clock::now_nanos()));
     let name = match input.name.trim() {
@@ -95,6 +99,7 @@ pub(crate) fn save_catalog_source(
 
 #[tauri::command(async)]
 pub(crate) fn delete_catalog_source(app: AppHandle, store: State<Store>, id: String) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:catalogs"))?;
     store.update(|s| s.sources.retain(|source| source.id != id)).map_err(|e| e.to_string())?;
     Active::forget_password(&id);
     let _ = app.emit("catalogs-changed", ());
@@ -108,11 +113,13 @@ fn source_by_id(store: &Store, id: &str) -> CmdResult<catalog::Source> {
 /// A page of a catalog: its root, or `url` on its server.
 #[tauri::command(async)]
 pub(crate) fn catalog_feed(store: State<Store>, id: String, url: Option<String>) -> CmdResult<opds::Feed> {
+    store.read(|s| modules::require(s, "capability:catalogs"))?;
     catalog::feed(&source_by_id(&store, &id)?, url.as_deref())
 }
 
 #[tauri::command(async)]
 pub(crate) fn catalog_search(store: State<Store>, templates: State<SearchTemplates>, id: String, query: String) -> CmdResult<opds::Feed> {
+    store.read(|s| modules::require(s, "capability:catalogs"))?;
     let source = source_by_id(&store, &id)?;
     let known = templates.0.lock().unwrap().get(&id).cloned();
     let template = match known {
@@ -128,6 +135,7 @@ pub(crate) fn catalog_search(store: State<Store>, templates: State<SearchTemplat
 
 #[tauri::command(async)]
 pub(crate) fn catalog_image(store: State<Store>, id: String, url: String) -> CmdResult<Response> {
+    store.read(|s| modules::require(s, "capability:catalogs"))?;
     catalog::image(&source_by_id(&store, &id)?, &url).map(Response::new)
 }
 
@@ -142,7 +150,10 @@ pub(crate) fn catalog_download(
     url: String,
     format: opds::FileFormat,
 ) -> CmdResult<Added> {
+    store.read(|s| modules::require(s, "capability:catalogs"))?;
     let source = source_by_id(&store, &id)?;
+    let reader = formats::by_module(format.module()).ok_or("Not a book file")?;
+    store.read(|s| formats::check(s, reader))?;
     let downloads = store.dir().join(CACHE_DIR).join("downloads");
     let file = catalog::download(&source, &url, format, &downloads)?;
     let result = put_in_library(&store, &books, &file, AddMode::Move);
