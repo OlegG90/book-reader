@@ -42,7 +42,7 @@ Off behavior per module:
 
 - `format:epub`, `format:fb2` (covers `.fb2/.fb2.zip/.fbz`) — reading formats (see [Supported formats](#supported-formats)).
 - `capability:catalogs` — OPDS browsing and downloads. Turned off, the Catalogs page, its navigation items and the settings tab are gone.
-- `capability:progress-sync` — KOSync positions. Turning it off stops push/pull and hides the sync badge and the jump offer; books still open, positions still save locally. A source marked for sync reports `Progress sync is turned off` instead of failing.
+- `capability:progress-sync` — the user's intent ("sync my positions"); the KOSync transport behind it needs catalogs, and each future transport declares its own `requires` edge instead. Turning it off stops push/pull and hides the sync badge and the jump offer; books still open, positions still save locally. A source marked for sync reports `Progress sync is turned off` instead of failing.
 - `capability:organize` — the Organize button leaves Settings › System; preview and apply refuse.
 - `capability:file-types` — the File types row leaves Settings › System (on a phone it is never offered); registering and unregistering refuse.
 - `capability:update-check` — the Updates row leaves Settings › About; the check and the release page refuse.
