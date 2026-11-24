@@ -17,8 +17,6 @@ export interface Settings extends PanelValues {
   libraryStatus: Status
   /** The last choice in the "add to library" bar, offered first next time. */
   libraryAddMode: 'move' | 'copy'
-  /** Layer-1 module ids turned off in Settings › Modules (backend-owned). */
-  disabledModules: string[]
 }
 
 export const FLOWS: readonly Flow[] = ['paginated', 'scrolled']
