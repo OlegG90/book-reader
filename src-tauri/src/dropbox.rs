@@ -14,11 +14,9 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::time::{Duration, Instant};
 
-/// The Dropbox app key: the App Console's scoped app with app-folder access
-/// (files.content.read + files.content.write). Empty until the maintainer
-/// creates the app and pastes the key here — without it every Dropbox
-/// action explains itself and stops.
-pub const APP_KEY: &str = "";
+/// The Dropbox app key: the "BookReader Sync" scoped app in the App Console
+/// with app-folder access (files.content.read + files.content.write).
+pub const APP_KEY: &str = "hq54wf951whc1jv";
 
 /// Where the refresh token is kept, like catalog passwords.
 const TOKEN_ID: &str = "dropbox";
@@ -366,9 +364,10 @@ mod tests {
     }
 
     #[test]
-    fn connect_refuses_without_an_app_key() {
-        assert!(APP_KEY.is_empty(), "fill the key in before connecting for real");
-        assert!(begin().is_err());
+    fn app_key_is_configured() {
+        // The App Console key; without it every Dropbox action refuses with help.
+        assert!(!APP_KEY.is_empty());
+        assert!(auth_url(APP_KEY, "challenge", "state").contains(&format!("client_id={APP_KEY}")));
     }
 
     #[test]
