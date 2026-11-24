@@ -312,6 +312,21 @@ mod tests {
     }
 
     #[test]
+    fn list_names_a_source_blocked_catalogs() {
+        let mut state = state_with(Map::new());
+        state.sources.push(crate::catalog::Source {
+            id: "1".into(),
+            name: "CWA".into(),
+            url: "https://books.example/opds".into(),
+            user: String::new(),
+            sync: false,
+        });
+        let catalogs = list(&state).into_iter().find(|m| m.id == "capability:catalogs").unwrap();
+        assert!(catalogs.in_use);
+        assert_eq!(catalogs.in_use_reason.as_deref(), Some("delete its catalog sources first"));
+    }
+
+    #[test]
     fn unknown_ids_are_refused_on_write() {
         let state = state_with(Map::new());
         let next = BTreeSet::from(["wizardry:fireball".into()]);

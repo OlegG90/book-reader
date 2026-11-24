@@ -153,6 +153,7 @@ mod tests {
         assert_eq!(stem, "a");
         assert_eq!(reader.module(), "format:fb2");
         assert_eq!(split("a.FBZ").unwrap().0, "a");
+        assert!(by_module("format:mobi").is_none());
     }
 
     #[test]
