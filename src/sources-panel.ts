@@ -8,7 +8,7 @@ import { row } from './settings-panel'
  * change one. Passwords go straight to the backend, which keeps them in the
  * OS credential store; they never come back.
  */
-export function createSourcesPanel(host: HTMLElement, deps: { syncOff: () => boolean; dropboxReady: () => boolean }) {
+export function createSourcesPanel(host: HTMLElement, deps: { syncOff: () => boolean; cloudReady: () => boolean }) {
   const list = el('ul', { className: 'sources' })
   const status = el('p', { className: 'muted source-status' })
   const add = el('button', { type: 'button', textContent: 'Add catalog…', onclick: () => edit(undefined) })
@@ -36,12 +36,12 @@ export function createSourcesPanel(host: HTMLElement, deps: { syncOff: () => boo
     // The badge promises syncing; with the module off nothing syncs.
     const syncBadge = (source: Source) =>
       source.sync && !deps.syncOff() ? el('span', { className: 'badge', textContent: 'sync', title: 'Syncs reading progress' }) : ''
-    // Dropbox needs no per-source badge (it syncs every local book when it can);
-    // its own state lives in the System row. Here only the intent and the fallback speak.
+    // No cloud needs a per-source badge (a cloud syncs every local book when it can);
+    // connected state lives in the System rows. Here only the intent and the fallback speak.
     const note = deps.syncOff()
       ? 'Progress sync is turned off.'
-      : !sources.some(s => s.sync) && !deps.dropboxReady()
-        ? 'Nothing to sync through: mark a catalog source for sync, or connect Dropbox.'
+      : !sources.some(s => s.sync) && !deps.cloudReady()
+        ? 'Nothing to sync through: mark a catalog source for sync, or connect a cloud.'
         : ''
     showSyncNote(note)
     list.replaceChildren(

@@ -320,7 +320,7 @@ function openSettings(section?: SettingsSection) {
   closePanels()
   $('settings').hidden = false
   void refreshFileTypesStatus()
-  void refreshDropboxStatus()
+  void refreshCloudStatus()
   refreshModules()
   if (section) settingsPage.showSection(section)
   $('settings').querySelector<HTMLElement>('button')?.focus()
@@ -350,7 +350,7 @@ function closePanels() {
 
 const systemDark = matchMedia('(prefers-color-scheme: dark)')
 let fileTypesRegistered = false
-let dropboxConnected = false
+let cloudConnected = false
 const settingsPage = createSettingsPage($('settings'), settings, changes => void changeSettings(changes), {
   clearHistory: () => {
     void invoke('clear_recent')
@@ -363,11 +363,24 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
     const command = fileTypesRegistered ? 'unregister_file_types' : 'register_file_types'
     void invoke(command).then(refreshFileTypesStatus, console.error)
   },
-  toggleDropbox: () => {
-    const command = dropboxConnected ? 'dropbox_disconnect' : 'dropbox_connect'
-    void invoke(command).then(
+  connectCloud: provider => {
+    // Only Dropbox has a transport yet; the picker disables the rest.
+    if (provider !== 'dropbox') {
+      showError(undefined, `${provider} sync is not available yet`)
+      return
+    }
+    void invoke('dropbox_connect').then(
       () => {
-        void refreshDropboxStatus()
+        void refreshCloudStatus()
+        void sourcesPanel.refresh()
+      },
+      console.error,
+    )
+  },
+  disconnectCloud: () => {
+    void invoke('dropbox_disconnect').then(
+      () => {
+        void refreshCloudStatus()
         void sourcesPanel.refresh()
       },
       console.error,
@@ -388,7 +401,7 @@ const appearancePanel = createAppearancePanel($('appearance'), settings, changes
 // The catalogs (OPDS servers), the key list and the version have their own sections in the settings.
 const sourcesPanel = createSourcesPanel(settingsPage.catalogs, {
   syncOff: () => settings.disabledModules.includes('capability:progress-sync'),
-  dropboxReady: () => !settings.disabledModules.includes('capability:dropbox') && dropboxConnected,
+  cloudReady: () => !settings.disabledModules.includes('capability:dropbox') && cloudConnected,
 })
 settingsPage.shortcuts.append($('shortcuts').querySelector('dl')!.cloneNode(true))
 const settingsVersion = el('span')
@@ -435,7 +448,7 @@ function showView(to: View) {
     if (!wasSettings) {
       refreshModules()
       void refreshFileTypesStatus()
-      void refreshDropboxStatus()
+      void refreshCloudStatus()
     }
     settingsPage.showSection(to.slice('settings:'.length) as SettingsSection)
     foldSettingsNav(false)
@@ -556,7 +569,7 @@ function applyCapabilities() {
   settingsPage.setSectionVisible('catalogs', catalogs)
   settingsPage.setOrganizeVisible(!off.has('capability:organize'))
   settingsPage.setFileTypesVisible(!isAndroid && !off.has('capability:file-types'))
-  settingsPage.setDropboxVisible(!off.has('capability:dropbox'))
+  settingsPage.setCloudVisible(!off.has('capability:dropbox'))
   settingsPage.setUpdatesVisible(!off.has('capability:update-check'))
   if (!catalogs && (view === 'catalogs' || view === 'settings:catalogs')) {
     showView(view === 'catalogs' ? 'library' : 'settings:modules')
@@ -592,14 +605,15 @@ async function refreshFileTypesStatus() {
   settingsPage.setFileTypesRegistered(registered)
 }
 
-/** Shows whether Dropbox is connected, and its last sync failure, if any. */
-async function refreshDropboxStatus() {
+/** Shows which cloud is connected, and its last sync failure, if any. */
+async function refreshCloudStatus() {
   const status = await invoke<{ connected: boolean; lastError: string | null }>('dropbox_status').catch(e => {
     console.error(e)
     return { connected: false, lastError: String(e) }
   })
-  dropboxConnected = status.connected
-  settingsPage.setDropboxConnected(status.connected, status.lastError)
+  cloudConnected = status.connected
+  // The backend knows only Dropbox yet; it names the connected cloud.
+  settingsPage.setCloudConnected(status.connected ? 'dropbox' : null, status.connected, status.lastError)
 }
 
 // ---- Edge controls ----------------------------------------------------------
@@ -802,7 +816,7 @@ appWindow.onCloseRequested(async () => {
 systemDark.addEventListener('change', () => settings.theme === 'system' && restyle())
 
 void refreshFileTypesStatus()
-void refreshDropboxStatus()
+void refreshCloudStatus()
 void invoke<string>('app_version')
   .then(version => {
     $('about-version').textContent = `v${version}`

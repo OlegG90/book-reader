@@ -16,9 +16,9 @@ const source = (over: Partial<Source> = {}): Source => ({
   ...over,
 })
 
-function page(syncOff = false, dropboxReady = false) {
+function page(syncOff = false, cloudReady = false) {
   const host = document.createElement('div')
-  const panel = createSourcesPanel(host, { syncOff: () => syncOff, dropboxReady: () => dropboxReady })
+  const panel = createSourcesPanel(host, { syncOff: () => syncOff, cloudReady: () => cloudReady })
   return { host, panel }
 }
 
@@ -44,7 +44,7 @@ describe('sources panel sync state', () => {
     expect(host.textContent).not.toContain('Nothing to sync through')
   })
 
-  it('stays quiet when Dropbox carries the sync', async () => {
+  it('stays quiet when a cloud carries the sync', async () => {
     invokeMock.mockResolvedValue([source()])
     const { host, panel } = page(false, true)
     await panel.refresh()
@@ -63,7 +63,7 @@ describe('sources panel sync state', () => {
     invokeMock.mockResolvedValue([source()])
     const host = document.createElement('div')
     let off = true
-    const panel = createSourcesPanel(host, { syncOff: () => off, dropboxReady: () => false })
+    const panel = createSourcesPanel(host, { syncOff: () => off, cloudReady: () => false })
     await panel.refresh()
     expect(host.textContent).toContain('Progress sync is turned off.')
     off = false
