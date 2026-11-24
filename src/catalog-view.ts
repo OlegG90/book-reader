@@ -153,8 +153,12 @@ export function createCatalogView(deps: CatalogViewDeps) {
             url: file.href,
             format: file.format,
           })
-          action.textContent = added.existed ? 'In library' : 'Downloaded'
+          // The book is in the library now (or was already): offer to read it.
+          action.disabled = false
+          action.replaceChildren(icon('book-open'), 'Read')
           action.title = added.path
+          action.onclick = () =>
+            void invoke('open_library_book', { key: added.path, fromStart: false }).catch(e => message(String(e)))
         } catch (e) {
           action.disabled = false
           actionLabel(label)
