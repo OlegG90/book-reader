@@ -176,6 +176,22 @@ mod tests {
     }
 
     #[test]
+    fn disabled_modules_survive_reload_unknown_ids_included() {
+        // Unknown ids are refused on write, but tolerated on load: an old
+        // or newer config still opens, like with every other setting.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("breader.json");
+        fs::write(&path, r#"{"settings":{"disabledModules":["format:fb2","wizardry:fireball",42]}}"#).unwrap();
+        let store = Store::load(path.clone());
+        assert_eq!(
+            store.read(|s| s.settings["disabledModules"].clone()),
+            serde_json::json!(["format:fb2", "wizardry:fireball", 42])
+        );
+        let reloaded = Store::load(path);
+        assert_eq!(reloaded.read(|s| s.settings["disabledModules"].clone()), serde_json::json!(["format:fb2", "wizardry:fireball", 42]));
+    }
+
+    #[test]
     fn unknown_and_missing_fields_are_tolerated() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("breader.json");

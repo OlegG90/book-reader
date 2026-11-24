@@ -17,6 +17,8 @@ export interface Settings extends PanelValues {
   libraryStatus: Status
   /** The last choice in the "add to library" bar, offered first next time. */
   libraryAddMode: 'move' | 'copy'
+  /** Layer-1 module ids turned off in Settings › Modules (backend-owned). */
+  disabledModules: string[]
 }
 
 export const FLOWS: readonly Flow[] = ['paginated', 'scrolled']
@@ -36,5 +38,8 @@ export function readSettings(stored: Record<string, unknown>): Settings {
     volumeKeys: stored.volumeKeys === true,
     historyLength: HISTORY_LENGTHS.find(n => n === stored.historyLength) ?? 3,
     uiFont: oneOf(stored.uiFont, UI_FONTS, 'classic'),
+    disabledModules: Array.isArray(stored.disabledModules)
+      ? (stored.disabledModules as unknown[]).filter((m): m is string => typeof m === 'string')
+      : [],
   }
 }
