@@ -27,6 +27,17 @@ Guiding principles: **no installation step on the desktop, small size, fast star
 
 Markdown, fixed-layout EPUB, DRM-protected books, PDF, MOBI/AZW3, TXT, highlights and notes, dictionary / translation, text-to-speech, format conversion, syncing bookmarks or appearance settings, more than one library folder. Full-text search comes later (second priority).
 
+### Optional modules
+
+Layer 0 (the core) is never modular: book identity and fingerprints, positions and bookmarks, the library scan and cache, the naming template, the network policy, the settings merge across windows. Layer 1 can be turned off in Settings › Modules:
+
+- `format:epub`, `format:fb2` (covers `.fb2/.fb2.zip/.fbz`) — reading formats.
+- `capability:catalogs` — OPDS browsing and downloads. In use while catalog sources exist, or while progress sync is still on (it needs catalogs).
+- `capability:progress-sync` — KOSync positions. Turning it off stops push/pull and hides the sync offer; books still open, positions still save locally.
+- `capability:organize`, `capability:file-types` (desktop only), `capability:update-check` — system capabilities.
+
+The settings keep `disabledModules`: a list of module ids (missing or corrupt entries are tolerated on load, like every other setting; writes refuse unknown, mandatory and in-use modules with a sentence). A disabled module removes its interface entries and refuses its actions with a sentence (never a broken button). No cloud stores, no `reader-core` changes: the modules only switch the app's own areas on and off.
+
 ## Reading
 
 Inherited from Simple Reader unless noted:

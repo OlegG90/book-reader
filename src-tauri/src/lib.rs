@@ -13,6 +13,7 @@ mod fingerprint;
 mod kosync;
 mod library;
 mod metadata;
+mod modules;
 mod naming;
 mod net;
 mod opds;
@@ -84,6 +85,7 @@ pub fn run() {
             books::save_position,
             books::get_settings,
             books::update_settings,
+            modules::list_modules,
             books::remember_book,
             books::recent_books,
             books::open_recent,

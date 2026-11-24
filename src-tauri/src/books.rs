@@ -4,6 +4,7 @@ use crate::cli::Launch;
 use crate::clock::now_ms;
 use crate::fingerprint;
 use crate::library_cmds::{library_root, LibraryBooks};
+use crate::modules;
 use crate::paths;
 use crate::store::{Position, RecentBook, Store};
 use crate::windows::{show_book, ReaderWindows};
@@ -82,9 +83,18 @@ pub(crate) fn get_settings(store: State<Store>) -> Map<String, Value> {
 }
 
 /// Merges changed settings (so windows never overwrite each other's changes)
-/// and passes them on to the other windows.
+/// and passes them on to the other windows. A `disabledModules` entry is
+/// checked first: unknown, mandatory and in-use modules refuse with a sentence.
 #[tauri::command(async)]
 pub(crate) fn update_settings(window: Window, store: State<Store>, changes: Map<String, Value>) -> CmdResult<()> {
+    if let Some(value) = changes.get("disabledModules") {
+        let next: Option<std::collections::BTreeSet<String>> =
+            value.as_array().and_then(|items| items.iter().map(|item| item.as_str().map(str::to_owned)).collect());
+        let Some(next) = next else {
+            return Err("\"disabledModules\" must be a list of module names.".into());
+        };
+        store.read(|s| modules::check_turning_off(s, &next))?;
+    }
     store.update(|s| s.settings.extend(changes.clone())).map_err(|e| e.to_string())?;
     for label in window.app_handle().webview_windows().into_keys().filter(|l| l != window.label()) {
         let _ = window.emit_to(&label, "settings-changed", &changes);
