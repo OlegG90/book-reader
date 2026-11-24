@@ -31,6 +31,7 @@
 7. **Library actions** (Windows + Android): open a started book from Library with a choice (continue at NN% or from the beginning); delete a book from the library through its menu (right click / long press), to the Recycle Bin on Windows, keeping its position and bookmarks; a Series page in the pane and the bottom bar.
 8. **Phase "e"** — read status and shelves in CWA, metadata editing through the Calibre Content Server.
 9. **Optional modules** — done (11.2026): the PswManager-style module pattern (layer 0 core, layer 1 registry, `disabledModules`, Settings › Modules, guards). Switchable: `format:epub`, `format:fb2`, `capability:catalogs`, `capability:progress-sync`, `capability:organize`, `capability:file-types` (desktop only), `capability:update-check`.
+10. **Cloud progress sync** (in progress): sync positions through a cloud store, independent of catalogs. First Dropbox: OAuth PKCE over loopback, refresh token in the credential store / Keystore, a fingerprint-keyed `sync-state.json` in the app's folder, newest-wins merge, offline edits converge on the next push. Later transports (OneDrive, Google) plug into the same `Transport` trait.
 
 Full-text search in a book fits after stage 4.
 

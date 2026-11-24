@@ -90,12 +90,13 @@ export function createSyncManager(deps: SyncDeps): SyncManager {
     if (deps.syncOff()) return
     const location = deps.book()?.view.lastLocation
     const synced = document
-    if ((!dirty && pending.size === 0) || !location || !synced) return
+    const fingerprint = deps.fingerprint()
+    if ((!dirty && pending.size === 0) || !location || !synced || !fingerprint) return
     dirty = false
     // A retry goes only to the transports that still owe an ack.
     const only = pending.size ? [...pending] : undefined
     try {
-      const reports = await invoke<PushReport[]>('sync_push', { document: synced, cfi: location.cfi, fraction: location.fraction, only })
+      const reports = await invoke<PushReport[]>('sync_push', { document: synced, fingerprint, cfi: location.cfi, fraction: location.fraction, only })
       pending = new Set(reports.filter(r => r.error).map(r => r.transport))
       if (pending.size) dirty = true
     } catch (e) {

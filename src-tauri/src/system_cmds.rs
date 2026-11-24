@@ -1,6 +1,7 @@
 //! One-off system commands: file types, updates, outside books, the library screen.
 
 use crate::cli::Launch;
+use crate::dropbox;
 use crate::formats;
 use crate::modules;
 use crate::platform::{Active, Platform};
@@ -9,6 +10,7 @@ use crate::register;
 use crate::updates;
 use crate::windows::{open_or_focus, show_book, show_here};
 use crate::CmdResult;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -33,6 +35,38 @@ pub(crate) fn unregister_file_types(store: State<Store>) -> CmdResult<()> {
 #[tauri::command(async)]
 pub(crate) fn file_types_registered() -> bool {
     register::registered()
+}
+
+/// Dropbox: whether a refresh token is kept, and the last sync failure,
+/// if any (sync stays quiet, but the settings show what went wrong).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DropboxStatus {
+    connected: bool,
+    last_error: Option<String>,
+}
+
+#[tauri::command(async)]
+pub(crate) fn dropbox_status() -> DropboxStatus {
+    DropboxStatus { connected: dropbox::is_connected(), last_error: dropbox::last_error() }
+}
+
+/// Connects Dropbox: opens its login in the browser, waits for the answer
+/// and keeps the refresh token like a catalog password.
+#[tauri::command(async)]
+pub(crate) fn dropbox_connect(app: AppHandle, store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:dropbox"))?;
+    let pending = dropbox::begin()?;
+    app.opener().open_url(&pending.url, None::<&str>).map_err(|e| e.to_string())?;
+    dropbox::finish(pending)
+}
+
+/// Forgets the Dropbox token; connecting again starts over.
+#[tauri::command(async)]
+pub(crate) fn dropbox_disconnect(store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:dropbox"))?;
+    dropbox::disconnect();
+    Ok(())
 }
 
 /// The app version (from Cargo.toml), shown in the About panel.

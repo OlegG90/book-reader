@@ -25,6 +25,7 @@ function page(found: Promise<{ latest: string; newer: boolean }> = Promise.resol
     toggleModule: vi.fn(),
     clearHistory: vi.fn(),
     toggleFileTypes: vi.fn(),
+    toggleDropbox: vi.fn(),
     changeLibrary: vi.fn(),
     organizeLibrary: vi.fn(),
     close: vi.fn(),
@@ -246,6 +247,8 @@ describe('settings page', () => {
     expect(actions.clearHistory).toHaveBeenCalledOnce()
     button('Register').click()
     expect(actions.toggleFileTypes).toHaveBeenCalledOnce()
+    button('Connect…').click()
+    expect(actions.toggleDropbox).toHaveBeenCalledOnce()
     button('Change…').click()
     expect(actions.changeLibrary).toHaveBeenCalledOnce()
     button('Organize…').click()
@@ -259,6 +262,20 @@ describe('settings page', () => {
     expect(host.textContent).toContain('Not chosen yet')
     panel.setLibraryFolder(String.raw`D:\Books`)
     expect(host.textContent).toContain(String.raw`D:\Books`)
+  })
+
+  it('shows the Dropbox connection state', () => {
+    const { host, panel, button } = page()
+    expect(host.textContent).toContain('Not connected')
+    panel.setDropboxConnected(true, null)
+    expect(host.textContent).toContain('Connected')
+    panel.setDropboxConnected(true, 'Dropbox upload failed (401)')
+    expect(host.textContent).toContain('Dropbox upload failed (401)')
+    expect(button('Disconnect')).toBeDefined()
+    panel.setDropboxVisible(false)
+    expect(button('Disconnect').closest<HTMLElement>('.row')?.hidden).toBe(true)
+    panel.setDropboxVisible(true)
+    expect(button('Disconnect').closest<HTMLElement>('.row')?.hidden).toBe(false)
   })
 
   it('shows the file-type registration state', () => {

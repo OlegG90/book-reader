@@ -131,6 +131,16 @@ fn definitions() -> Vec<Def> {
             optional: true,
             requires: &[],
         },
+        Def {
+            id: "capability:dropbox",
+            kind: ModuleKind::Capability,
+            label: "Dropbox",
+            hint: "Sync reading positions through your Dropbox, without catalogs.",
+            extensions: &[],
+            needs_network: true,
+            optional: true,
+            requires: &[],
+        },
     ]
 }
 
@@ -260,7 +270,7 @@ mod tests {
     #[test]
     fn list_reflects_settings() {
         let all = list(&state_with(Map::new()));
-        assert_eq!(all.len(), 7);
+        assert_eq!(all.len(), 8);
         assert!(all.iter().all(|m| m.enabled));
         // Catalogs show the dependency while progress sync is still on.
         assert!(all.iter().find(|m| m.id == "capability:catalogs").unwrap().in_use);
@@ -278,7 +288,7 @@ mod tests {
         // Unknown ids change nothing; corrupt shapes mean nothing is off.
         let state = state_with(disabled(&["format:fb2", "wizardry:fireball"]));
         assert!(is_off(&state, "format:fb2"));
-        assert_eq!(list(&state).len(), 7);
+        assert_eq!(list(&state).len(), 8);
         let state = state_with(Map::from_iter([("disabledModules".into(), json!("fb2"))]));
         assert!(!is_off(&state, "format:fb2"));
         let state = state_with(Map::from_iter([("disabledModules".into(), json!([42]))]));

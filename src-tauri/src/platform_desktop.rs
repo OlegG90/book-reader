@@ -62,7 +62,7 @@ impl Platform for Desktop {
 
     /// Keeps a catalog's password in the OS credential store (the Windows Credential Manager).
     fn save_password(source_id: &str, password: &str) -> Result<(), String> {
-        credential(source_id)?.set_password(password).map_err(|e| e.to_string())
+        credential(&format!("catalog:{source_id}"))?.set_password(password).map_err(|e| e.to_string())
     }
 
     /// Whether a catalog has a password kept.
@@ -77,12 +77,12 @@ impl Platform for Desktop {
 
     /// A catalog's password, if one is kept.
     fn password(source_id: &str) -> Option<String> {
-        credential(source_id).ok()?.get_password().ok()
+        credential(&format!("catalog:{source_id}")).ok()?.get_password().ok()
     }
 
     /// Removes a catalog's password from the credential store.
     fn forget_password(source_id: &str) {
-        if let Ok(entry) = credential(source_id) {
+        if let Ok(entry) = credential(&format!("catalog:{source_id}")) {
             let _ = entry.delete_credential();
         }
     }
@@ -99,6 +99,7 @@ fn file_dialog(window: &Window) -> FileDialogBuilder<Wry> {
 }
 
 /// The credential store entry for a catalog's password.
-fn credential(source_id: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new("Book Reader", &format!("catalog:{source_id}")).map_err(|e| e.to_string())
+/// A credential-store entry by its full account name (`catalog:<id>` for catalogs).
+fn credential(account: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new("Book Reader", account).map_err(|e| e.to_string())
 }

@@ -9,6 +9,7 @@ mod console;
 // Android keeps its data in the app's storage: only `resolve_state_file` is shared.
 #[cfg_attr(mobile, allow(dead_code))]
 mod data_dir;
+mod dropbox;
 mod fingerprint;
 mod formats;
 mod kosync;
@@ -95,6 +96,9 @@ pub fn run() {
             system_cmds::register_file_types,
             system_cmds::unregister_file_types,
             system_cmds::file_types_registered,
+            system_cmds::dropbox_status,
+            system_cmds::dropbox_connect,
+            system_cmds::dropbox_disconnect,
             system_cmds::app_version,
             system_cmds::open_repository,
             system_cmds::check_for_update,
