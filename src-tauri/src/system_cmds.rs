@@ -85,8 +85,7 @@ pub(crate) fn google_status() -> GoogleStatus {
 }
 
 /// Connects Google Drive: opens its login in the browser, waits for the answer
-/// and keeps the refresh token like a catalog password. Both platforms wait on
-/// a loopback address (same as Dropbox and PswManager).
+/// and keeps the refresh token like a catalog password.
 #[tauri::command(async)]
 pub(crate) fn google_connect(app: AppHandle, store: State<Store>) -> CmdResult<()> {
     store.read(|s| modules::require(s, "capability:googledrive"))?;
@@ -101,6 +100,31 @@ pub(crate) fn google_disconnect(store: State<Store>) -> CmdResult<()> {
     store.read(|s| modules::require(s, "capability:googledrive"))?;
     google::disconnect();
     Ok(())
+}
+
+/// Starts the phone's Google login: opens its page in the browser, and the
+/// answer comes back through the app's intent filter (`google_finish`).
+/// The desktop waits on a loopback address instead (`google_connect`).
+#[tauri::command(async)]
+pub(crate) fn google_connect_android(app: AppHandle, store: State<Store>) -> CmdResult<String> {
+    store.read(|s| modules::require(s, "capability:googledrive"))?;
+    let url = google::begin_android()?;
+    app.opener().open_url(&url, None::<&str>).map_err(|e| e.to_string())?;
+    Ok(url)
+}
+
+/// Finishes the phone's Google login with the address the browser came back to.
+#[tauri::command(async)]
+pub(crate) fn google_finish(answer: String, store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:googledrive"))?;
+    google::finish_answer(&answer)
+}
+
+/// A Google sign-in answer waiting on a phone, if one arrived. The settings drain
+/// it at startup and on every oauth event, so a cold start cannot lose it.
+#[tauri::command(async)]
+pub(crate) fn google_take_answer() -> CmdResult<Option<String>> {
+    Active::take_oauth_answer()
 }
 
 /// The app version (from Cargo.toml), shown in the About panel.

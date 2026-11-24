@@ -35,3 +35,10 @@ export function initVolumeKeys(onKey: (direction: 'next' | 'prev') => void): voi
   void addPluginListener<{ direction: 'next' | 'prev' }>('system', 'volumeKey', ({ direction }) => onKey(direction)).catch(console.error)
 }
 
+/** A Google sign-in answer arriving on the app's scheme (a phone redirect back
+from the browser): the address to finish the login with. Nothing arrives on
+the desktop, where the login waits on a loopback address instead. */
+export function initOauthAnswer(answer: (url: string) => void): void {
+  if (!isAndroid) return
+  void addPluginListener<{ url: string }>('system', 'oauth', ({ url }) => answer(url)).catch(console.error)
+}

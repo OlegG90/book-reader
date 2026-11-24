@@ -67,15 +67,14 @@ const FILE_VERSION: u32 = 1;
 /// The narrow Drive scope: the app's own hidden folder, nothing else.
 const SCOPE: &str = "https://www.googleapis.com/auth/drive.appdata";
 
-/// The OAuth callback: the loopback address on both platforms (like Dropbox
-/// and PswManager: Desktop-type clients accept any loopback port, and the
-/// Android client takes the same loopback address, so neither needs
-/// registration). Explicit 127.0.0.1 on a phone, where `localhost` may
-/// resolve either way.
+/// The OAuth callback. Desktop: the loopback address (Desktop-type clients
+/// accept any loopback port, so it needs no registration). Phone: the app's
+/// own scheme, caught by an intent filter (see AndroidManifest.xml) — the
+/// answer arrives as an intent instead of a loopback connection.
 #[cfg(not(mobile))]
 const REDIRECT_URI: &str = "http://localhost:51944/googledrive";
 #[cfg(mobile)]
-const REDIRECT_URI: &str = "http://127.0.0.1:51944/googledrive";
+const REDIRECT_URI: &str = "com.olegg90.bookreader:/oauth2redirect";
 
 /// One book's synced position as the cloud file keeps it: the local shape
 /// (see store::Position) plus who saved it, for the echo check.
@@ -172,6 +171,34 @@ pub fn begin() -> Result<PendingLogin, String> {
 /// keeps the refresh token like a catalog password.
 pub fn finish(login: PendingLogin) -> Result<(), String> {
     let code = oauth::wait_for_code(login.listener, &login.state, "Google")?;
+    let (_access, refresh) = exchange(&code, &login.verifier, Active::password(TOKEN_ID))?;
+    Active::save_password(TOKEN_ID, &refresh)
+}
+
+/// A login waiting for the phone's browser: the answer arrives as an intent
+/// with the app's scheme, so nothing listens locally (unlike the desktop).
+struct AndroidLogin {
+    verifier: String,
+    state: String,
+}
+
+static ANDROID_LOGIN: Mutex<Option<AndroidLogin>> = Mutex::new(None);
+
+/// Starts the phone login: open the returned address in the browser, and the
+/// answer comes back to `finish_answer` through the app's intent filter.
+pub fn begin_android() -> Result<String, String> {
+    let (client_id, _) = credentials()?;
+    let verifier = oauth::random_string(64);
+    let state = oauth::random_string(16);
+    let url = auth_url(client_id, &oauth::challenge(&verifier), &state);
+    *ANDROID_LOGIN.lock().unwrap() = Some(AndroidLogin { verifier, state });
+    Ok(url)
+}
+
+/// Finishes the phone login with the address the browser came back to.
+pub fn finish_answer(answer: &str) -> Result<(), String> {
+    let login = ANDROID_LOGIN.lock().unwrap().take().ok_or("login: no Google login is waiting")?;
+    let code = oauth::code_in_answer(answer, &login.state, "Google")?;
     let (_access, refresh) = exchange(&code, &login.verifier, Active::password(TOKEN_ID))?;
     Active::save_password(TOKEN_ID, &refresh)
 }
