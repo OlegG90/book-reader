@@ -29,7 +29,7 @@ import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
 import { cloudModuleId, createAppearancePanel, createSettingsPage, type ModuleInfo, type SettingsSection } from './settings-panel'
-import { initBackButton, initIncoming, initOauthAnswer, initVolumeKeys, isAndroid, setReading } from './platform'
+import { initBackButton, initIncoming, initVolumeKeys, isAndroid, setReading } from './platform'
 import { createReadingView, type AddMode, type Offer } from './reading-view'
 import { createLibraryView, type View } from './library-view'
 import { SYNC_EVERY_MS, SYNC_ON_CLOSE_MS } from './sync-manager'
@@ -366,9 +366,7 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
   },
   connectCloud: provider => {
     // The picker never sends an unavailable cloud; a disabled module refuses.
-    // A phone's answer comes back on the app's scheme (initOauthAnswer);
-    // the desktop waits on a loopback address instead.
-    const command = provider === 'google' && isAndroid ? 'google_connect_android' : provider === 'google' ? 'google_connect' : 'dropbox_connect'
+    const command = provider === 'google' ? 'google_connect' : 'dropbox_connect'
     void invoke(command).then(
       () => {
         void refreshCloudStatus()
@@ -820,25 +818,7 @@ initIncoming(() => void invoke('open_incoming').catch(e => showError(undefined, 
 initVolumeKeys(direction => {
   if (reading.book) void runCommand(direction)
 })
-// A Google sign-in answer back from the phone's browser, or one stashed
-// while the app started: finish the login (draining takes it exactly once).
-async function drainOauthAnswer() {
-  const answer = await invoke<string | null>('google_take_answer').catch(e => {
-    console.error(e)
-    return null
-  })
-  if (!answer) return
-  try {
-    await invoke('google_finish', { answer })
-    void refreshCloudStatus()
-    void sourcesPanel.refresh()
-  } catch (e) {
-    showError(undefined, e)
-    void refreshCloudStatus()
-  }
-}
-initOauthAnswer(() => void drainOauthAnswer())
-void drainOauthAnswer()
+
 // Another window changed a setting: apply it here too (it is already saved).
 appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
   const valid = readSettings({ ...settings, ...payload })

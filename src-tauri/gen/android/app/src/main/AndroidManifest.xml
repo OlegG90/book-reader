@@ -49,15 +49,6 @@
                 <data android:mimeType="application/x-zip-compressed-fb2" />
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
-            <!-- A Google sign-in answer: the OAuth redirect comes back on the
-                 app's own scheme (the Android client in the Cloud Console),
-                 for SystemPlugin.kt to hand to `google_finish`. -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="com.olegg90.bookreader" android:path="/oauth2redirect" />
-            </intent-filter>
         </activity>
 
         <provider

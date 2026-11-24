@@ -45,11 +45,6 @@ impl Platform for Desktop {
         Ok(None)
     }
 
-    /// A Google sign-in answer waiting on a phone; nothing waits on the desktop.
-    fn take_oauth_answer() -> Result<Option<String>, String> {
-        Ok(None)
-    }
-
     /// Desktop books are moved as files, so there is no original to delete.
     fn delete_original(_original: &str) -> bool {
         false

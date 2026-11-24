@@ -29,11 +29,6 @@ pub(crate) trait Platform {
     /// phone); nothing waits on the desktop.
     fn take_incoming() -> Result<Option<Outside>, String>;
 
-    /// A Google sign-in answer waiting on a phone (the browser back on the
-    /// app's scheme); nothing waits on the desktop, whose login listens on
-    /// a loopback address instead.
-    fn take_oauth_answer() -> Result<Option<String>, String>;
-
     /// Deletes the original of a book moved into the library; false where
     /// that isn't allowed, and always false on the desktop.
     fn delete_original(original: &str) -> bool;
