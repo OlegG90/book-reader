@@ -300,6 +300,18 @@ mod tests {
     }
 
     #[test]
+    fn require_names_each_system_capability() {
+        for (id, label) in [
+            ("capability:organize", "Organize"),
+            ("capability:file-types", "File types"),
+            ("capability:update-check", "Update check"),
+        ] {
+            let off = state_with(disabled(&[id]));
+            assert_eq!(require(&off, id), Err(format!("{label} is turned off in Settings > Modules")));
+        }
+    }
+
+    #[test]
     fn unknown_ids_are_refused_on_write() {
         let state = state_with(Map::new());
         let next = BTreeSet::from(["wizardry:fireball".into()]);

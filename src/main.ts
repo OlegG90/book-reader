@@ -29,7 +29,7 @@ import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
 import { createAppearancePanel, createSettingsPage, type ModuleInfo, type SettingsSection } from './settings-panel'
-import { initBackButton, initIncoming, initVolumeKeys, setReading } from './platform'
+import { initBackButton, initIncoming, initVolumeKeys, isAndroid, setReading } from './platform'
 import { createReadingView, type AddMode, type Offer } from './reading-view'
 import { createLibraryView, type View } from './library-view'
 import { SYNC_EVERY_MS, SYNC_ON_CLOSE_MS } from './sync-manager'
@@ -540,6 +540,9 @@ function applyCapabilities() {
     if (item.dataset.nav === 'catalogs' || item.dataset.nav === 'settings:catalogs') item.hidden = !catalogs
   }
   settingsPage.setSectionVisible('catalogs', catalogs)
+  settingsPage.setOrganizeVisible(!off.has('capability:organize'))
+  settingsPage.setFileTypesVisible(!isAndroid && !off.has('capability:file-types'))
+  settingsPage.setUpdatesVisible(!off.has('capability:update-check'))
   if (!catalogs && (view === 'catalogs' || view === 'settings:catalogs')) {
     showView(view === 'catalogs' ? 'library' : 'settings:modules')
   }

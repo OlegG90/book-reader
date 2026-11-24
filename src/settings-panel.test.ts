@@ -199,6 +199,22 @@ describe('settings page', () => {
     expect(button('Register')).toBeDefined()
   })
 
+  it('hides the capability rows', () => {
+    const { button, panel } = page()
+    panel.setOrganizeVisible(false)
+    expect(button('Organize…').hidden).toBe(true)
+    panel.setOrganizeVisible(true)
+    expect(button('Organize…').hidden).toBe(false)
+    panel.setFileTypesVisible(false)
+    expect(button('Register').closest<HTMLElement>('.row')?.hidden).toBe(true)
+    panel.setFileTypesVisible(true)
+    expect(button('Register').closest<HTMLElement>('.row')?.hidden).toBe(false)
+    panel.setUpdatesVisible(false)
+    expect(button('Check for updates').closest<HTMLElement>('.row')?.hidden).toBe(true)
+    panel.setUpdatesVisible(true)
+    expect(button('Check for updates').closest<HTMLElement>('.row')?.hidden).toBe(false)
+  })
+
   it('hides a section tab', () => {
     const { button, panel } = page()
     panel.setSectionVisible('catalogs', false)
