@@ -31,14 +31,23 @@ Markdown, fixed-layout EPUB, DRM-protected books, PDF, MOBI/AZW3, TXT, highlight
 
 ### Optional modules
 
-Layer 0 (the core) is never modular: book identity and fingerprints, positions and bookmarks, the library scan and cache, the naming template, the network policy, the settings merge across windows. Layer 1 can be turned off in Settings › Modules:
+Layer 0 (the core) is never modular: book identity and fingerprints, positions and bookmarks, the library scan and cache, the naming template, the network policy, the settings merge across windows. Layer 1 can be turned off in Settings › Modules. The section lists every module with its switch, grouped into formats and capabilities, and says why a switch is locked. The settings keep `disabledModules`: a list of module ids (missing or corrupt entries are tolerated on load, like every other setting; writes refuse unknown, mandatory and in-use modules with a sentence).
 
-- `format:epub`, `format:fb2` (covers `.fb2/.fb2.zip/.fbz`) — reading formats.
-- `capability:catalogs` — OPDS browsing and downloads. In use while catalog sources exist, or while progress sync is still on (it needs catalogs). Turned off, the Catalogs page and its navigation items are gone and every `catalog_*` action refuses with the Modules sentence.
+A disabled module removes its interface entries and refuses its actions with a sentence (never a broken button):
+
+- `"<Label> is turned off in Settings > Modules"` — every refused action, e.g. `FB2 is turned off in Settings > Modules` when opening, picking, adding or downloading an FB2 book with the format off; `Catalogs is turned off in Settings > Modules` for every `catalog_*` action.
+- `"Catalogs is in use: delete its catalog sources first."`, `"Catalogs is in use: turn off \"Progress sync\" first."` — turning `catalogs` off is refused while sources exist or progress sync is still on.
+
+Off behavior per module:
+
+- `format:epub`, `format:fb2` (covers `.fb2/.fb2.zip/.fbz`) — reading formats (see [Supported formats](#supported-formats)).
+- `capability:catalogs` — OPDS browsing and downloads. Turned off, the Catalogs page, its navigation items and the settings tab are gone.
 - `capability:progress-sync` — KOSync positions. Turning it off stops push/pull and hides the sync badge and the jump offer; books still open, positions still save locally. A source marked for sync reports `Progress sync is turned off` instead of failing.
-- `capability:organize`, `capability:file-types` (desktop only), `capability:update-check` — system capabilities.
+- `capability:organize` — the Organize button leaves Settings › System; preview and apply refuse.
+- `capability:file-types` — the File types row leaves Settings › System (on a phone it is never offered); registering and unregistering refuse.
+- `capability:update-check` — the Updates row leaves Settings › About; the check and the release page refuse.
 
-The settings keep `disabledModules`: a list of module ids (missing or corrupt entries are tolerated on load, like every other setting; writes refuse unknown, mandatory and in-use modules with a sentence). A disabled module removes its interface entries and refuses its actions with a sentence (never a broken button). No cloud stores, no `reader-core` changes: the modules only switch the app's own areas on and off.
+No cloud stores, no `reader-core` changes: the modules only switch the app's own areas on and off.
 
 ## Reading
 
