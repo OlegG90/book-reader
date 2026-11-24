@@ -399,6 +399,7 @@ pub(crate) struct Rename {
 /// The renames that would make the last scan's books follow the naming template.
 #[tauri::command(async)]
 pub(crate) fn organize_preview(store: State<Store>, books: State<LibraryBooks>) -> CmdResult<Vec<Rename>> {
+    store.read(|s| modules::require(s, "capability:organize"))?;
     let root = library_root(&store)?;
     let plan = library::organize_plan(&root, &books.snapshot(&store, &root)).map_err(|e| e.to_string())?;
     Ok(plan.into_iter().map(|(entry, to)| Rename { from: entry.path, to }).collect())
@@ -408,6 +409,7 @@ pub(crate) fn organize_preview(store: State<Store>, books: State<LibraryBooks>) 
 /// files). Returns how many books were renamed.
 #[tauri::command(async)]
 pub(crate) fn organize_apply(app: AppHandle, store: State<Store>, books: State<LibraryBooks>, windows: State<ReaderWindows>) -> CmdResult<usize> {
+    store.read(|s| modules::require(s, "capability:organize"))?;
     let root = library_root(&store)?;
     let plan = library::organize_plan(&root, &books.snapshot(&store, &root)).map_err(|e| e.to_string())?;
     let mut moved = Vec::new();

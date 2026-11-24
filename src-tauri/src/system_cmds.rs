@@ -17,13 +17,15 @@ use tauri_plugin_opener::OpenerExt;
 
 /// Registers the app for its book file types (see register::register).
 #[tauri::command(async)]
-pub(crate) fn register_file_types() -> CmdResult<()> {
+pub(crate) fn register_file_types(store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:file-types"))?;
     std::env::current_exe().and_then(|exe| register::register(&exe)).map_err(|e| e.to_string())
 }
 
 /// Removes the app's file associations again.
 #[tauri::command(async)]
-pub(crate) fn unregister_file_types() -> CmdResult<()> {
+pub(crate) fn unregister_file_types(store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:file-types"))?;
     register::unregister().map_err(|e| e.to_string())
 }
 
@@ -47,13 +49,15 @@ pub(crate) fn open_repository(app: AppHandle) -> CmdResult<()> {
 
 /// Opens the latest release's page, where its files are, in the browser.
 #[tauri::command]
-pub(crate) fn open_latest_release(app: AppHandle) -> CmdResult<()> {
+pub(crate) fn open_latest_release(app: AppHandle, store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:update-check"))?;
     app.opener().open_url(format!("{}/releases/latest", updates::REPOSITORY), None::<&str>).map_err(|e| e.to_string())
 }
 
 /// Asks GitHub for the latest release and compares it with this copy.
 #[tauri::command(async)]
-pub(crate) fn check_for_update() -> CmdResult<updates::UpdateCheck> {
+pub(crate) fn check_for_update(store: State<Store>) -> CmdResult<updates::UpdateCheck> {
+    store.read(|s| modules::require(s, "capability:update-check"))?;
     updates::check()
 }
 

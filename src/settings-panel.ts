@@ -219,13 +219,15 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const openRelease = el('button', { type: 'button', textContent: 'Open the release', hidden: true, onclick: actions.openLatestRelease })
   const checkUpdate = el('button', { type: 'button', textContent: 'Check for updates', onclick: () => void checkForUpdate() })
 
+  const organizeButton = el('button', { type: 'button', textContent: 'Organize…', onclick: actions.organizeLibrary })
   const libraryRow = row(
     'Library folder',
     libraryFolder,
     el('button', { type: 'button', textContent: 'Change…', onclick: actions.changeLibrary }),
-    el('button', { type: 'button', textContent: 'Organize…', onclick: actions.organizeLibrary }),
+    organizeButton,
   )
   const fileTypesRow = row('File types', fileTypesStatus, fileTypesButton)
+  const updatesRow = row('Updates', updateStatus, openRelease, checkUpdate)
   const historyLength = el(
     'select',
     { ariaLabel: 'Books in Continue reading' },
@@ -299,7 +301,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     about: [
       about,
       row('Source code', 'Book Reader on GitHub.', el('button', { type: 'button', textContent: 'Open on GitHub', onclick: actions.openRepository })),
-      row('Updates', updateStatus, openRelease, checkUpdate),
+      updatesRow,
     ],
   }
 
@@ -326,6 +328,21 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     ),
     el('div', { className: 'page-body' }, el('nav', { className: 'sections', ariaLabel: 'Sections', role: 'tablist' }, ...nav), el('div', { className: 'page-content' }, ...sections)),
   )
+
+  /** Hides the Organize button (the organize module is off). */
+  function setOrganizeVisible(visible: boolean) {
+    organizeButton.hidden = !visible
+  }
+
+  /** Hides the File types row (the module is off, or a phone: never offered there). */
+  function setFileTypesVisible(visible: boolean) {
+    fileTypesRow.hidden = !visible
+  }
+
+  /** Hides the Updates row (the update-check module is off). */
+  function setUpdatesVisible(visible: boolean) {
+    updatesRow.hidden = !visible
+  }
 
   /** Hides a section's tab (a disabled module takes its interface away), or shows it again. */
   function setSectionVisible(id: SettingsSection, visible: boolean) {
@@ -383,5 +400,18 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   setFileTypesRegistered(false)
   setLibraryFolder(null)
   showSection('reading')
-  return { show, setFileTypesRegistered, setLibraryFolder, showSection, setSectionVisible, setModules, catalogs, shortcuts, about }
+  return {
+    show,
+    setFileTypesRegistered,
+    setFileTypesVisible,
+    setLibraryFolder,
+    setOrganizeVisible,
+    setSectionVisible,
+    showSection,
+    setUpdatesVisible,
+    setModules,
+    catalogs,
+    shortcuts,
+    about,
+  }
 }
