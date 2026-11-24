@@ -197,10 +197,17 @@ pub fn check_turning_off(state: &store::State, next: &BTreeSet<String>) -> Resul
 }
 
 /// The sentence a refused action reports when its module is turned off.
-/// (The format and capability guards of the next tickets use it.)
-#[allow(dead_code)]
 pub fn off_message(label: &str) -> String {
     format!("{label} is turned off in Settings > Modules")
+}
+
+/// Refuses with the Modules sentence when the module is turned off.
+pub fn require(state: &store::State, id: &str) -> Result<(), String> {
+    if is_off(state, id) {
+        let label = definitions().into_iter().find(|d| d.id == id).map(|d| d.label).unwrap_or(id);
+        return Err(off_message(label));
+    }
+    Ok(())
 }
 
 /// Every layer-1 module with its current switch position.
@@ -282,6 +289,14 @@ mod tests {
             let endings: Vec<String> = reader.suffixes().iter().map(|s| s[1..].to_string()).collect();
             assert_eq!(def.extensions, endings.iter().map(String::as_str).collect::<Vec<_>>());
         }
+    }
+
+    #[test]
+    fn require_refuses_an_off_module_with_its_sentence() {
+        let on = state_with(Map::new());
+        assert_eq!(require(&on, "capability:catalogs"), Ok(()));
+        let off = state_with(disabled(&["capability:catalogs"]));
+        assert_eq!(require(&off, "capability:catalogs"), Err("Catalogs is turned off in Settings > Modules".into()));
     }
 
     #[test]

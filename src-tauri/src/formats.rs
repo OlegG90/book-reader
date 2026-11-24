@@ -128,10 +128,7 @@ pub fn read(path: &Path) -> io::Result<Metadata> {
 
 /// Refuses with the Modules sentence when the reader's module is turned off.
 pub fn check(state: &store::State, reader: &dyn FormatReader) -> Result<(), String> {
-    if modules::is_off(state, reader.module()) {
-        return Err(modules::off_message(reader.label()));
-    }
-    Ok(())
+    modules::require(state, reader.module())
 }
 
 #[cfg(test)]

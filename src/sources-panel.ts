@@ -8,7 +8,7 @@ import { row } from './settings-panel'
  * change one. Passwords go straight to the backend, which keeps them in the
  * OS credential store; they never come back.
  */
-export function createSourcesPanel(host: HTMLElement) {
+export function createSourcesPanel(host: HTMLElement, deps: { syncOff: () => boolean }) {
   const list = el('ul', { className: 'sources' })
   const status = el('p', { className: 'muted source-status' })
   const add = el('button', { type: 'button', textContent: 'Add catalog…', onclick: () => edit(undefined) })
@@ -21,20 +21,28 @@ export function createSourcesPanel(host: HTMLElement) {
     return { field, row: el('label', { className: 'stacked' }, label, field) }
   }
 
+  /** Whether the status line currently says sync is off (ours to clear). */
+  let syncOffShown = false
+
   async function refresh() {
     const sources = await fetchSources()
+    // The badge promises syncing; with the module off nothing syncs.
+    const syncBadge = (source: Source) =>
+      source.sync && !deps.syncOff() ? el('span', { className: 'badge', textContent: 'sync', title: 'Syncs reading progress' }) : ''
+    if (deps.syncOff()) {
+      status.textContent = 'Progress sync is turned off.'
+      syncOffShown = true
+    } else if (syncOffShown) {
+      status.textContent = ''
+      syncOffShown = false
+    }
     list.replaceChildren(
       ...sources.map(source =>
         el(
           'li',
           {},
           row(
-            el(
-              'span',
-              {},
-              source.name,
-              source.sync ? el('span', { className: 'badge', textContent: 'sync', title: 'Syncs reading progress' }) : '',
-            ),
+            el('span', {}, source.name, syncBadge(source)),
             source.url,
             el('button', { type: 'button', textContent: 'Edit', onclick: () => edit(source) }),
             el('button', { type: 'button', textContent: 'Remove', onclick: () => void remove(source) }),
