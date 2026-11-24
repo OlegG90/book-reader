@@ -98,6 +98,78 @@ function moduleBox(host: HTMLElement, label: string) {
   return box as HTMLInputElement
 }
 
+function sectionStrip(host: HTMLElement) {
+  const strip = host.querySelector<HTMLElement>('.sections')
+  if (!strip) throw new Error('no section strip')
+  return strip
+}
+
+function stubStrip(strip: HTMLElement, metrics: { scrollWidth: number; clientWidth: number; scrollLeft?: number }) {
+  Object.defineProperties(strip, {
+    scrollWidth: { value: metrics.scrollWidth, configurable: true },
+    clientWidth: { value: metrics.clientWidth, configurable: true },
+  })
+  strip.scrollLeft = metrics.scrollLeft ?? 0
+  strip.dispatchEvent(new Event('scroll'))
+}
+
+function stripArrows(host: HTMLElement) {
+  const [prev, next] = [...host.querySelectorAll<HTMLButtonElement>('.sections-arrow')]
+  if (!prev || !next) throw new Error('no strip arrows')
+  return { prev, next }
+}
+
+describe('section strip arrows', () => {
+  it('stays hidden when every section fits', () => {
+    const { host } = page()
+    stubStrip(sectionStrip(host), { scrollWidth: 300, clientWidth: 300 })
+    const { prev, next } = stripArrows(host)
+    expect(prev.hidden).toBe(true)
+    expect(next.hidden).toBe(true)
+  })
+
+  it('shows an arrow on each edge that hides more sections', () => {
+    const { host } = page()
+    const strip = sectionStrip(host)
+    stubStrip(strip, { scrollWidth: 600, clientWidth: 300, scrollLeft: 0 })
+    let arrows = stripArrows(host)
+    expect(arrows.prev.hidden).toBe(true)
+    expect(arrows.next.hidden).toBe(false)
+    stubStrip(strip, { scrollWidth: 600, clientWidth: 300, scrollLeft: 150 })
+    arrows = stripArrows(host)
+    expect(arrows.prev.hidden).toBe(false)
+    expect(arrows.next.hidden).toBe(false)
+    stubStrip(strip, { scrollWidth: 600, clientWidth: 300, scrollLeft: 300 })
+    arrows = stripArrows(host)
+    expect(arrows.prev.hidden).toBe(false)
+    expect(arrows.next.hidden).toBe(true)
+  })
+
+  it('scrolls the strip when an arrow is pressed', () => {
+    const { host } = page()
+    const strip = sectionStrip(host)
+    stubStrip(strip, { scrollWidth: 600, clientWidth: 300, scrollLeft: 0 })
+    const scrollBy = vi.fn()
+    strip.scrollBy = scrollBy
+    const { prev, next } = stripArrows(host)
+    next.click()
+    expect(scrollBy).toHaveBeenCalledWith(expect.objectContaining({ left: 240 }))
+    stubStrip(strip, { scrollWidth: 600, clientWidth: 300, scrollLeft: 300 })
+    prev.click()
+    expect(scrollBy).toHaveBeenCalledWith(expect.objectContaining({ left: -240 }))
+  })
+
+  it('rechecks when a tab hides', () => {
+    const { host, panel } = page()
+    const strip = sectionStrip(host)
+    stubStrip(strip, { scrollWidth: 600, clientWidth: 300, scrollLeft: 0 })
+    expect(stripArrows(host).next.hidden).toBe(false)
+    stubStrip(strip, { scrollWidth: 300, clientWidth: 300, scrollLeft: 0 })
+    panel.setSectionVisible('catalogs', false)
+    expect(stripArrows(host).next.hidden).toBe(true)
+  })
+})
+
 describe('modules section', () => {
   it('renders the backend modules grouped by kind', () => {
     const { host, panel } = page()
