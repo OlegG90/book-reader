@@ -266,14 +266,26 @@ fn access_token() -> Result<String, String> {
     if reply.status != 200 {
         return Err(format!("Dropbox login failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
     }
-    tokens(&reply.body).map(|(access, _)| access)
+    // A refresh answer carries no refresh token (only the code exchange does).
+    access_from(&token_json(&reply.body)?)
+}
+
+fn token_json(body: &[u8]) -> Result<serde_json::Value, String> {
+    serde_json::from_slice(body).map_err(|e| format!("login: {e}"))
+}
+
+fn access_from(tokens: &serde_json::Value) -> Result<String, String> {
+    tokens["access_token"]
+        .as_str()
+        .ok_or_else(|| "login: Dropbox gave no access token".to_string())
+        .map(str::to_string)
 }
 
 fn tokens(body: &[u8]) -> Result<(String, String), String> {
-    let tokens: serde_json::Value = serde_json::from_slice(body).map_err(|e| format!("login: {e}"))?;
-    let access = tokens["access_token"].as_str().ok_or("login: Dropbox gave no access token")?.to_string();
-    let refresh = tokens["refresh_token"].as_str().ok_or("login: Dropbox gave no refresh token (ask for offline access again)")?.to_string();
-    Ok((access, refresh))
+    let tokens = token_json(body)?;
+    let refresh =
+        tokens["refresh_token"].as_str().ok_or("login: Dropbox gave no refresh token (ask for offline access again)")?.to_string();
+    Ok((access_from(&tokens)?, refresh))
 }
 
 /// Downloads the positions file; `None` when there is none yet.
@@ -403,6 +415,14 @@ mod tests {
         assert_eq!(last_error().as_deref(), Some("gone"));
         let _ = track::<()>(Ok(()));
         assert_eq!(last_error(), None);
+    }
+
+    #[test]
+    fn refresh_answer_carries_no_refresh_token() {
+        // What /oauth2/token answers to a refresh grant: access only.
+        let body = br#"{"access_token": "sl.XXXX", "token_type": "bearer", "expires_in": 14400}"#;
+        assert_eq!(access_from(&token_json(body).unwrap()).unwrap(), "sl.XXXX");
+        assert!(tokens(body).is_err(), "a code exchange without one still fails");
     }
 
     #[test]
