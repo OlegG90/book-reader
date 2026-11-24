@@ -327,6 +327,12 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     el('div', { className: 'page-body' }, el('nav', { className: 'sections', ariaLabel: 'Sections', role: 'tablist' }, ...nav), el('div', { className: 'page-content' }, ...sections)),
   )
 
+  /** Hides a section's tab (a disabled module takes its interface away), or shows it again. */
+  function setSectionVisible(id: SettingsSection, visible: boolean) {
+    const i = SECTIONS.findIndex(section => section.id === id)
+    nav[i].hidden = !visible
+  }
+
   /** Shows one section (a tab) and marks it in the list. */
   function showSection(id: SettingsSection) {
     SECTIONS.forEach((section, i) => {
@@ -377,5 +383,5 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   setFileTypesRegistered(false)
   setLibraryFolder(null)
   showSection('reading')
-  return { show, setFileTypesRegistered, setLibraryFolder, showSection, setModules, catalogs, shortcuts, about }
+  return { show, setFileTypesRegistered, setLibraryFolder, showSection, setSectionVisible, setModules, catalogs, shortcuts, about }
 }

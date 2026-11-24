@@ -19,6 +19,8 @@ export interface SyncOffer {
 export interface SyncDeps {
   book: () => BookView | null
   fingerprint: () => string
+  /** The progress-sync module is turned off: never touch the network. */
+  syncOff: () => boolean
 }
 
 export interface SyncManager {
@@ -55,6 +57,7 @@ export function createSyncManager(deps: SyncDeps): SyncManager {
   let dirty = false
 
   async function pull() {
+    if (deps.syncOff()) return
     const book = deps.book()
     const fingerprint = deps.fingerprint()
     const synced = await invoke<string | null>('sync_document').catch(e => {
@@ -76,6 +79,7 @@ export function createSyncManager(deps: SyncDeps): SyncManager {
   }
 
   async function push() {
+    if (deps.syncOff()) return
     const location = deps.book()?.view.lastLocation
     const synced = document
     if (!dirty || !location || !synced) return

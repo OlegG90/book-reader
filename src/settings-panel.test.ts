@@ -199,6 +199,14 @@ describe('settings page', () => {
     expect(button('Register')).toBeDefined()
   })
 
+  it('hides a section tab', () => {
+    const { button, panel } = page()
+    panel.setSectionVisible('catalogs', false)
+    expect(button('Catalogs').hidden).toBe(true)
+    panel.setSectionVisible('catalogs', true)
+    expect(button('Catalogs').hidden).toBe(false)
+  })
+
   it('shows one section at a time, as tabs', () => {
     const { host, panel, button } = page()
     const shown = () => [...host.querySelectorAll<HTMLElement>('.section')].filter(s => !s.hidden).map(s => s.id)

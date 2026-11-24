@@ -56,6 +56,7 @@ const settingsReady = invoke<Record<string, unknown>>('get_settings')
     settings = readSettings(stored)
     applyTheme()
     showSettings()
+    applyCapabilities()
     library.showControls()
   })
 const library = createLibraryView({
@@ -373,7 +374,9 @@ const appearancePanel = createAppearancePanel($('appearance'), settings, changes
   allSettings: () => openSettings('reading'),
 })
 // The catalogs (OPDS servers), the key list and the version have their own sections in the settings.
-const sourcesPanel = createSourcesPanel(settingsPage.catalogs)
+const sourcesPanel = createSourcesPanel(settingsPage.catalogs, {
+  syncOff: () => settings.disabledModules.includes('capability:progress-sync'),
+})
 settingsPage.shortcuts.append($('shortcuts').querySelector('dl')!.cloneNode(true))
 const settingsVersion = el('span')
 settingsPage.about.append(
@@ -403,6 +406,8 @@ const navItems = [...document.querySelectorAll<HTMLElement>('[data-nav]')]
 const settingsHead = document.querySelector<HTMLElement>('#sidebar .section-head')!
 /** The last page that isn't a settings section, for S / Ctrl+, to go back to. */
 let lastPage: View = 'library'
+/** The disabled modules the capabilities UI was last drawn for. */
+let lastCapabilities = ''
 
 /** Shows `to` in the library window's content and marks it in the pane. */
 function showView(to: View) {
@@ -497,6 +502,7 @@ function applySettings(changes: Partial<Settings>) {
   if ('volumeKeys' in changes) setReading(!!open, settings.volumeKeys)
   if ('historyLength' in changes && !open) void library.refreshRecent()
   if ('uiFont' in changes) applyTheme()
+  applyCapabilities()
 }
 
 /** Applies changes made in this window, and saves them after a pause. */
@@ -520,9 +526,28 @@ function refreshModules() {
     modules => {
       settingsPage.setModules(modules)
       setFormats(modules)
+      applyCapabilities()
     },
     console.error,
   )
+}
+
+/** Hides what disabled capability modules take away (catalogs UI, sync UI). */
+function applyCapabilities() {
+  const off = new Set(settings.disabledModules)
+  const catalogs = !off.has('capability:catalogs')
+  for (const item of navItems) {
+    if (item.dataset.nav === 'catalogs' || item.dataset.nav === 'settings:catalogs') item.hidden = !catalogs
+  }
+  settingsPage.setSectionVisible('catalogs', catalogs)
+  if (!catalogs && (view === 'catalogs' || view === 'settings:catalogs')) {
+    showView(view === 'catalogs' ? 'library' : 'settings:modules')
+  }
+  const key = [...off].sort().join(',')
+  if (key !== lastCapabilities) {
+    lastCapabilities = key
+    void sourcesPanel.refresh()
+  }
 }
 
 /** Turns a layer-1 module off or back on, then refreshes its row. */
