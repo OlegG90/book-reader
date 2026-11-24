@@ -20,18 +20,24 @@ fn sync_source(store: &Store) -> Option<catalog::Source> {
     store.read(|s| s.sources.iter().find(|source| source.sync).cloned())
 }
 
+/// What a transport reads a book by: KOSync's document id, the cloud's fingerprint.
+struct BookKey<'a> {
+    document: &'a str,
+    fingerprint: &'a str,
+}
+
 /// One way to carry positions between devices. KOSync today; a cloud store
 /// next. Every transport speaks `Progress` and names itself, so pulling fans
 /// out and pushing reports per transport without learning transports.
 trait Transport {
-    /// "kosync" — the Modules reason and the frontend's pending set name it.
+    /// "kosync", "dropbox", … — the Modules reason and the frontend's pending set name it.
     fn id(&self) -> &'static str;
     /// False when the transport's module is off.
     fn enabled(&self, state: &store::State) -> bool;
     /// The newest remote position for the book, if any.
-    fn pull(&self, store: &Store, document: &str) -> Result<Option<kosync::Progress>, String>;
+    fn pull(&self, store: &Store, book: &BookKey) -> Result<Option<kosync::Progress>, String>;
     /// Sends the position.
-    fn push(&self, store: &Store, document: &str, cfi: &str, fraction: f64) -> Result<(), String>;
+    fn push(&self, store: &Store, book: &BookKey, cfi: &str, fraction: f64) -> Result<(), String>;
 }
 
 /// Progress sync through the catalog server (see kosync.rs).
@@ -43,41 +49,66 @@ impl Transport for Kosync {
     }
 
     fn enabled(&self, state: &store::State) -> bool {
-        !modules::is_off(state, "capability:progress-sync")
+        // Mirrors the requires edge: KOSync works through the catalog server.
+        !modules::is_off(state, "capability:progress-sync") && !modules::is_off(state, "capability:catalogs")
     }
 
-    fn pull(&self, store: &Store, document: &str) -> Result<Option<kosync::Progress>, String> {
+    fn pull(&self, store: &Store, book: &BookKey) -> Result<Option<kosync::Progress>, String> {
         let Some(source) = sync_source(store) else { return Ok(None) };
-        kosync::pull(&source, document)
+        kosync::pull(&source, book.document)
     }
 
-    fn push(&self, store: &Store, document: &str, cfi: &str, fraction: f64) -> Result<(), String> {
+    fn push(&self, store: &Store, book: &BookKey, cfi: &str, fraction: f64) -> Result<(), String> {
         let Some(source) = sync_source(store) else { return Ok(()) };
         let device_id = device_id(store)?;
         kosync::push(
             &source,
-            &kosync::Update { document, progress: cfi, percentage: fraction, device: DEVICE_NAME, device_id: &device_id },
+            &kosync::Update { document: book.document, progress: cfi, percentage: fraction, device: DEVICE_NAME, device_id: &device_id },
         )
     }
 }
 
+/// Progress sync through the reader's Dropbox (see dropbox.rs).
+struct Dropbox;
+
+impl Transport for Dropbox {
+    fn id(&self) -> &'static str {
+        "dropbox"
+    }
+
+    fn enabled(&self, state: &store::State) -> bool {
+        !modules::is_off(state, "capability:progress-sync") && !modules::is_off(state, "capability:dropbox")
+    }
+
+    fn pull(&self, _store: &Store, book: &BookKey) -> Result<Option<kosync::Progress>, String> {
+        Ok(crate::dropbox::pull(book.fingerprint))
+    }
+
+    fn push(&self, store: &Store, book: &BookKey, cfi: &str, fraction: f64) -> Result<(), String> {
+        let local = store.read(|s| s.positions.clone());
+        let device_id = device_id(store)?;
+        crate::dropbox::push(&local, book.fingerprint, cfi, fraction, DEVICE_NAME, &device_id)
+    }
+}
+
 static KOSYNC: Kosync = Kosync;
+static DROPBOX: Dropbox = Dropbox;
 
 /// Every transport, in merge order (first wins timestamp ties).
-fn transports() -> [&'static dyn Transport; 1] {
-    [&KOSYNC]
+fn transports() -> [&'static dyn Transport; 2] {
+    [&KOSYNC, &DROPBOX]
 }
 
 /// The newest remote position across the transports. A transport that fails
 /// reports nothing instead of failing the pull, so a dead transport never
 /// blocks a live one.
-fn pull_merged(store: &Store, transports: &[&dyn Transport], document: &str) -> Option<kosync::Progress> {
+fn pull_merged(store: &Store, transports: &[&dyn Transport], book: &BookKey) -> Option<kosync::Progress> {
     let mut remote = None;
     for t in transports {
         if !store.read(|s| t.enabled(s)) {
             continue;
         }
-        if let Ok(found) = t.pull(store, document) {
+        if let Ok(found) = t.pull(store, book) {
             remote = newest(remote, found);
         }
     }
@@ -109,7 +140,7 @@ fn push_all(
     store: &Store,
     transports: &[&dyn Transport],
     only: &Option<BTreeSet<String>>,
-    document: &str,
+    book: &BookKey,
     cfi: &str,
     fraction: f64,
 ) -> Vec<PushReport> {
@@ -117,7 +148,7 @@ fn push_all(
         .iter()
         .filter(|t| store.read(|s| t.enabled(s)))
         .filter(|t| only.as_ref().is_none_or(|ids| ids.contains(t.id())))
-        .map(|t| PushReport { transport: t.id().into(), error: t.push(store, document, cfi, fraction).err() })
+        .map(|t| PushReport { transport: t.id().into(), error: t.push(store, book, cfi, fraction).err() })
         .collect()
 }
 
@@ -185,7 +216,8 @@ pub(crate) struct SyncState {
 /// it comes from another device, differs from the one here and is newer.
 #[tauri::command(async)]
 pub(crate) fn sync_pull(store: State<Store>, document: String, fingerprint: String) -> CmdResult<SyncState> {
-    let remote = pull_merged(&store, &transports(), &document);
+    let book = BookKey { document: &document, fingerprint: &fingerprint };
+    let remote = pull_merged(&store, &transports(), &book);
     let local = store.read(|s| s.positions.get(&fingerprint).cloned());
     Ok(compare_positions(local.as_ref(), remote, &device_id(&store)?))
 }
@@ -211,17 +243,19 @@ fn compare_positions(local: Option<&Position>, remote: Option<kosync::Progress>,
 pub(crate) fn sync_push(
     store: State<Store>,
     document: String,
+    fingerprint: String,
     cfi: String,
     fraction: f64,
     only: Option<Vec<String>>,
 ) -> CmdResult<Vec<PushReport>> {
     let only = only.map(|ids| ids.into_iter().collect::<BTreeSet<_>>());
-    Ok(push_all(&store, &transports(), &only, &document, &cfi, fraction))
+    let book = BookKey { document: &document, fingerprint: &fingerprint };
+    Ok(push_all(&store, &transports(), &only, &book, &cfi, fraction))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{compare_positions, pull_merged, push_all, sync_source, Transport};
+    use super::{compare_positions, pull_merged, push_all, sync_source, BookKey, Dropbox, Kosync, Transport};
     use crate::kosync::Progress;
     use crate::store::{self, Position, Store};
 
@@ -254,12 +288,12 @@ mod tests {
             self.on
         }
 
-        fn pull(&self, _store: &Store, _document: &str) -> Result<Option<Progress>, String> {
+        fn pull(&self, _store: &Store, _book: &BookKey) -> Result<Option<Progress>, String> {
             self.calls.borrow_mut().push("pull");
             self.pull.clone()
         }
 
-        fn push(&self, _store: &Store, _document: &str, _cfi: &str, _fraction: f64) -> Result<(), String> {
+        fn push(&self, _store: &Store, _book: &BookKey, _cfi: &str, _fraction: f64) -> Result<(), String> {
             self.calls.borrow_mut().push("push");
             self.push.clone()
         }
@@ -304,6 +338,19 @@ mod tests {
     }
 
     #[test]
+    fn dropbox_needs_its_module_and_the_intent() {
+        let (_dir, store) = synced_store(&[]);
+        assert!(store.read(|s| Dropbox.enabled(s)));
+        let (_dir, store) = synced_store(&["capability:dropbox"]);
+        assert!(!store.read(|s| Dropbox.enabled(s)));
+        let (_dir, store) = synced_store(&["capability:progress-sync"]);
+        assert!(!store.read(|s| Dropbox.enabled(s)), "the intent switch gates every transport");
+        // KOSync additionally needs catalogs (its requires edge).
+        let (_dir, store) = synced_store(&["capability:catalogs"]);
+        assert!(!store.read(|s| Kosync.enabled(s)));
+    }
+
+    #[test]
     fn a_newer_position_from_another_device_is_offered() {
         let state = compare_positions(Some(&here("a", 1_000)), Some(server("b", "phone", 2)), "pc");
         assert_eq!(state.offer.map(|o| o.cfi).as_deref(), Some("b"));
@@ -328,6 +375,13 @@ mod tests {
         assert!(state.offer.is_none() && !state.push);
     }
 
+    const DOC: &str = "doc";
+    const FP: &str = "fp";
+
+    fn book() -> BookKey<'static> {
+        BookKey { document: DOC, fingerprint: FP }
+    }
+
     fn as_transports<'a>(fakes: &[&'a Fake]) -> Vec<&'a dyn Transport> {
         fakes
             .iter()
@@ -343,7 +397,7 @@ mod tests {
         let (_dir, store) = synced_store(&[]);
         let live = Fake::of("live", Ok(Some(server("b", "phone", 2))), Ok(()));
         let dead = Fake::of("dead", Err("gone".into()), Err("gone".into()));
-        let remote = pull_merged(&store, &as_transports(&[&live, &dead]), "doc");
+        let remote = pull_merged(&store, &as_transports(&[&live, &dead]), &book());
         assert_eq!(remote.map(|p| p.progress).as_deref(), Some("b"));
         assert_eq!(live.calls.borrow().as_slice(), ["pull"]);
         assert_eq!(dead.calls.borrow().as_slice(), ["pull"], "asked, then isolated");
@@ -354,12 +408,12 @@ mod tests {
         let (_dir, store) = synced_store(&[]);
         let older = Fake::of("older", Ok(Some(server("a", "phone", 3))), Ok(()));
         let newer = Fake::of("newer", Ok(Some(server("b", "phone", 5))), Ok(()));
-        let remote = pull_merged(&store, &as_transports(&[&older, &newer]), "doc");
+        let remote = pull_merged(&store, &as_transports(&[&older, &newer]), &book());
         assert_eq!(remote.map(|p| p.progress).as_deref(), Some("b"));
-        let remote = pull_merged(&store, &as_transports(&[&newer, &older]), "doc");
+        let remote = pull_merged(&store, &as_transports(&[&newer, &older]), &book());
         assert_eq!(remote.map(|p| p.progress).as_deref(), Some("b"), "time decides, not order");
         let tie = Fake::of("tie", Ok(Some(server("c", "phone", 5))), Ok(()));
-        let remote = pull_merged(&store, &as_transports(&[&newer, &tie]), "doc");
+        let remote = pull_merged(&store, &as_transports(&[&newer, &tie]), &book());
         assert_eq!(remote.map(|p| p.progress).as_deref(), Some("b"), "ties keep the first");
     }
 
@@ -367,10 +421,10 @@ mod tests {
     fn disabled_transports_are_skipped() {
         let (_dir, store) = synced_store(&[]);
         let off = Fake::of("off", Ok(Some(server("b", "phone", 2))), Ok(())).off();
-        let remote = pull_merged(&store, &as_transports(&[&off]), "doc");
+        let remote = pull_merged(&store, &as_transports(&[&off]), &book());
         assert!(remote.is_none());
         assert!(off.calls.borrow().is_empty());
-        let reports = push_all(&store, &as_transports(&[&off]), &None, "doc", "a", 0.5);
+        let reports = push_all(&store, &as_transports(&[&off]), &None, &book(), "a", 0.5);
         assert!(reports.is_empty());
         assert!(off.calls.borrow().is_empty());
     }
@@ -380,12 +434,12 @@ mod tests {
         let (_dir, store) = synced_store(&[]);
         let ok = Fake::of("ok", Ok(None), Ok(()));
         let failing = Fake::of("failing", Ok(None), Err("down".into()));
-        let reports = push_all(&store, &as_transports(&[&ok, &failing]), &None, "doc", "a", 0.5);
+        let reports = push_all(&store, &as_transports(&[&ok, &failing]), &None, &book(), "a", 0.5);
         assert_eq!(reports.len(), 2);
         assert_eq!((reports[0].transport.as_str(), reports[0].error.as_deref()), ("ok", None));
         assert_eq!((reports[1].transport.as_str(), reports[1].error.as_deref()), ("failing", Some("down")));
         let only: Option<std::collections::BTreeSet<String>> = Some(["failing".to_string()].into_iter().collect());
-        let reports = push_all(&store, &as_transports(&[&ok, &failing]), &only, "doc", "a", 0.5);
+        let reports = push_all(&store, &as_transports(&[&ok, &failing]), &only, &book(), "a", 0.5);
         assert_eq!(reports.len(), 1);
         assert_eq!(ok.calls.borrow().as_slice(), ["push"], "clean transports are not retried");
         assert_eq!(failing.calls.borrow().as_slice(), ["push", "push"]);

@@ -1,6 +1,7 @@
 //! One-off system commands: file types, updates, outside books, the library screen.
 
 use crate::cli::Launch;
+use crate::dropbox;
 use crate::formats;
 use crate::modules;
 use crate::platform::{Active, Platform};
@@ -33,6 +34,30 @@ pub(crate) fn unregister_file_types(store: State<Store>) -> CmdResult<()> {
 #[tauri::command(async)]
 pub(crate) fn file_types_registered() -> bool {
     register::registered()
+}
+
+/// Whether Dropbox is connected (a refresh token is kept).
+#[tauri::command(async)]
+pub(crate) fn dropbox_connected() -> bool {
+    dropbox::is_connected()
+}
+
+/// Connects Dropbox: opens its login in the browser, waits for the answer
+/// and keeps the refresh token like a catalog password.
+#[tauri::command(async)]
+pub(crate) fn dropbox_connect(app: AppHandle, store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:dropbox"))?;
+    let pending = dropbox::begin()?;
+    app.opener().open_url(&pending.url, None::<&str>).map_err(|e| e.to_string())?;
+    dropbox::finish(pending)
+}
+
+/// Forgets the Dropbox token; connecting again starts over.
+#[tauri::command(async)]
+pub(crate) fn dropbox_disconnect(store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:dropbox"))?;
+    dropbox::disconnect();
+    Ok(())
 }
 
 /// The app version (from Cargo.toml), shown in the About panel.

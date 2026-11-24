@@ -320,6 +320,7 @@ function openSettings(section?: SettingsSection) {
   closePanels()
   $('settings').hidden = false
   void refreshFileTypesStatus()
+  void refreshDropboxStatus()
   refreshModules()
   if (section) settingsPage.showSection(section)
   $('settings').querySelector<HTMLElement>('button')?.focus()
@@ -349,6 +350,7 @@ function closePanels() {
 
 const systemDark = matchMedia('(prefers-color-scheme: dark)')
 let fileTypesRegistered = false
+let dropboxConnected = false
 const settingsPage = createSettingsPage($('settings'), settings, changes => void changeSettings(changes), {
   clearHistory: () => {
     void invoke('clear_recent')
@@ -360,6 +362,10 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
   toggleFileTypes: () => {
     const command = fileTypesRegistered ? 'unregister_file_types' : 'register_file_types'
     void invoke(command).then(refreshFileTypesStatus, console.error)
+  },
+  toggleDropbox: () => {
+    const command = dropboxConnected ? 'dropbox_disconnect' : 'dropbox_connect'
+    void invoke(command).then(refreshDropboxStatus, console.error)
   },
   changeLibrary: () => void library.chooseLibrary(true),
   toggleModule: (id, off) => void toggleModule(id, off),
@@ -422,6 +428,7 @@ function showView(to: View) {
     if (!wasSettings) {
       refreshModules()
       void refreshFileTypesStatus()
+      void refreshDropboxStatus()
     }
     settingsPage.showSection(to.slice('settings:'.length) as SettingsSection)
     foldSettingsNav(false)
@@ -542,6 +549,7 @@ function applyCapabilities() {
   settingsPage.setSectionVisible('catalogs', catalogs)
   settingsPage.setOrganizeVisible(!off.has('capability:organize'))
   settingsPage.setFileTypesVisible(!isAndroid && !off.has('capability:file-types'))
+  settingsPage.setDropboxVisible(!off.has('capability:dropbox'))
   settingsPage.setUpdatesVisible(!off.has('capability:update-check'))
   if (!catalogs && (view === 'catalogs' || view === 'settings:catalogs')) {
     showView(view === 'catalogs' ? 'library' : 'settings:modules')
@@ -575,6 +583,16 @@ async function refreshFileTypesStatus() {
   })
   fileTypesRegistered = registered
   settingsPage.setFileTypesRegistered(registered)
+}
+
+/** Shows whether Dropbox is connected (a refresh token is kept). */
+async function refreshDropboxStatus() {
+  const connected = await invoke<boolean>('dropbox_connected').catch(e => {
+    console.error(e)
+    return false
+  })
+  dropboxConnected = connected
+  settingsPage.setDropboxConnected(connected)
 }
 
 // ---- Edge controls ----------------------------------------------------------
@@ -777,6 +795,7 @@ appWindow.onCloseRequested(async () => {
 systemDark.addEventListener('change', () => settings.theme === 'system' && restyle())
 
 void refreshFileTypesStatus()
+void refreshDropboxStatus()
 void invoke<string>('app_version')
   .then(version => {
     $('about-version').textContent = `v${version}`

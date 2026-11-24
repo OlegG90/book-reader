@@ -43,6 +43,8 @@ export interface ModuleInfo {
 export interface PanelActions {
   /** Turns a layer-1 module off (or back on) in Settings › Modules. */
   toggleModule(id: string, off: boolean): void
+  /** Connects or disconnects Dropbox (reading positions sync through it). */
+  toggleDropbox(): void
   /** Forgets the recent books list (reading positions are kept). */
   clearHistory(): void
   /** Registers or unregisters the app for its book file types. */
@@ -211,6 +213,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const libraryFolder = el('span', { className: 'hint path' })
   const fileTypesStatus = el('span', { className: 'hint' })
   const fileTypesButton = el('button', { type: 'button', onclick: actions.toggleFileTypes })
+  const dropboxStatus = el('span', { className: 'hint' })
+  const dropboxButton = el('button', { type: 'button', onclick: actions.toggleDropbox })
   const catalogs = el('div', { className: 'catalogs' })
   const modules = el('div', { className: 'modules' })
   const moduleBoxes = new Map<string, HTMLInputElement>()
@@ -228,6 +232,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     organizeButton,
   )
   const fileTypesRow = row('File types', fileTypesStatus, fileTypesButton)
+  const dropboxRow = row('Dropbox', dropboxStatus, dropboxButton)
   const updatesRow = row('Updates', updateStatus, openRelease, checkUpdate)
   const historyLength = el(
     'select',
@@ -294,6 +299,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       libraryRow,
       checkRow('Offer to add books opened from elsewhere', 'Shows Move / Copy to library when a file is outside the library folder.', offerLibrary),
       fileTypesRow,
+      dropboxRow,
       row('Interface font', 'The library and the panels; the book has its own (Reading).', uiFont),
       row('Continue reading', 'How many of the last books read it shows.', historyLength),
       row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory })),
@@ -424,6 +430,16 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     fileTypesButton.textContent = registered ? 'Unregister' : 'Register'
   }
 
+  /** Hides the Dropbox row (the dropbox module is off). */
+  function setDropboxVisible(visible: boolean) {
+    dropboxRow.hidden = !visible
+  }
+
+  function setDropboxConnected(connected: boolean) {
+    dropboxStatus.textContent = connected ? 'Connected — reading positions sync through it' : 'Not connected'
+    dropboxButton.textContent = connected ? 'Disconnect' : 'Connect…'
+  }
+
   function setLibraryFolder(folder: string | null) {
     libraryFolder.textContent = folder ?? 'Not chosen yet'
     libraryFolder.title = folder ?? ''
@@ -431,6 +447,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
 
   show(initial)
   setFileTypesRegistered(false)
+  setDropboxConnected(false)
   setLibraryFolder(null)
   showSection('reading')
   return {
@@ -438,6 +455,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     setFileTypesRegistered,
     setFileTypesVisible,
     setLibraryFolder,
+    setDropboxConnected,
+    setDropboxVisible,
     setOrganizeVisible,
     setSectionVisible,
     showSection,
