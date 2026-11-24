@@ -102,6 +102,24 @@ pub(crate) fn google_disconnect(store: State<Store>) -> CmdResult<()> {
     Ok(())
 }
 
+/// Starts the phone's Google login: opens its page in the browser, and the
+/// answer comes back through the app's intent filter (`google_finish`).
+/// The desktop waits on a loopback address instead (`google_connect`).
+#[tauri::command(async)]
+pub(crate) fn google_connect_android(app: AppHandle, store: State<Store>) -> CmdResult<String> {
+    store.read(|s| modules::require(s, "capability:googledrive"))?;
+    let url = google::begin_android()?;
+    app.opener().open_url(&url, None::<&str>).map_err(|e| e.to_string())?;
+    Ok(url)
+}
+
+/// Finishes the phone's Google login with the address the browser came back to.
+#[tauri::command(async)]
+pub(crate) fn google_finish(answer: String, store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:googledrive"))?;
+    google::finish_answer(&answer)
+}
+
 /// The app version (from Cargo.toml), shown in the About panel.
 #[tauri::command]
 pub(crate) fn app_version() -> String {

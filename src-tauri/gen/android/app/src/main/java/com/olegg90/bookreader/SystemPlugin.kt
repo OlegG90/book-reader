@@ -94,11 +94,28 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
 
   override fun load(webView: WebView) {
     instance = this
-    takeBook(activity.intent)
+    if (!takeOauth(activity.intent)) takeBook(activity.intent)
   }
 
   override fun onNewIntent(intent: Intent) {
+    if (takeOauth(intent)) return
     if (takeBook(intent)) trigger("incoming", JSObject())
+  }
+
+  /**
+   * A Google sign-in answer for `google_finish` (the browser back on the
+   * app's scheme): handed to the settings as an `oauth` event. False for
+   * anything else; a book intent still goes to `takeBook`.
+   */
+  private fun takeOauth(intent: Intent?): Boolean {
+    val uri = intent?.data
+    if (intent?.action != Intent.ACTION_VIEW || uri?.scheme != "com.olegg90.bookreader") return false
+    // Reopened from the recent apps: the answer was handed over before.
+    if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return false
+    trigger("oauth", JSObject().put("url", uri.toString()))
+    // Handled once: a recreated activity must not answer it again.
+    activity.intent = Intent(Intent.ACTION_MAIN)
+    return true
   }
 
   /** Keeps a book intent for `takeIncoming`; false for any other intent. */

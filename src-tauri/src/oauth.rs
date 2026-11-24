@@ -59,6 +59,20 @@ pub fn wait_for_code(listener: TcpListener, state: &str, service: &str) -> Resul
     }
 }
 
+/// The code in the address the browser came back to, if it belongs to this
+/// login (`state`). `answer` is the full redirect address: a loopback URL on
+/// the desktop, the app's own scheme on a phone.
+pub fn code_in_answer(answer: &str, state: &str, service: &str) -> Result<String, String> {
+    let query: HashMap<_, _> = url::Url::parse(answer).map_err(|_| "login: the browser sent nothing usable")?.query_pairs().into_owned().collect();
+    if let Some(error) = query.get("error") {
+        return Err(format!("login: {service} said {error}"));
+    }
+    if query.get("state").map(String::as_str) != Some(state) {
+        return Err("login: the answer is not for this login".into());
+    }
+    query.get("code").cloned().ok_or("login: the browser sent no code".into())
+}
+
 /// Reads the browser's answer (`GET /?code=…&state=…`), checks it answers
 /// this login, and tells the tab it can close.
 fn read_code(stream: &std::net::TcpStream, state: &str, service: &str) -> Result<String, String> {
@@ -66,15 +80,7 @@ fn read_code(stream: &std::net::TcpStream, state: &str, service: &str) -> Result
     let mut first = String::new();
     BufReader::new(stream).read_line(&mut first).map_err(|e| format!("login: {e}"))?;
     let target = first.split_whitespace().nth(1).ok_or("login: the browser sent nothing usable")?;
-    let query: HashMap<_, _> =
-        url::Url::parse(&format!("http://localhost{target}")).map_err(|_| "login: the browser sent nothing usable")?.query_pairs().into_owned().collect();
-    if let Some(error) = query.get("error") {
-        return Err(format!("login: {service} said {error}"));
-    }
-    if query.get("state").map(String::as_str) != Some(state) {
-        return Err("login: the answer is not for this login".into());
-    }
-    let code = query.get("code").cloned().ok_or("login: the browser sent no code")?;
+    let code = code_in_answer(&format!("http://localhost{target}"), state, service)?;
     respond(stream, "Connected — you can close this tab.");
     Ok(code)
 }
@@ -87,4 +93,21 @@ fn respond(stream: &std::net::TcpStream, text: &str) {
         "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn answers_give_the_code_only_with_the_right_state() {
+        let loopback = "http://localhost:51944/googledrive?code=abc&state=s1";
+        assert_eq!(code_in_answer(loopback, "s1", "Google").unwrap(), "abc");
+        // A phone's custom scheme carries the same query.
+        let scheme = "com.olegg90.bookreader:/oauth2redirect?code=abc&state=s1";
+        assert_eq!(code_in_answer(scheme, "s1", "Google").unwrap(), "abc");
+        assert!(code_in_answer(scheme.replace("state=s1", "state=forged").as_str(), "s1", "Google").is_err());
+        assert!(code_in_answer("com.olegg90.bookreader:/oauth2redirect?error=access_denied&state=s1", "s1", "Google").is_err());
+        assert!(code_in_answer("com.olegg90.bookreader:/oauth2redirect?state=s1", "s1", "Google").is_err());
+    }
 }

@@ -29,22 +29,32 @@ pub fn last_error() -> Option<String> {
     LAST_ERROR.lock().unwrap().clone()
 }
 
-/// The Google Cloud OAuth client ID (a Desktop client with the
-/// `drive.appdata` scope). Baked in at build time from the `GOOGLE_CLIENT_ID`
-/// environment (CI reads it from a repository secret); empty in a plain
-/// checkout, in which case every action refuses with how to set it up.
+/// The Google Cloud OAuth client ID. Desktop: a Desktop client with the
+/// `drive.appdata` scope. Phone: an Android client for the app's package and
+/// release-key SHA-1. Baked in at build time from the environment (CI reads
+/// them from repository secrets); empty in a plain checkout, in which case
+/// every action refuses with how to set it up.
+#[cfg(not(mobile))]
 pub const CLIENT_ID: &str = match option_env!("GOOGLE_CLIENT_ID") {
     Some(id) => id,
     None => "",
 };
+#[cfg(mobile)]
+pub const CLIENT_ID: &str = match option_env!("GOOGLE_ANDROID_CLIENT_ID") {
+    Some(id) => id,
+    None => "",
+};
 
-/// The same client's secret. Same sourcing as the ID (`GOOGLE_CLIENT_SECRET`):
-/// Desktop clients with a secret must send it on the token endpoint, even
-/// with PKCE. Never committed: GitHub's push protection blocks it.
+/// The desktop client's secret. Desktop clients with a secret must send it on
+/// the token endpoint, even with PKCE. Same sourcing as the ID. The Android
+/// client has no secret. Never committed: GitHub's push protection blocks it.
+#[cfg(not(mobile))]
 pub const CLIENT_SECRET: &str = match option_env!("GOOGLE_CLIENT_SECRET") {
     Some(secret) => secret,
     None => "",
 };
+#[cfg(mobile)]
+pub const CLIENT_SECRET: &str = "";
 
 /// Where the refresh token is kept, like catalog passwords.
 const TOKEN_ID: &str = "google";
@@ -57,11 +67,14 @@ const FILE_VERSION: u32 = 1;
 /// The narrow Drive scope: the app's own hidden folder, nothing else.
 const SCOPE: &str = "https://www.googleapis.com/auth/drive.appdata";
 
-/// The OAuth callback. Desktop-type clients accept any loopback port, so this
-/// needs no registration in the Cloud Console. No manifest or key-hash
-/// changes are needed: the loopback address works in the desktop browser and
-/// on the phone.
+/// The OAuth callback. Desktop: the loopback address (Desktop-type clients
+/// accept any loopback port, so it needs no registration). Phone: the app's
+/// own scheme, caught by an intent filter (see AndroidManifest.xml) — the
+/// answer arrives as an intent instead of a loopback connection.
+#[cfg(not(mobile))]
 const REDIRECT_URI: &str = "http://localhost:51944/googledrive";
+#[cfg(mobile)]
+const REDIRECT_URI: &str = "com.olegg90.bookreader:/oauth2redirect";
 
 /// One book's synced position as the cloud file keeps it: the local shape
 /// (see store::Position) plus who saved it, for the echo check.
@@ -157,6 +170,34 @@ pub fn finish(login: PendingLogin) -> Result<(), String> {
     Active::save_password(TOKEN_ID, &refresh)
 }
 
+/// A login waiting for the phone's browser: the answer arrives as an intent
+/// with the app's scheme, so nothing listens locally (unlike the desktop).
+struct AndroidLogin {
+    verifier: String,
+    state: String,
+}
+
+static ANDROID_LOGIN: Mutex<Option<AndroidLogin>> = Mutex::new(None);
+
+/// Starts the phone login: open the returned address in the browser, and the
+/// answer comes back to `finish_answer` through the app's intent filter.
+pub fn begin_android() -> Result<String, String> {
+    let (client_id, _) = credentials()?;
+    let verifier = oauth::random_string(64);
+    let state = oauth::random_string(16);
+    let url = auth_url(client_id, &oauth::challenge(&verifier), &state);
+    *ANDROID_LOGIN.lock().unwrap() = Some(AndroidLogin { verifier, state });
+    Ok(url)
+}
+
+/// Finishes the phone login with the address the browser came back to.
+pub fn finish_answer(answer: &str) -> Result<(), String> {
+    let login = ANDROID_LOGIN.lock().unwrap().take().ok_or("login: no Google login is waiting")?;
+    let code = oauth::code_in_answer(answer, &login.state, "Google")?;
+    let (_access, refresh) = exchange(&code, &login.verifier, Active::password(TOKEN_ID))?;
+    Active::save_password(TOKEN_ID, &refresh)
+}
+
 /// Whether Google Drive is connected (a refresh token is kept).
 pub fn is_connected() -> bool {
     Active::has_password(TOKEN_ID)
@@ -170,14 +211,17 @@ pub fn disconnect() {
 /// Trades an auth code (or a refresh token) for tokens.
 fn exchange(code: &str, verifier: &str, stored: Option<String>) -> Result<(String, String), String> {
     let (client_id, client_secret) = credentials()?;
-    let body = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("code", code)
+    let mut form = url::form_urlencoded::Serializer::new(String::new());
+    form.append_pair("code", code)
         .append_pair("client_id", client_id)
-        .append_pair("client_secret", client_secret)
         .append_pair("code_verifier", verifier)
         .append_pair("redirect_uri", REDIRECT_URI)
-        .append_pair("grant_type", "authorization_code")
-        .finish();
+        .append_pair("grant_type", "authorization_code");
+    // The Android client has no secret; the desktop one must send its own.
+    if !client_secret.is_empty() {
+        form.append_pair("client_secret", client_secret);
+    }
+    let body = form.finish();
     let reply = net::post(
         "https://oauth2.googleapis.com/token",
         &[("Content-Type", "application/x-www-form-urlencoded")],
@@ -193,12 +237,14 @@ fn exchange(code: &str, verifier: &str, stored: Option<String>) -> Result<(Strin
 fn access_token() -> Result<String, String> {
     let refresh = Active::password(TOKEN_ID).ok_or_else(|| "Google Drive is not connected.".to_string())?;
     let (client_id, client_secret) = credentials()?;
-    let body = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("refresh_token", &refresh)
+    let mut form = url::form_urlencoded::Serializer::new(String::new());
+    form.append_pair("refresh_token", &refresh)
         .append_pair("client_id", client_id)
-        .append_pair("client_secret", client_secret)
-        .append_pair("grant_type", "refresh_token")
-        .finish();
+        .append_pair("grant_type", "refresh_token");
+    if !client_secret.is_empty() {
+        form.append_pair("client_secret", client_secret);
+    }
+    let body = form.finish();
     let reply = net::post(
         "https://oauth2.googleapis.com/token",
         &[("Content-Type", "application/x-www-form-urlencoded")],
