@@ -28,7 +28,7 @@ import { closePopup } from './book-menu'
 import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
-import { createAppearancePanel, createSettingsPage, type ModuleInfo, type SettingsSection } from './settings-panel'
+import { cloudModuleId, createAppearancePanel, createSettingsPage, type ModuleInfo, type SettingsSection } from './settings-panel'
 import { initBackButton, initIncoming, initVolumeKeys, isAndroid, setReading } from './platform'
 import { createReadingView, type AddMode, type Offer } from './reading-view'
 import { createLibraryView, type View } from './library-view'
@@ -350,7 +350,8 @@ function closePanels() {
 
 const systemDark = matchMedia('(prefers-color-scheme: dark)')
 let fileTypesRegistered = false
-let cloudConnected = false
+/** Which cloud is connected, if any: one at a time, like the picker. */
+let connectedCloud: 'dropbox' | 'google' | null = null
 const settingsPage = createSettingsPage($('settings'), settings, changes => void changeSettings(changes), {
   clearHistory: () => {
     void invoke('clear_recent')
@@ -364,21 +365,22 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
     void invoke(command).then(refreshFileTypesStatus, console.error)
   },
   connectCloud: provider => {
-    // Only Dropbox has a transport yet; the picker disables the rest.
-    if (provider !== 'dropbox') {
-      showError(undefined, `${provider} sync is not available yet`)
-      return
-    }
-    void invoke('dropbox_connect').then(
+    // The picker never sends an unavailable cloud; a disabled module refuses.
+    const command = provider === 'google' ? 'google_connect' : 'dropbox_connect'
+    void invoke(command).then(
       () => {
         void refreshCloudStatus()
         void sourcesPanel.refresh()
       },
-      console.error,
+      e => {
+        showError(undefined, e)
+        void refreshCloudStatus()
+      },
     )
   },
   disconnectCloud: () => {
-    void invoke('dropbox_disconnect').then(
+    const command = connectedCloud === 'google' ? 'google_disconnect' : 'dropbox_disconnect'
+    void invoke(command).then(
       () => {
         void refreshCloudStatus()
         void sourcesPanel.refresh()
@@ -401,7 +403,7 @@ const appearancePanel = createAppearancePanel($('appearance'), settings, changes
 // The catalogs (OPDS servers), the key list and the version have their own sections in the settings.
 const sourcesPanel = createSourcesPanel(settingsPage.catalogs, {
   syncOff: () => settings.disabledModules.includes('capability:progress-sync'),
-  cloudReady: () => !settings.disabledModules.includes('capability:dropbox') && cloudConnected,
+  cloudReady: () => connectedCloud !== null && !settings.disabledModules.includes(cloudModuleId(connectedCloud)),
 })
 settingsPage.shortcuts.append($('shortcuts').querySelector('dl')!.cloneNode(true))
 const settingsVersion = el('span')
@@ -569,7 +571,7 @@ function applyCapabilities() {
   settingsPage.setSectionVisible('catalogs', catalogs)
   settingsPage.setOrganizeVisible(!off.has('capability:organize'))
   settingsPage.setFileTypesVisible(!isAndroid && !off.has('capability:file-types'))
-  settingsPage.setCloudVisible(!off.has('capability:dropbox'))
+  settingsPage.setCloudVisible(!off.has('capability:dropbox') || !off.has('capability:googledrive'))
   settingsPage.setUpdatesVisible(!off.has('capability:update-check'))
   if (!catalogs && (view === 'catalogs' || view === 'settings:catalogs')) {
     showView(view === 'catalogs' ? 'library' : 'settings:modules')
@@ -607,13 +609,26 @@ async function refreshFileTypesStatus() {
 
 /** Shows which cloud is connected, and its last sync failure, if any. */
 async function refreshCloudStatus() {
-  const status = await invoke<{ connected: boolean; lastError: string | null }>('dropbox_status').catch(e => {
+  interface CloudStatus {
+    connected: boolean
+    lastError: string | null
+  }
+  const quiet = (e: unknown) => {
     console.error(e)
     return { connected: false, lastError: String(e) }
-  })
-  cloudConnected = status.connected
-  // The backend knows only Dropbox yet; it names the connected cloud.
-  settingsPage.setCloudConnected(status.connected ? 'dropbox' : null, status.connected, status.lastError)
+  }
+  const [dropbox, google] = await Promise.all([
+    invoke<CloudStatus>('dropbox_status').catch(quiet),
+    invoke<CloudStatus>('google_status').catch(quiet),
+  ])
+  // One cloud at a time; the picker lists Dropbox first.
+  const active = dropbox.connected
+    ? { id: 'dropbox' as const, status: dropbox }
+    : google.connected
+      ? { id: 'google' as const, status: google }
+      : null
+  connectedCloud = active?.id ?? null
+  settingsPage.setCloudConnected(connectedCloud, active !== null, active?.status.lastError ?? null)
 }
 
 // ---- Edge controls ----------------------------------------------------------

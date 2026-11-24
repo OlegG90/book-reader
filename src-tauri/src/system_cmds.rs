@@ -2,6 +2,7 @@
 
 use crate::cli::Launch;
 use crate::dropbox;
+use crate::google;
 use crate::formats;
 use crate::modules;
 use crate::platform::{Active, Platform};
@@ -66,6 +67,38 @@ pub(crate) fn dropbox_connect(app: AppHandle, store: State<Store>) -> CmdResult<
 pub(crate) fn dropbox_disconnect(store: State<Store>) -> CmdResult<()> {
     store.read(|s| modules::require(s, "capability:dropbox"))?;
     dropbox::disconnect();
+    Ok(())
+}
+
+/// Google Drive: whether a refresh token is kept, and the last sync failure,
+/// if any (sync stays quiet, but the settings show what went wrong).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GoogleStatus {
+    connected: bool,
+    last_error: Option<String>,
+}
+
+#[tauri::command(async)]
+pub(crate) fn google_status() -> GoogleStatus {
+    GoogleStatus { connected: google::is_connected(), last_error: google::last_error() }
+}
+
+/// Connects Google Drive: opens its login in the browser, waits for the answer
+/// and keeps the refresh token like a catalog password.
+#[tauri::command(async)]
+pub(crate) fn google_connect(app: AppHandle, store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:googledrive"))?;
+    let pending = google::begin()?;
+    app.opener().open_url(&pending.url, None::<&str>).map_err(|e| e.to_string())?;
+    google::finish(pending)
+}
+
+/// Forgets the Google token; connecting again starts over.
+#[tauri::command(async)]
+pub(crate) fn google_disconnect(store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:googledrive"))?;
+    google::disconnect();
     Ok(())
 }
 

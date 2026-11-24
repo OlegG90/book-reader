@@ -12,12 +12,14 @@ mod data_dir;
 mod dropbox;
 mod fingerprint;
 mod formats;
+mod google;
 mod kosync;
 mod library;
 mod metadata;
 mod modules;
 mod naming;
 mod net;
+mod oauth;
 mod opds;
 mod paths;
 #[cfg_attr(not(windows), path = "register_unsupported.rs")]
@@ -99,6 +101,9 @@ pub fn run() {
             system_cmds::dropbox_status,
             system_cmds::dropbox_connect,
             system_cmds::dropbox_disconnect,
+            system_cmds::google_status,
+            system_cmds::google_connect,
+            system_cmds::google_disconnect,
             system_cmds::app_version,
             system_cmds::open_repository,
             system_cmds::check_for_update,

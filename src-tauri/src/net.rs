@@ -77,6 +77,21 @@ pub fn post(url: &str, headers: &[(&str, &str)], body: &[u8]) -> Result<Reply, S
     finish(req.send(body), url)
 }
 
+/// PATCH bytes to `url` with extra headers (a sync store's API).
+pub fn patch(url: &str, headers: &[(&str, &str)], body: &[u8]) -> Result<Reply, String> {
+    let mut req = agent().patch(url);
+    for (name, value) in headers {
+        req = req.header(*name, *value);
+    }
+    finish(req.send(body), url)
+}
+
+/// GET `url` with a Bearer token (a sync store's API).
+pub fn bearer_get(url: &str, token: &str) -> Result<Reply, String> {
+    let auth = format!("Bearer {token}");
+    finish(agent().get(url).header("Authorization", auth.as_str()).call(), url)
+}
+
 /// A GET, or with a body a PUT.
 fn send(url: &str, login: Option<&Login>, auth: Auth, accept: &str, body: Option<&str>) -> Result<Reply, String> {
     let origin = origin_of(url);

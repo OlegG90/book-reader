@@ -7,13 +7,11 @@
 //! credential store, the Android Keystore).
 
 use crate::platform::{Active, Platform};
-use crate::{kosync, net};
+use crate::{kosync, net, oauth};
+use oauth::PendingLogin;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::{self, BufRead, BufReader, Write};
-use std::net::TcpListener;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
 
 /// The last sync failure, if any: a dead transport stays quiet, but the
 /// settings show what went wrong instead of failing silently.
@@ -48,9 +46,6 @@ const FILE_VERSION: u32 = 1;
 /// as the app has no secret). No manifest or key-hash changes are needed:
 /// the loopback address works in the desktop browser and on the phone.
 const REDIRECT_URI: &str = "http://localhost:51943/dropbox";
-
-/// How long `connect` waits for the browser to come back with the code.
-const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// One book's synced position as the cloud file keeps it: the local shape
 /// (see store::Position) plus who saved it, for the echo check.
@@ -105,32 +100,12 @@ pub fn should_upload(merged: &HashMap<String, RemoteRecord>, remote: &HashMap<St
     merged != remote
 }
 
-/// An OAuth login waiting for the browser: open `url`, then `finish` it.
-pub struct PendingLogin {
-    verifier: String,
-    state: String,
-    listener: TcpListener,
-    pub url: String,
-}
-
 /// The app key, or why Dropbox cannot work yet.
 fn app_key() -> Result<&'static str, String> {
     if APP_KEY.is_empty() {
         return Err("Dropbox is not set up yet: create a scoped app (app-folder access) in the Dropbox App Console and put its key in dropbox::APP_KEY.".into());
     }
     Ok(APP_KEY)
-}
-
-fn random_string(len: usize) -> String {
-    use rand::{distr::Alphanumeric, Rng};
-    rand::rng().sample_iter(&Alphanumeric).take(len).map(char::from).collect()
-}
-
-/// The S256 challenge for a verifier (RFC 7636 test vector covered below).
-fn challenge(verifier: &str) -> String {
-    use base64::Engine;
-    use sha2::{Digest, Sha256};
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 
 /// The Dropbox authorize address for the loopback flow.
@@ -151,21 +126,19 @@ fn auth_url(app_key: &str, challenge: &str, state: &str) -> String {
 /// the URI registered in the App Console.
 pub fn begin() -> Result<PendingLogin, String> {
     let app_key = app_key()?;
-    let verifier = random_string(64);
-    let state = random_string(16);
+    let verifier = oauth::random_string(64);
+    let state = oauth::random_string(16);
     // `localhost` may resolve to ::1 or 127.0.0.1 depending on the device;
     // listen on both where the stack allows it, so the browser always lands.
-    let listener = TcpListener::bind("[::]:51943")
-        .or_else(|_| TcpListener::bind("127.0.0.1:51943"))
-        .map_err(|e| format!("login: the redirect port is busy ({e})"))?;
-    let url = auth_url(app_key, &challenge(&verifier), &state);
+    let listener = oauth::bind(51943)?;
+    let url = auth_url(app_key, &oauth::challenge(&verifier), &state);
     Ok(PendingLogin { verifier, state, listener, url })
 }
 
 /// Waits for the browser's code (or the timeout), trades it for tokens and
 /// keeps the refresh token like a catalog password.
 pub fn finish(login: PendingLogin) -> Result<(), String> {
-    let code = wait_for_code(login.listener, &login.state)?;
+    let code = oauth::wait_for_code(login.listener, &login.state, "Dropbox")?;
     let (_access, refresh) = exchange(app_key()?, &code, &login.verifier, Active::password(TOKEN_ID))?;
     Active::save_password(TOKEN_ID, &refresh)
 }
@@ -178,55 +151,6 @@ pub fn is_connected() -> bool {
 /// Forgets the refresh token; connecting again starts over.
 pub fn disconnect() {
     Active::forget_password(TOKEN_ID);
-}
-
-/// Waits up to `LOGIN_TIMEOUT` for the browser to come back with `?code=`
-/// (or an error, when the reader declines in the browser).
-fn wait_for_code(listener: TcpListener, state: &str) -> Result<String, String> {
-    listener.set_nonblocking(true).map_err(|e| format!("login: {e}"))?;
-    let start = Instant::now();
-    loop {
-        match listener.accept() {
-            Ok((stream, _)) => return read_code(&stream, state),
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                if start.elapsed() > LOGIN_TIMEOUT {
-                    return Err("Timed out waiting for Dropbox in the browser.".into());
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(e) => return Err(format!("login: {e}")),
-        }
-    }
-}
-
-/// Reads the browser's answer (`GET /?code=…&state=…`), checks it answers
-/// this login, and tells the tab it can close.
-fn read_code(stream: &std::net::TcpStream, state: &str) -> Result<String, String> {
-    stream.set_read_timeout(Some(Duration::from_secs(30))).map_err(|e| format!("login: {e}"))?;
-    let mut first = String::new();
-    BufReader::new(stream).read_line(&mut first).map_err(|e| format!("login: {e}"))?;
-    let target = first.split_whitespace().nth(1).ok_or("login: the browser sent nothing usable")?;
-    let query: HashMap<_, _> =
-        url::Url::parse(&format!("http://localhost{target}")).map_err(|_| "login: the browser sent nothing usable")?.query_pairs().into_owned().collect();
-    if let Some(error) = query.get("error") {
-        return Err(format!("login: Dropbox said {error}"));
-    }
-    if query.get("state").map(String::as_str) != Some(state) {
-        return Err("login: the answer is not for this login".into());
-    }
-    let code = query.get("code").cloned().ok_or("login: the browser sent no code")?;
-    respond(stream, "Connected — you can close this tab.");
-    Ok(code)
-}
-
-fn respond(stream: &std::net::TcpStream, text: &str) {
-    let body = format!("<html><body><p>{text}</p></body></html>");
-    let mut stream = stream;
-    let _ = write!(
-        stream,
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
 }
 
 /// Trades an auth code (or a refresh token) for tokens.
@@ -387,6 +311,7 @@ fn push_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::oauth::challenge;
 
     fn record(cfi: &str, time: u64) -> RemoteRecord {
         RemoteRecord { cfi: cfi.into(), fraction: 0.5, time, device: "phone".into(), device_id: "phone".into() }
