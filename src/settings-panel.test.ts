@@ -25,7 +25,8 @@ function page(found: Promise<{ latest: string; newer: boolean }> = Promise.resol
     toggleModule: vi.fn(),
     clearHistory: vi.fn(),
     toggleFileTypes: vi.fn(),
-    toggleDropbox: vi.fn(),
+    connectCloud: vi.fn(),
+    disconnectCloud: vi.fn(),
     changeLibrary: vi.fn(),
     organizeLibrary: vi.fn(),
     close: vi.fn(),
@@ -244,19 +245,39 @@ describe('settings page', () => {
   })
 
   it('forwards the action buttons', () => {
-    const { actions, button } = page()
+    const { actions, button, panel } = page()
     button('Clear history').click()
     expect(actions.clearHistory).toHaveBeenCalledOnce()
     button('Register').click()
     expect(actions.toggleFileTypes).toHaveBeenCalledOnce()
-    button('Connect…').click()
-    expect(actions.toggleDropbox).toHaveBeenCalledOnce()
+    button('Connect').click()
+    expect(actions.connectCloud).toHaveBeenCalledWith('dropbox')
+    panel.setCloudConnected('dropbox', true, null)
+    button('Disconnect').click()
+    expect(actions.disconnectCloud).toHaveBeenCalledOnce()
     button('Change…').click()
     expect(actions.changeLibrary).toHaveBeenCalledOnce()
     button('Organize…').click()
     expect(actions.organizeLibrary).toHaveBeenCalledOnce()
     button('← Back').click()
     expect(actions.close).toHaveBeenCalledOnce()
+  })
+
+  it('groups the System rows into Library, History and Sync', () => {
+    const { host, panel } = page()
+    panel.showSection('system')
+    const section = host.querySelector('#settings-system')
+    if (!section) throw new Error('no system section')
+    const groups = [...section.querySelectorAll('.group')]
+    expect(groups.map(g => g.querySelector('h3')?.textContent)).toEqual(['Library', 'History', 'Sync'])
+    const rowsOf = (title: string) => {
+      const found = groups.find(g => g.querySelector('h3')?.textContent === title)
+      if (!found) throw new Error(`no group "${title}"`)
+      return [...found.querySelectorAll('.row-label')].map(l => l.textContent)
+    }
+    expect(rowsOf('Library')).toEqual(['Library folder', 'Offer to add books opened from elsewhere'])
+    expect(rowsOf('History')).toEqual(['Continue reading', 'History'])
+    expect(rowsOf('Sync')).toEqual(['Cloud connection', 'Add cloud'])
   })
 
   it('shows the library folder', () => {
@@ -266,18 +287,40 @@ describe('settings page', () => {
     expect(host.textContent).toContain(String.raw`D:\Books`)
   })
 
-  it('shows the Dropbox connection state', () => {
+  it('shows the cloud connection state', () => {
     const { host, panel, button } = page()
     expect(host.textContent).toContain('Not connected')
-    panel.setDropboxConnected(true, null)
-    expect(host.textContent).toContain('Connected')
-    panel.setDropboxConnected(true, 'Dropbox upload failed (401)')
+    panel.setCloudConnected('dropbox', true, null)
+    expect(host.textContent).toContain('Dropbox')
+    panel.setCloudConnected('dropbox', true, 'Dropbox upload failed (401)')
     expect(host.textContent).toContain('Dropbox upload failed (401)')
     expect(button('Disconnect')).toBeDefined()
-    panel.setDropboxVisible(false)
+    panel.setCloudVisible(false)
     expect(button('Disconnect').closest<HTMLElement>('.row')?.hidden).toBe(true)
-    panel.setDropboxVisible(true)
+    panel.setCloudVisible(true)
     expect(button('Disconnect').closest<HTMLElement>('.row')?.hidden).toBe(false)
+  })
+
+  it('locks the cloud picker on unavailable clouds and while connected', () => {
+    const { host, panel, actions, button } = page()
+    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Cloud to connect"]')
+    if (!select) throw new Error('no cloud select')
+    // Only Dropbox has a transport; the rest wait for theirs.
+    expect([...select.options].map(o => o.textContent)).toEqual(['Dropbox', 'OneDrive (soon)', 'Google Drive (soon)'])
+    select.value = 'onedrive'
+    select.dispatchEvent(new Event('change'))
+    expect(button('Connect').disabled).toBe(true)
+    expect(host.textContent).toContain('Coming soon')
+    select.value = 'dropbox'
+    select.dispatchEvent(new Event('change'))
+    expect(button('Connect').disabled).toBe(false)
+    // While a cloud is connected the picker locks until disconnect.
+    panel.setCloudConnected('dropbox', true, null)
+    expect(button('Connect').disabled).toBe(true)
+    expect(select.disabled).toBe(true)
+    expect(host.textContent).toContain('Disconnect to switch clouds.')
+    button('Connect').click()
+    expect(actions.connectCloud).not.toHaveBeenCalled()
   })
 
   it('shows the file-type registration state', () => {

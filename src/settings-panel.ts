@@ -39,12 +39,23 @@ export interface ModuleInfo {
   inUseReason: string | null
 }
 
+/** A cloud store sync can run through; only Dropbox has a transport yet. */
+export const CLOUD_PROVIDERS = [
+  { id: 'dropbox', label: 'Dropbox', available: true },
+  { id: 'onedrive', label: 'OneDrive', available: false },
+  { id: 'google', label: 'Google Drive', available: false },
+] as const
+/** Which cloud `connectCloud` connects; unavailable ones stay picked but never sent. */
+export type CloudProviderId = (typeof CLOUD_PROVIDERS)[number]['id']
+
 /** Buttons in the settings page that act instead of changing a value. */
 export interface PanelActions {
   /** Turns a layer-1 module off (or back on) in Settings › Modules. */
   toggleModule(id: string, off: boolean): void
-  /** Connects or disconnects Dropbox (reading positions sync through it). */
-  toggleDropbox(): void
+  /** Connects the chosen cloud (reading positions sync through it). */
+  connectCloud(provider: CloudProviderId): void
+  /** Forgets the connected cloud's token; connecting again starts over. */
+  disconnectCloud(): void
   /** Forgets the recent books list (reading positions are kept). */
   clearHistory(): void
   /** Registers or unregisters the app for its book file types. */
@@ -179,6 +190,11 @@ function checkRow(label: string, hint: string, box: HTMLInputElement) {
   return el('label', { className: 'row' }, ...rowParts(label, hint, [box]))
 }
 
+/** A titled group of settings rows, as in Modules (kind) and System (Library, History, Sync). */
+function group(title: string, ...rows: HTMLElement[]) {
+  return el('div', { className: 'group' }, el('h3', { textContent: title }), ...rows)
+}
+
 const SECTIONS = [
   { id: 'reading', title: 'Reading' },
   { id: 'catalogs', title: 'Catalogs' },
@@ -213,8 +229,27 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const libraryFolder = el('span', { className: 'hint path' })
   const fileTypesStatus = el('span', { className: 'hint' })
   const fileTypesButton = el('button', { type: 'button', onclick: actions.toggleFileTypes })
-  const dropboxStatus = el('span', { className: 'hint' })
-  const dropboxButton = el('button', { type: 'button', onclick: actions.toggleDropbox })
+  const cloudStatus = el('span', { className: 'hint' })
+  const cloudDisconnect = el('button', { type: 'button', textContent: 'Disconnect', hidden: true, onclick: actions.disconnectCloud })
+  const cloudSelect = el(
+    'select',
+    { ariaLabel: 'Cloud to connect' },
+    ...CLOUD_PROVIDERS.map(p => el('option', { value: p.id, textContent: p.available ? p.label : `${p.label} (soon)`, disabled: !p.available })),
+  ) as HTMLSelectElement
+  const cloudAddHint = el('span', { className: 'hint' })
+  const cloudConnect = el('button', { type: 'button', textContent: 'Connect' })
+  // Whether a cloud is connected: the Add row locks while one is.
+  let cloudConnected = false
+  // The picker never sends an unavailable cloud: the button stays disabled on one.
+  const pickedCloud = () => CLOUD_PROVIDERS.find(p => p.id === cloudSelect.value) ?? CLOUD_PROVIDERS[0]
+  const refreshCloudAdd = () => {
+    const picked = pickedCloud()
+    cloudAddHint.textContent = cloudConnected ? 'Disconnect to switch clouds.' : picked.available ? '' : 'Coming soon — not available yet.'
+    cloudConnect.disabled = !picked.available || cloudConnected
+    cloudSelect.disabled = cloudConnected
+  }
+  cloudSelect.onchange = refreshCloudAdd
+  cloudConnect.onclick = () => actions.connectCloud(pickedCloud().id)
   const catalogs = el('div', { className: 'catalogs' })
   const modules = el('div', { className: 'modules' })
   const moduleBoxes = new Map<string, HTMLInputElement>()
@@ -232,7 +267,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     organizeButton,
   )
   const fileTypesRow = row('File types', fileTypesStatus, fileTypesButton)
-  const dropboxRow = row('Dropbox', dropboxStatus, dropboxButton)
+  const cloudRow = row('Cloud connection', cloudStatus, cloudDisconnect)
+  const cloudAddRow = row('Add cloud', cloudAddHint, cloudSelect, cloudConnect)
   const updatesRow = row('Updates', updateStatus, openRelease, checkUpdate)
   const historyLength = el(
     'select',
@@ -252,6 +288,10 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     ),
   )
   uiFont.onchange = () => onChange({ uiFont: uiFont.value as UiFont })
+  const offerRow = checkRow('Offer to add books opened from elsewhere', 'Shows Move / Copy to library when a file is outside the library folder.', offerLibrary)
+  const interfaceRow = row('Interface font', 'The library and the panels; the book has its own (Reading).', uiFont)
+  const continueRow = row('Continue reading', 'How many of the last books read it shows.', historyLength)
+  const clearRow = row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory }))
   // The volume keys are a phone's.
   const volumeKeysRow = checkRow('Volume keys turn pages', 'While a book is open.', volumeKeys)
   volumeKeysRow.classList.add('android-only')
@@ -296,13 +336,11 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       modules,
     ],
     system: [
-      libraryRow,
-      checkRow('Offer to add books opened from elsewhere', 'Shows Move / Copy to library when a file is outside the library folder.', offerLibrary),
+      group('Library', libraryRow, offerRow),
+      group('History', continueRow, clearRow),
+      group('Sync', cloudRow, cloudAddRow),
       fileTypesRow,
-      dropboxRow,
-      row('Interface font', 'The library and the panels; the book has its own (Reading).', uiFont),
-      row('Continue reading', 'How many of the last books read it shows.', historyLength),
-      row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory })),
+      interfaceRow,
     ],
     shortcuts: [shortcuts],
     about: [
@@ -430,15 +468,31 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     fileTypesButton.textContent = registered ? 'Unregister' : 'Register'
   }
 
-  /** Hides the Dropbox row (the dropbox module is off). */
-  function setDropboxVisible(visible: boolean) {
-    dropboxRow.hidden = !visible
+  /** Hides the cloud rows (every cloud module is off). */
+  function setCloudVisible(visible: boolean) {
+    cloudRow.hidden = !visible
+    cloudAddRow.hidden = !visible
   }
 
-  function setDropboxConnected(connected: boolean, error: string | null = null) {
-    dropboxStatus.textContent = !connected ? 'Not connected' : (error ?? 'Connected — reading positions sync through it')
-    dropboxStatus.title = error ?? ''
-    dropboxButton.textContent = connected ? 'Disconnect' : 'Connect…'
+  /**
+   * Shows which cloud is connected and its last sync failure, if any.
+   * Sync stays quiet; only the settings say what went wrong.
+   */
+  function setCloudConnected(provider: CloudProviderId | null, connected: boolean, error: string | null = null) {
+    cloudConnected = connected
+    const label = CLOUD_PROVIDERS.find(p => p.id === provider)?.label ?? ''
+    if (!connected) {
+      cloudStatus.textContent = 'Not connected'
+      cloudStatus.title = ''
+    } else if (error) {
+      cloudStatus.textContent = label ? `${label} — ${error}` : error
+      cloudStatus.title = error
+    } else {
+      cloudStatus.textContent = `${label} — reading positions sync through it`
+      cloudStatus.title = ''
+    }
+    cloudDisconnect.hidden = !connected
+    refreshCloudAdd()
   }
 
   function setLibraryFolder(folder: string | null) {
@@ -448,7 +502,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
 
   show(initial)
   setFileTypesRegistered(false)
-  setDropboxConnected(false)
+  setCloudConnected(null, false)
   setLibraryFolder(null)
   showSection('reading')
   return {
@@ -456,8 +510,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     setFileTypesRegistered,
     setFileTypesVisible,
     setLibraryFolder,
-    setDropboxConnected,
-    setDropboxVisible,
+    setCloudConnected,
+    setCloudVisible,
     setOrganizeVisible,
     setSectionVisible,
     showSection,
