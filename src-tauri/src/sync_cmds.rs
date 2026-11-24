@@ -49,8 +49,11 @@ impl Transport for Kosync {
     }
 
     fn enabled(&self, state: &store::State) -> bool {
-        // Mirrors the requires edge: KOSync works through the catalog server.
-        !modules::is_off(state, "capability:progress-sync") && !modules::is_off(state, "capability:catalogs")
+        // Mirrors the requires edge: KOSync works through the catalog server,
+        // and needs a source marked for sync.
+        !modules::is_off(state, "capability:progress-sync")
+            && !modules::is_off(state, "capability:catalogs")
+            && state.sources.iter().any(|s| s.sync)
     }
 
     fn pull(&self, store: &Store, book: &BookKey) -> Result<Option<kosync::Progress>, String> {
@@ -181,11 +184,15 @@ const DEVICE_NAME: &str = if cfg!(mobile) {
 };
 
 /// The window's book's id on the sync server, when its progress syncs
-/// (there is a sync source, and the window keeps positions).
+/// (some transport is enabled, and the window keeps positions). The id is
+/// the KOSync one; transports that key by fingerprint ignore it.
 #[tauri::command(async)]
 pub(crate) fn sync_document(window: Window, store: State<Store>) -> CmdResult<Option<String>> {
     let launch = window.state::<ReaderWindows>().get(window.label());
-    let (Some(path), false, Some(_)) = (launch.file, launch.no_save, sync_source(&store)) else { return Ok(None) };
+    let (Some(path), false) = (launch.file, launch.no_save) else { return Ok(None) };
+    if !store.read(|s| transports().iter().any(|t| t.enabled(s))) {
+        return Ok(None);
+    }
     kosync::document_id(&path).map(Some).map_err(|e| e.to_string())
 }
 
@@ -335,6 +342,14 @@ mod tests {
         assert!(sync_source(&store).is_some());
         let (_dir, store) = synced_store(&["capability:progress-sync"]);
         assert!(sync_source(&store).is_none(), "the sync commands no-op");
+    }
+
+    #[test]
+    fn kosync_needs_a_sync_marked_source() {
+        let (_dir, store) = synced_store(&[]);
+        assert!(store.read(|s| Kosync.enabled(s)));
+        store.update(|s| s.sources.iter_mut().for_each(|o| o.sync = false)).unwrap();
+        assert!(!store.read(|s| Kosync.enabled(s)));
     }
 
     #[test]
