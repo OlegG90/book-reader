@@ -1401,12 +1401,32 @@ button:hover {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 2px;
+  /* The wrap never outgrows the page, and an arrow never squeezes
+     below its icon: otherwise the right arrow ends up off-screen. */
+  width: 100%;
+  max-width: 100%;
 }
 
 .android #settings .sections-arrow:not([hidden]) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 30px;
+}
+
+/* A hidden arrow leaves no box, so pin every child to its column:
+   otherwise the strip slides into the auto column and stops shrinking. */
+.android #settings .sections-wrap > .prev {
+  grid-column: 1;
+}
+
+.android #settings .sections-wrap > .sections {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.android #settings .sections-wrap > .next {
+  grid-column: 3;
 }
 
 #settings .page-content {
@@ -1753,13 +1773,15 @@ body.library-mode #topbar {
   color: var(--accent-text);
 }
 
-/* The settings inside the phone's library: the section chips stay, as tabs */
+/* The settings inside the phone's library: the section chips stay, as tabs.
+   The single column is definite, so the strip and its arrows always fit. */
 .android #settings.embedded .sections {
   display: flex;
 }
 
 .android #settings.embedded .page-body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .android #settings.embedded .page-content {

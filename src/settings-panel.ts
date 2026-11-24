@@ -319,8 +319,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     }),
   )
   const navEl = el('nav', { className: 'sections', ariaLabel: 'Sections', role: 'tablist' }, ...nav)
-  const prevArrow = el('button', { type: 'button', className: 'sections-arrow', ariaLabel: 'Earlier sections', hidden: true, onclick: () => scrollSections(-1) }, icon('chevron-left'))
-  const nextArrow = el('button', { type: 'button', className: 'sections-arrow', ariaLabel: 'More sections', hidden: true, onclick: () => scrollSections(1) }, icon('chevron-right'))
+  const prevArrow = el('button', { type: 'button', className: 'sections-arrow prev', ariaLabel: 'Earlier sections', hidden: true, onclick: () => scrollSections(-1) }, icon('chevron-left'))
+  const nextArrow = el('button', { type: 'button', className: 'sections-arrow next', ariaLabel: 'More sections', hidden: true, onclick: () => scrollSections(1) }, icon('chevron-right'))
   sections.forEach(section => section.setAttribute('role', 'tabpanel'))
 
   /** Scrolls the section strip by most of its width. */
