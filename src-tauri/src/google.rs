@@ -129,10 +129,15 @@ pub fn should_upload(merged: &HashMap<String, RemoteRecord>, remote: &HashMap<St
     merged != remote
 }
 
-/// The client ID and secret, or why Google Drive cannot work yet.
+/// The client ID and secret, or why Google Drive cannot work yet. The phone's
+/// Android client has no secret; the desktop one must send its own.
 fn credentials() -> Result<(&'static str, &'static str), String> {
-    if CLIENT_ID.is_empty() || CLIENT_SECRET.is_empty() {
-        return Err("Google Drive is not set up yet: build with GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the environment (a Desktop OAuth client in the Google Cloud Console, drive.appdata scope).".into());
+    if CLIENT_ID.is_empty() || (!cfg!(mobile) && CLIENT_SECRET.is_empty()) {
+        return Err(if cfg!(mobile) {
+            "Google Drive is not set up yet: build with GOOGLE_ANDROID_CLIENT_ID in the environment (an Android OAuth client in the Google Cloud Console).".into()
+        } else {
+            "Google Drive is not set up yet: build with GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the environment (a Desktop OAuth client in the Google Cloud Console, drive.appdata scope).".into()
+        });
     }
     Ok((CLIENT_ID, CLIENT_SECRET))
 }
