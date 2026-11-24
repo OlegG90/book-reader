@@ -365,7 +365,13 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
   },
   toggleDropbox: () => {
     const command = dropboxConnected ? 'dropbox_disconnect' : 'dropbox_connect'
-    void invoke(command).then(refreshDropboxStatus, console.error)
+    void invoke(command).then(
+      () => {
+        void refreshDropboxStatus()
+        void sourcesPanel.refresh()
+      },
+      console.error,
+    )
   },
   changeLibrary: () => void library.chooseLibrary(true),
   toggleModule: (id, off) => void toggleModule(id, off),
@@ -382,6 +388,7 @@ const appearancePanel = createAppearancePanel($('appearance'), settings, changes
 // The catalogs (OPDS servers), the key list and the version have their own sections in the settings.
 const sourcesPanel = createSourcesPanel(settingsPage.catalogs, {
   syncOff: () => settings.disabledModules.includes('capability:progress-sync'),
+  dropboxReady: () => !settings.disabledModules.includes('capability:dropbox') && dropboxConnected,
 })
 settingsPage.shortcuts.append($('shortcuts').querySelector('dl')!.cloneNode(true))
 const settingsVersion = el('span')

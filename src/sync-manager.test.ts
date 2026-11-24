@@ -73,6 +73,31 @@ describe('createSyncManager', () => {
     expect(invokeMock).not.toHaveBeenCalled()
   })
 
+  it('keeps each transport on its own rhythm', async () => {
+    const book = { view: { lastLocation: { cfi: 'a', fraction: 0.5 } } } as unknown as BookView
+    const sync = createSyncManager({ book: () => book, fingerprint: () => 'fp', syncOff: () => false })
+    invokeMock.mockImplementation((command: string, args?: { only?: string[] }) => {
+      if (command === 'sync_document') return Promise.resolve('doc1')
+      if (command === 'sync_pull') return Promise.resolve({ offer: null, push: false })
+      if (command === 'sync_push') {
+        if (!args?.only) return Promise.resolve([{ transport: 'kosync', error: null }, { transport: 'dropbox', error: 'down' }])
+        expect(args.only).toEqual(['dropbox'])
+        return Promise.resolve([{ transport: 'dropbox', error: null }])
+      }
+      throw new Error(`unexpected ${command}`)
+    })
+    await sync.pull()
+    sync.markDirty()
+    await sync.push()
+    await sync.push()
+    const pushes = invokeMock.mock.calls.filter(call => call[0] === 'sync_push')
+    expect(pushes).toHaveLength(2)
+    // Everything acked: the third push stays quiet.
+    invokeMock.mockClear()
+    await sync.push()
+    expect(invokeMock).not.toHaveBeenCalled()
+  })
+
   it('stays quiet when progress sync is turned off', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const sync = manager(true)

@@ -8,7 +8,7 @@ import { row } from './settings-panel'
  * change one. Passwords go straight to the backend, which keeps them in the
  * OS credential store; they never come back.
  */
-export function createSourcesPanel(host: HTMLElement, deps: { syncOff: () => boolean }) {
+export function createSourcesPanel(host: HTMLElement, deps: { syncOff: () => boolean; dropboxReady: () => boolean }) {
   const list = el('ul', { className: 'sources' })
   const status = el('p', { className: 'muted source-status' })
   const add = el('button', { type: 'button', textContent: 'Add catalog…', onclick: () => edit(undefined) })
@@ -21,21 +21,29 @@ export function createSourcesPanel(host: HTMLElement, deps: { syncOff: () => boo
     return { field, row: el('label', { className: 'stacked' }, label, field) }
   }
 
-  /** Whether the status line currently says sync is off (ours to clear). */
-  let syncOffShown = false
+  /** The sync-state line currently shown, if the panel put it there. */
+  let shownNote = ''
+
+  /** Shows the sync-state line (empty clears ours); save and remove messages stay. */
+  function showSyncNote(note: string) {
+    if (note) status.textContent = note
+    else if (shownNote) status.textContent = ''
+    shownNote = note
+  }
 
   async function refresh() {
     const sources = await fetchSources()
     // The badge promises syncing; with the module off nothing syncs.
     const syncBadge = (source: Source) =>
       source.sync && !deps.syncOff() ? el('span', { className: 'badge', textContent: 'sync', title: 'Syncs reading progress' }) : ''
-    if (deps.syncOff()) {
-      status.textContent = 'Progress sync is turned off.'
-      syncOffShown = true
-    } else if (syncOffShown) {
-      status.textContent = ''
-      syncOffShown = false
-    }
+    // Dropbox needs no per-source badge (it syncs every local book when it can);
+    // its own state lives in the System row. Here only the intent and the fallback speak.
+    const note = deps.syncOff()
+      ? 'Progress sync is turned off.'
+      : !sources.some(s => s.sync) && !deps.dropboxReady()
+        ? 'Nothing to sync through: mark a catalog source for sync, or connect Dropbox.'
+        : ''
+    showSyncNote(note)
     list.replaceChildren(
       ...sources.map(source =>
         el(
