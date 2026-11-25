@@ -538,7 +538,8 @@ body:has(#bottombar.shown) :is(#offer, #sync-bar, #cloud-offer) {
 }
 
 /* Organize preview */
-#organize {
+#organize,
+#book-details {
   position: fixed;
   top: 50%;
   left: 50%;
@@ -558,6 +559,47 @@ body:has(#bottombar.shown) :is(#offer, #sync-bar, #cloud-offer) {
 #organize h2,
 #organize p {
   margin: 0;
+}
+
+#book-details h2,
+#book-details p {
+  margin: 0;
+}
+
+#book-details h2 {
+  font-size: 16px;
+}
+
+#book-details-body {
+  display: flex;
+  gap: 12px;
+}
+
+#book-details-cover {
+  width: 96px;
+  align-self: flex-start;
+}
+
+#book-details-rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+#book-details-rows dt {
+  color: var(--muted);
+}
+
+#book-details-annotation {
+  font-size: 13px;
+}
+
+.book-details-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 #organize h2 {

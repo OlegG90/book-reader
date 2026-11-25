@@ -54,6 +54,21 @@ interface MissingBook {
   size: number
 }
 
+interface BookDetails {
+  title: string
+  authors: string[]
+  series: string | null
+  seriesIndex: string | null
+  language: string | null
+  annotation: string | null
+  hasCover: boolean
+  path: string
+  size: number
+  format: string
+  fingerprint: string
+  catalogSource: string | null
+}
+
 export interface LibraryDeps {
   getSettings(): Settings
   changeSettings(changes: Partial<Settings>): void
@@ -78,6 +93,8 @@ export interface LibraryView {
   organize(): Promise<void>
   /** Renames the books per the shown plan. */
   applyOrganize(): Promise<void>
+  /** The book details dialog is open. */
+  isDetailsOpen(): boolean
   /** The organize preview is open. */
   isOrganizeOpen(): boolean
   showScreen(): Promise<void>
@@ -330,14 +347,16 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     const open = (fromStart = false) =>
       void invoke('open_library_book', { key: book.key, fromStart }).catch(e => deps.showError(book.title, e))
     // A book read before: continue where it was, or start over (asked); a new one just opens.
+    const details = { label: 'Book details', action: () => void showBookDetails(book) }
     const choices: MenuItem[] =
       status === 'new'
-        ? [{ label: 'Open', action: () => open() }]
+        ? [{ label: 'Open', action: () => open() }, details]
         : [
             { label: `Continue · ${percent(book.fraction ?? 0)}`, action: () => open() },
             { label: 'Start from the beginning', action: () => open(true) },
+            details,
           ]
-    const withDelete = [...choices, { label: 'Delete from library…', danger: true, action: () => void deleteBook(book) }]
+    const withDelete = [...choices.filter(c => c !== details), details, { label: 'Delete from library…', danger: true, action: () => void deleteBook(book) }]
     const button = el(
       'button',
       {
@@ -426,6 +445,9 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     return el('li', {}, button)
   }
 
+  /** The book details dialog is open. */
+  const isDetailsOpen = () => !$('book-details').hidden
+
   /** Deletes a book from the library, after asking: the file goes to the Recycle Bin (a phone deletes it). */
   async function deleteBook(book: LibraryBook) {
     const ok = await confirmDialog({
@@ -437,6 +459,100 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     // The library redraws on "library-updated".
     await invoke('delete_library_book', { key: book.key }).catch(e => deps.showError(book.title, e))
   }
+
+  /** The dialog key it shows, to ignore late cloud answers after a switch. */
+  let detailsKey: string | null = null
+
+  /** Shows everything known about a book: metadata, file, catalog origin and cloud presence. */
+  async function showBookDetails(book: LibraryBook) {
+    detailsKey = book.key
+    $('book-details-title').textContent = book.title
+    $('book-details-rows').replaceChildren()
+    $('book-details-annotation').textContent = ''
+    const cover = $('book-details-cover') as HTMLImageElement
+    cover.hidden = true
+    cover.removeAttribute('src')
+    $('book-details').hidden = false
+    let details: BookDetails | null = null
+    try {
+      details = await invoke<BookDetails>('book_details', { key: book.key })
+    } catch (e) {
+      deps.showError(book.title, e)
+      $('book-details').hidden = true
+      return
+    }
+    if (detailsKey !== book.key) return
+    const rows = $('book-details-rows')
+    const row = (label: string, value: string) => {
+      rows.append(el('dt', { textContent: label }), el('dd', { textContent: value }))
+    }
+    row('Author', details.authors.join(', ') || '—')
+    if (details.series) row('Series', details.series + (details.seriesIndex ? ` #${details.seriesIndex}` : ''))
+    if (details.language) row('Language', details.language)
+    row('Format', details.format || '—')
+    row('File', details.path)
+    row('Size', formatSize(details.size))
+    row('Fingerprint', details.fingerprint)
+    row('From catalog', details.catalogSource ?? 'Not from a catalog')
+    if (details.annotation) $('book-details-annotation').textContent = details.annotation
+    if (details.hasCover) {
+      try {
+        const bytes = await invoke<ArrayBuffer>('library_cover', { key: book.key })
+        if (detailsKey !== book.key) return
+        cover.src = URL.createObjectURL(new Blob([bytes]))
+        cover.hidden = false
+      } catch (e) {
+        console.warn('details:', e)
+      }
+    }
+    void fillCloudState(book.key, details.fingerprint)
+  }
+
+  /** Asks the clouds about the book; unknown on timeout or failure. */
+  async function fillCloudState(key: string, fingerprint: string) {
+    const rows = $('book-details-rows')
+    const dt = el('dt', { textContent: 'Cloud' })
+    const dd = el('dd', { textContent: 'Checking…' })
+    rows.append(dt, dd)
+    const settled = await Promise.race([
+      invoke<{ id: string; label: string; state: string }[]>('book_cloud', { fingerprint }).catch((): null => null),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 8000)),
+    ])
+    if (detailsKey !== key || $('book-details').hidden) return
+    dt.remove()
+    dd.remove()
+    if (!settled) {
+      rows.append(el('dt', { textContent: 'Cloud' }), el('dd', { textContent: 'Unknown' }))
+      return
+    }
+    for (const cloud of settled) rows.append(el('dt', { textContent: cloud.label }), el('dd', { textContent: cloudStateText(cloud.state) }))
+  }
+
+  function cloudStateText(state: string): string {
+    switch (state) {
+      case 'synced':
+        return 'Synced'
+      case 'absent':
+        return 'Not in the cloud'
+      case 'off':
+        return 'Turned off in Settings › Modules'
+      default:
+        return 'Unknown'
+    }
+  }
+
+  function hideBookDetails() {
+    detailsKey = null
+    $('book-details').hidden = true
+  }
+
+  $('book-details-close').addEventListener('click', hideBookDetails)
+
+  function formatSize(bytes: number): string {
+    return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
+  }
+
+  $('book-details-close').addEventListener('click', hideBookDetails)
 
   /** Fingerprints the download offer skipped this run. */
   const dismissedCloud = new Set<string>()
@@ -496,6 +612,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     organize,
     applyOrganize,
     isOrganizeOpen: organizeOpen,
+    isDetailsOpen,
     showScreen,
     refreshScreen,
     refreshRecent,

@@ -25,6 +25,9 @@ pub struct State {
     pub bookmarks: HashMap<String, Value>,
     /// OPDS catalogs (their passwords are in the OS credential store).
     pub sources: Vec<crate::catalog::Source>,
+    /// Which catalog a book came from: fingerprint to the source's name at
+    /// download time, for the book details.
+    pub book_sources: HashMap<String, String>,
     /// This install's id for progress sync, so its own positions on the
     /// server can be told from another device's.
     pub device_id: String,

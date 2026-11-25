@@ -48,6 +48,21 @@ fn clean(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Appends a text chunk from nested markup (an annotation, a description):
+/// words stay apart, punctuation hugs the previous word.
+fn push_text(acc: &mut String, chunk: &str) {
+    let chunk = chunk.trim();
+    if chunk.is_empty() {
+        return;
+    }
+    let starts_with_punct =
+        chunk.starts_with(['.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'', '”', '’', '…']);
+    if !acc.is_empty() && !acc.ends_with(char::is_whitespace) && !starts_with_punct {
+        acc.push(' ');
+    }
+    acc.push_str(chunk);
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cover {
     pub bytes: Vec<u8>,
@@ -64,6 +79,12 @@ pub struct Book {
     pub series: Option<String>,
     /// As written in the book ("3", "2.5").
     pub series_index: Option<String>,
+    /// The ISO language code the file states ("en", "uk").
+    #[serde(default)]
+    pub language: Option<String>,
+    /// The book's own blurb, when the file carries one.
+    #[serde(default)]
+    pub annotation: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -107,6 +128,8 @@ fn in_title_info(stack: &[String]) -> Option<&[String]> {
 pub(crate) fn fb2(bytes: &[u8]) -> io::Result<Metadata> {
     let xml = decode_fb2(bytes);
     let mut meta = Metadata::default();
+    let mut annotation = String::new();
+    let mut langs: Vec<String> = Vec::new();
     let mut cover_id: Option<String> = None;
     // id -> (content type, base64 text)
     let mut binaries: HashMap<String, (String, String)> = HashMap::new();
@@ -123,6 +146,7 @@ pub(crate) fn fb2(bytes: &[u8]) -> io::Result<Metadata> {
             let Some(path) = in_title_info(stack) else { return };
             match (path, name.as_str()) {
                 ([], "author") => meta.book.authors.push(Author::default()),
+                ([], "lang") => langs.push(String::new()),
                 ([], "sequence") if meta.book.series.is_none() => {
                     meta.book.series = attr(e, "name").map(|s| clean(&s)).filter(|s| !s.is_empty());
                     meta.book.series_index = attr(e, "number").map(|s| clean(&s)).filter(|s| !s.is_empty() && s != "0");
@@ -144,6 +168,10 @@ pub(crate) fn fb2(bytes: &[u8]) -> io::Result<Metadata> {
             let path: Vec<&str> = path.iter().map(String::as_str).collect();
             match path.as_slice() {
                 ["book-title"] => meta.book.title.push_str(text),
+                ["lang"] => {
+                    langs.last_mut().into_iter().for_each(|l| l.push_str(text));
+                }
+                ["annotation", ..] => push_text(&mut annotation, text),
                 ["author", part] => {
                     let Some(a) = meta.book.authors.last_mut() else { return };
                     match *part {
@@ -161,6 +189,8 @@ pub(crate) fn fb2(bytes: &[u8]) -> io::Result<Metadata> {
 
     meta.book.authors.retain(|a| !a.first.is_empty() || !a.last.is_empty());
     meta.book.title = clean(&meta.book.title);
+    meta.book.language = langs.into_iter().map(|l| clean(&l)).find(|l| !l.is_empty());
+    meta.book.annotation = Some(clean(&annotation)).filter(|s| !s.is_empty());
     if let Some((content_type, data)) = cover_id.and_then(|id| binaries.remove(&id)) {
         let data: String = data.split_whitespace().collect();
         if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) {
@@ -199,6 +229,11 @@ struct Creator {
     name: String,
 }
 
+/// Whether the text sits anywhere under the OPF description.
+fn in_metadata_description(stack: &[String]) -> bool {
+    stack.windows(2).any(|w| w[0] == "metadata" && w[1] == "description")
+}
+
 pub(crate) fn epub<R: Read + Seek>(file: R) -> io::Result<Metadata> {
     let mut zip = ZipArchive::new(file).map_err(zip_error)?;
     let container = String::from_utf8_lossy(&read_entry(&mut zip, "META-INF/container.xml")?).into_owned();
@@ -216,6 +251,8 @@ pub(crate) fn epub<R: Read + Seek>(file: R) -> io::Result<Metadata> {
     let mut meta = Metadata::default();
     let mut titles: Vec<String> = Vec::new();
     let mut creators: Vec<Creator> = Vec::new();
+    let mut languages: Vec<String> = Vec::new();
+    let mut description = String::new();
     let mut collection: Option<String> = None;
     let mut in_collection = false;
     let mut cover_id = None;
@@ -227,6 +264,7 @@ pub(crate) fn epub<R: Read + Seek>(file: R) -> io::Result<Metadata> {
             let name = local_name(e);
             match (stack.last().map(String::as_str), name.as_str()) {
                 (Some("metadata"), "title") => titles.push(String::new()),
+                (Some("metadata"), "language") => languages.push(String::new()),
                 (Some("metadata"), "creator") => {
                     creators.push(Creator { role: attr(e, "role"), file_as: attr(e, "file-as"), name: String::new() })
                 }
@@ -252,6 +290,8 @@ pub(crate) fn epub<R: Read + Seek>(file: R) -> io::Result<Metadata> {
         }
         Xml::Text(stack, text) => match last_two(stack) {
             (Some("metadata"), Some("title")) => titles.last_mut().into_iter().for_each(|t| t.push_str(text)),
+            (Some("metadata"), Some("language")) => languages.last_mut().into_iter().for_each(|l| l.push_str(text)),
+            _ if in_metadata_description(stack) => push_text(&mut description, text),
             (Some("metadata"), Some("creator")) => creators.last_mut().into_iter().for_each(|c| c.name.push_str(text)),
             (Some("metadata"), Some("meta")) if in_collection => collection.get_or_insert_with(String::new).push_str(text),
             _ => {}
@@ -260,6 +300,8 @@ pub(crate) fn epub<R: Read + Seek>(file: R) -> io::Result<Metadata> {
     })?;
 
     meta.book.title = titles.first().map(|t| clean(t)).unwrap_or_default();
+    meta.book.language = languages.into_iter().map(|l| clean(&l)).find(|l| !l.is_empty());
+    meta.book.annotation = Some(clean(&description)).filter(|s| !s.is_empty());
     meta.book.authors = creators
         .iter()
         .filter(|c| c.role.as_deref().is_none_or(|r| r == "aut") && !c.name.trim().is_empty())
@@ -372,6 +414,55 @@ mod tests {
     fn fb2_encoding_comes_from_the_declaration() {
         let (bytes, _, _) = encoding_rs::WINDOWS_1251.encode("<?xml version='1.0' encoding='windows-1251'?><a>Привіт</a>");
         assert!(decode_fb2(&bytes).contains("Привіт"));
+    }
+
+    #[test]
+    fn fb2_lang_and_annotation() {
+        let xml = r##"<?xml version="1.0" encoding="utf-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
+ <description><title-info>
+  <book-title>Book</book-title>
+  <annotation><p>First paragraph.</p><p>Second <emphasis>one</emphasis>.</p></annotation>
+  <lang>uk</lang>
+ </title-info></description>
+ <body><section><p>Text</p></section></body>
+</FictionBook>"##;
+        let meta = fb2(xml.as_bytes()).unwrap();
+        assert_eq!(meta.book.language.as_deref(), Some("uk"));
+        assert_eq!(meta.book.annotation.as_deref(), Some("First paragraph. Second one."));
+    }
+
+    #[test]
+    fn books_without_lang_or_annotation_stay_empty() {
+        let meta = fb2(FB2.as_bytes()).unwrap();
+        assert_eq!(meta.book.language, None);
+        assert_eq!(meta.book.annotation, None);
+    }
+
+    #[test]
+    fn old_cached_books_load_without_the_new_fields() {
+        // Caches written before language/annotation existed carry neither key.
+        let book: Book = serde_json::from_value(serde_json::json!({
+            "title": "Old",
+            "authors": [],
+            "series": null,
+            "seriesIndex": null,
+        }))
+        .unwrap();
+        assert_eq!(book.language, None);
+        assert_eq!(book.annotation, None);
+    }
+
+    #[test]
+    fn epub_language_and_description() {
+        let opf = r#"<package xmlns:opf="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:title>Book</dc:title>
+            <dc:language>en</dc:language>
+            <dc:description>A tale <b>of two</b> cities.</dc:description>
+          </metadata><manifest></manifest></package>"#;
+        let meta = epub(Cursor::new(make_epub(opf, &[]))).unwrap();
+        assert_eq!(meta.book.language.as_deref(), Some("en"));
+        assert_eq!(meta.book.annotation.as_deref(), Some("A tale of two cities."));
     }
 
     fn make_epub(opf: &str, files: &[(&str, &[u8])]) -> Vec<u8> {
