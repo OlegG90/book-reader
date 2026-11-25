@@ -254,6 +254,10 @@ fn merge_remote(
 /// skipped like in a pull.
 #[tauri::command(async)]
 pub(crate) fn sync_pull_all(store: State<Store>) -> CmdResult<usize> {
+    pull_all_clouds(&store)
+}
+
+fn pull_all_clouds(store: &Store) -> CmdResult<usize> {
     let device = device_id(&store)?;
     let mut updated = 0;
     for t in transports() {
@@ -277,6 +281,10 @@ pub(crate) fn sync_pull_all(store: State<Store>) -> CmdResult<usize> {
 /// cloud gained the book.
 #[tauri::command(async)]
 pub(crate) fn sync_push_book(store: State<Store>, books: State<LibraryBooks>, fingerprint: String) -> CmdResult<bool> {
+    push_book_to_cloud(&store, &books, &fingerprint)
+}
+
+fn push_book_to_cloud(store: &Store, books: &LibraryBooks, fingerprint: &str) -> CmdResult<bool> {
     if !book_transfer_allowed(&store) {
         return Ok(false);
     }
@@ -353,6 +361,10 @@ fn collect_missing(manifests: &[&HashMap<String, crate::cloud::BookRecord>], loc
 /// pull: transports that are off or disconnected report nothing.
 #[tauri::command(async)]
 pub(crate) fn sync_missing_books(store: State<Store>, books: State<LibraryBooks>) -> CmdResult<Vec<MissingBook>> {
+    missing_cloud_books(&store, &books)
+}
+
+fn missing_cloud_books(store: &Store, books: &LibraryBooks) -> CmdResult<Vec<MissingBook>> {
     let root = library_root(&store)?;
     let local: BTreeSet<String> = books.snapshot(&store, &root).into_iter().map(|b| b.fingerprint).collect();
     let mut manifests = Vec::new();
@@ -406,6 +418,10 @@ fn place_book(root: &Path, name: &str, fingerprint: &str) -> CmdResult<Option<Pa
 /// an upload.
 #[tauri::command(async)]
 pub(crate) fn sync_pull_book(store: State<Store>, fingerprint: String) -> CmdResult<bool> {
+    pull_book_from_cloud(&store, &fingerprint)
+}
+
+fn pull_book_from_cloud(store: &Store, fingerprint: &str) -> CmdResult<bool> {
     if !book_transfer_allowed(&store) {
         return Ok(false);
     }
@@ -415,7 +431,7 @@ pub(crate) fn sync_pull_book(store: State<Store>, fingerprint: String) -> CmdRes
             continue;
         }
         let Some(manifest) = t.books() else { continue };
-        let Some(record) = manifest.get(&fingerprint) else { continue };
+        let Some(record) = manifest.get(fingerprint) else { continue };
         let remote_name = crate::cloud::remote_book_name(&fingerprint, &record.name);
         let Some(bytes) = t.pull_book(&remote_name).map_err(|e| e.to_string())? else { continue };
         // Same bytes as recorded, or nothing lands in the library.
@@ -565,7 +581,8 @@ pub(crate) fn sync_push(
 
 #[cfg(test)]
 mod tests {
-    use super::{book_transfer_allowed, book_transfer_gate, collect_missing, compare_positions, merge_remote, place_book, pull_merged, push_all, safe_relative, sync_source, BookKey, Dropbox, Google, Kosync, Transport};
+    use super::{book_transfer_allowed, book_transfer_gate, collect_missing, compare_positions, merge_remote, missing_cloud_books, place_book, pull_all_clouds, pull_book_from_cloud, pull_merged, push_all, push_book_to_cloud, safe_relative, sync_source, BookKey, Dropbox, Google, Kosync, Transport};
+    use crate::library_cmds::LibraryBooks;
     use crate::cloud::push_book_missing;
     use crate::kosync::Progress;
     use crate::store::{self, Position, Store};
@@ -870,6 +887,69 @@ mod tests {
         .unwrap();
         assert!(!ok);
         assert!(uploaded.borrow().is_empty());
+    }
+
+    /// A library with real files on disk and a matching scan.
+    fn library_with(files: &[(&str, &str)]) -> (tempfile::TempDir, Store, LibraryBooks, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("lib");
+        let mut entries = Vec::new();
+        for (name, content) in files {
+            let path = root.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, content).unwrap();
+            entries.push(crate::library::Entry {
+                path: name.to_string(),
+                size: content.len() as u64,
+                modified: 0,
+                fingerprint: crate::fingerprint::fingerprint(&path).unwrap(),
+                book: crate::metadata::Book { title: name.to_string(), authors: Vec::new(), series: None, series_index: None },
+                cover: None,
+                added: 0,
+            });
+        }
+        let store = Store::load(dir.path().join("breader.json"));
+        store
+            .update(|s| {
+                s.library = Some(root.clone());
+                // Hermetic: the OS credential store may hold real logins, so
+                // switch the clouds off here — no keyring, no network, ever.
+                s.settings.insert(
+                    "disabledModules".into(),
+                    serde_json::json!(["capability:dropbox", "capability:googledrive"]),
+                );
+            })
+            .unwrap();
+        let books = LibraryBooks::default();
+        books.replace(entries, &root);
+        (dir, store, books, root)
+    }
+
+    #[test]
+    fn missing_books_lists_what_no_cloud_has() {
+        // No logins anywhere: nothing can be missing, and nothing touches
+        // the network (the credential check fails first).
+        let (_dir, store, books, _root) = library_with(&[("A.epub", "aaa")]);
+        assert!(missing_cloud_books(&store, &books).unwrap().is_empty());
+    }
+
+    #[test]
+    fn push_book_stays_quiet_without_a_cloud() {
+        let (_dir, store, books, root) = library_with(&[("A.epub", "aaa")]);
+        let fp = books.snapshot(&store, &root).into_iter().next().unwrap().fingerprint;
+        assert_eq!(push_book_to_cloud(&store, &books, &fp).unwrap(), false);
+    }
+
+    #[test]
+    fn pull_all_stays_quiet_without_a_cloud() {
+        let (_dir, store, _books, _root) = library_with(&[]);
+        assert_eq!(pull_all_clouds(&store).unwrap(), 0);
+    }
+
+    #[test]
+    fn pull_book_stays_quiet_without_a_cloud() {
+        let (_dir, store, _books, _root) = library_with(&[]);
+        assert_eq!(pull_book_from_cloud(&store, "fp").unwrap(), false);
     }
 
     #[test]
