@@ -67,6 +67,11 @@ pub(crate) trait Platform {
     /// Sends the app to the background (Back on the library screen of a
     /// phone); nothing to leave on the desktop.
     fn leave(app: &AppHandle) -> Result<(), String>;
+
+    /// Whether the active network is metered (a phone on mobile data).
+    /// Book files wait for an unmetered network; on the desktop every
+    /// network counts as one.
+    fn network_metered() -> bool;
 }
 
 #[cfg(desktop)]

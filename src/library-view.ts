@@ -47,6 +47,13 @@ interface Rename {
   to: string
 }
 
+/** A cloud book the library lacks, for the download offer. */
+interface MissingBook {
+  fingerprint: string
+  name: string
+  size: number
+}
+
 export interface LibraryDeps {
   getSettings(): Settings
   changeSettings(changes: Partial<Settings>): void
@@ -249,6 +256,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
       try {
         libraryBooks = await invoke<LibraryBook[]>('scan_library')
         renderLibrary()
+        void offerCloudBooks()
       } catch (e) {
         showLibraryMessage(`Can't read the library folder: ${e}`)
       } finally {
@@ -429,6 +437,58 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     // The library redraws on "library-updated".
     await invoke('delete_library_book', { key: book.key }).catch(e => deps.showError(book.title, e))
   }
+
+  /** Fingerprints the download offer skipped this run. */
+  const dismissedCloud = new Set<string>()
+  /** Books the last offer showed (the Download button takes them). */
+  let cloudMissing: MissingBook[] = []
+
+  function hideCloudOffer(): void {
+    $('cloud-offer').hidden = true
+  }
+
+  /** Offers the cloud books the library lacks, once per book per run. */
+  async function offerCloudBooks(): Promise<void> {
+    let missing: MissingBook[] = []
+    try {
+      missing = await invoke<MissingBook[]>('sync_missing_books')
+    } catch (e) {
+      console.warn('sync:', e)
+      return
+    }
+    cloudMissing = missing.filter(m => !dismissedCloud.has(m.fingerprint))
+    if (!cloudMissing.length) {
+      hideCloudOffer()
+      return
+    }
+    const n = cloudMissing.length
+    $('cloud-offer-text').textContent = `The cloud has ${n === 1 ? 'a book' : `${n} books`} not in this library.`
+    $('cloud-offer').hidden = false
+  }
+
+  /** Downloads the offered books, then rescans so they appear. */
+  async function downloadCloudBooks(): Promise<void> {
+    const books = cloudMissing
+    cloudMissing = []
+    hideCloudOffer()
+    let failed = 0
+    for (const book of books) {
+      try {
+        await invoke<boolean>('sync_pull_book', { fingerprint: book.fingerprint })
+      } catch {
+        failed += 1
+      }
+    }
+    await refreshLibrary()
+    if (failed) showLibraryMessage(`Couldn't download ${failed === 1 ? 'a book' : `${failed} books`} from the cloud.`)
+  }
+
+  $('cloud-download').addEventListener('click', () => void downloadCloudBooks())
+  $('cloud-later').addEventListener('click', () => {
+    for (const book of cloudMissing) dismissedCloud.add(book.fingerprint)
+    cloudMissing = []
+    hideCloudOffer()
+  })
 
   return {
     getBooks: () => libraryBooks,

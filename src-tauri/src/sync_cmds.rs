@@ -7,11 +7,13 @@ use crate::fingerprint;
 use crate::kosync;
 use crate::library_cmds::{library_root, LibraryBooks};
 use crate::modules;
+use crate::platform::{Active, Platform};
 use crate::store::{self, Position, Store};
 use crate::windows::ReaderWindows;
 use crate::CmdResult;
 use serde::Serialize;
 use std::collections::{BTreeSet, HashMap};
+use std::path::{Component, Path, PathBuf};
 use tauri::{Manager, State, Window};
 
 /// The source that syncs progress, if one is set and sync is on: with the
@@ -50,6 +52,16 @@ trait Transport {
     /// A disconnected cloud is skipped silently, like a dead one.
     fn connected(&self) -> bool {
         false
+    }
+    /// The cloud's book manifest, if the transport keeps books.
+    fn books(&self) -> Option<HashMap<String, crate::cloud::BookRecord>> {
+        None
+    }
+    /// Downloads a book file by its cloud name; `None` when the cloud never
+    /// saw it.
+    fn pull_book(&self, remote_name: &str) -> Result<Option<Vec<u8>>, String> {
+        let _ = remote_name;
+        Ok(None)
     }
     /// Uploads a book file the cloud lacks, and records it in the cloud
     /// manifest; true when the cloud gained the book.
@@ -121,6 +133,14 @@ impl Transport for Dropbox {
         crate::dropbox::is_connected()
     }
 
+    fn books(&self) -> Option<HashMap<String, crate::cloud::BookRecord>> {
+        crate::dropbox::book_manifest()
+    }
+
+    fn pull_book(&self, remote_name: &str) -> Result<Option<Vec<u8>>, String> {
+        crate::dropbox::download_book(remote_name)
+    }
+
     fn push_book(&self, fingerprint: &str, record: &crate::cloud::BookRecord, bytes: &[u8]) -> Result<bool, String> {
         crate::dropbox::push_book(fingerprint, record, bytes)
     }
@@ -154,6 +174,14 @@ impl Transport for Google {
 
     fn connected(&self) -> bool {
         crate::google::is_connected()
+    }
+
+    fn books(&self) -> Option<HashMap<String, crate::cloud::BookRecord>> {
+        crate::google::book_manifest()
+    }
+
+    fn pull_book(&self, remote_name: &str) -> Result<Option<Vec<u8>>, String> {
+        crate::google::download_book(remote_name)
     }
 
     fn push_book(&self, fingerprint: &str, record: &crate::cloud::BookRecord, bytes: &[u8]) -> Result<bool, String> {
@@ -249,6 +277,9 @@ pub(crate) fn sync_pull_all(store: State<Store>) -> CmdResult<usize> {
 /// cloud gained the book.
 #[tauri::command(async)]
 pub(crate) fn sync_push_book(store: State<Store>, books: State<LibraryBooks>, fingerprint: String) -> CmdResult<bool> {
+    if !book_transfer_allowed(&store) {
+        return Ok(false);
+    }
     let root = library_root(&store)?;
     let entry = books.snapshot(&store, &root).into_iter().find(|b| b.fingerprint == fingerprint);
     let Some(entry) = entry else { return Ok(false) };
@@ -275,6 +306,130 @@ pub(crate) fn sync_push_book(store: State<Store>, books: State<LibraryBooks>, fi
         pushed |= t.push_book(&fingerprint, &record, &bytes).map_err(|e| e.to_string())?;
     }
     Ok(pushed)
+}
+
+/// Book files travel only on unmetered networks when the setting says so
+/// (on by default); positions are tiny and always sync. The desktop counts
+/// every network as unmetered.
+fn book_transfer_allowed(store: &Store) -> bool {
+    book_transfer_gate(
+        store.read(|s| s.settings.get("booksWifiOnly").and_then(|v| v.as_bool()).unwrap_or(true)),
+        Active::network_metered(),
+    )
+}
+
+/// The Wi-Fi gate as a pure rule, for tests: holding books back needs both
+/// the setting on and a metered network.
+fn book_transfer_gate(wifi_only: bool, metered: bool) -> bool {
+    !wifi_only || !metered
+}
+
+/// A cloud book the library lacks, for the download offer.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MissingBook {
+    fingerprint: String,
+    name: String,
+    size: u64,
+}
+
+/// The cloud books the library lacks, first cloud wins on duplicates: same
+/// fingerprint means same bytes, so one entry is enough.
+fn collect_missing(manifests: &[&HashMap<String, crate::cloud::BookRecord>], local: &BTreeSet<String>) -> Vec<MissingBook> {
+    let mut seen = BTreeSet::new();
+    let mut missing = Vec::new();
+    for books in manifests {
+        for (fingerprint, record) in books.iter() {
+            if local.contains(fingerprint.as_str()) || !seen.insert(fingerprint.clone()) {
+                continue;
+            }
+            missing.push(MissingBook { fingerprint: fingerprint.clone(), name: record.name.clone(), size: record.size });
+        }
+    }
+    missing
+}
+
+/// The cloud books the library lacks, for the download offer. Silent like a
+/// pull: transports that are off or disconnected report nothing.
+#[tauri::command(async)]
+pub(crate) fn sync_missing_books(store: State<Store>, books: State<LibraryBooks>) -> CmdResult<Vec<MissingBook>> {
+    let root = library_root(&store)?;
+    let local: BTreeSet<String> = books.snapshot(&store, &root).into_iter().map(|b| b.fingerprint).collect();
+    let mut manifests = Vec::new();
+    for t in transports() {
+        if !store.read(|s| t.enabled(s)) || !t.connected() {
+            continue;
+        }
+        if let Some(books) = t.books() {
+            manifests.push(books);
+        }
+    }
+    let refs: Vec<&HashMap<String, crate::cloud::BookRecord>> = manifests.iter().collect();
+    Ok(collect_missing(&refs, &local))
+}
+
+/// A manifest name is a library-relative path: absolute paths and parent
+/// climbs never land in the library, whatever the cloud claims.
+fn safe_relative(name: &str) -> Result<PathBuf, String> {
+    let path = Path::new(name);
+    if path.is_absolute() || path.components().any(|c| !matches!(c, Component::Normal(_))) {
+        return Err("The cloud name is not a library path.".into());
+    }
+    Ok(path.to_path_buf())
+}
+
+/// Where a downloaded book lands: its manifest name, unless a different
+/// book already holds it — then ` (2)`, like Organize.
+fn place_book(root: &Path, name: &str, fingerprint: &str) -> CmdResult<Option<PathBuf>> {
+    let rel = safe_relative(name)?;
+    let dest = root.join(&rel);
+    if !dest.exists() {
+        return Ok(Some(dest));
+    }
+    if fingerprint::fingerprint(&dest).map_err(|e| e.to_string())? == fingerprint {
+        return Ok(None);
+    }
+    let stem = rel.file_stem().and_then(|s| s.to_str()).unwrap_or("book");
+    let parent = rel.parent().unwrap_or_else(|| Path::new(""));
+    let ext = rel.extension().and_then(|s| s.to_str()).map(|s| format!(".{s}")).unwrap_or_default();
+    for n in 2..1000 {
+        let candidate = root.join(parent).join(format!("{stem} ({n}){ext}"));
+        if !candidate.exists() {
+            return Ok(Some(candidate));
+        }
+    }
+    Err("No free name for the downloaded book.".into())
+}
+
+/// Downloads a book file the library lacks, verifying it against the
+/// manifest hash, and places it in the library. Best-effort and silent like
+/// an upload.
+#[tauri::command(async)]
+pub(crate) fn sync_pull_book(store: State<Store>, fingerprint: String) -> CmdResult<bool> {
+    if !book_transfer_allowed(&store) {
+        return Ok(false);
+    }
+    let root = library_root(&store)?;
+    for t in transports() {
+        if !store.read(|s| t.enabled(s)) || !t.connected() {
+            continue;
+        }
+        let Some(manifest) = t.books() else { continue };
+        let Some(record) = manifest.get(&fingerprint) else { continue };
+        let remote_name = crate::cloud::remote_book_name(&fingerprint, &record.name);
+        let Some(bytes) = t.pull_book(&remote_name).map_err(|e| e.to_string())? else { continue };
+        // Same bytes as recorded, or nothing lands in the library.
+        if fingerprint::sha256_bytes(&bytes) != record.sha256 {
+            return Err("The cloud copy failed its hash check.".into());
+        }
+        let Some(dest) = place_book(&root, &record.name, &fingerprint)? else { return Ok(false) };
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 /// What one push round achieved, per transport: the frontend retries only
@@ -410,7 +565,8 @@ pub(crate) fn sync_push(
 
 #[cfg(test)]
 mod tests {
-    use super::{compare_positions, merge_remote, pull_merged, push_all, sync_source, BookKey, Dropbox, Google, Kosync, Transport};
+    use super::{book_transfer_allowed, book_transfer_gate, collect_missing, compare_positions, merge_remote, place_book, pull_merged, push_all, safe_relative, sync_source, BookKey, Dropbox, Google, Kosync, Transport};
+    use crate::cloud::push_book_missing;
     use crate::kosync::Progress;
     use crate::store::{self, Position, Store};
     use std::collections::HashMap;
@@ -569,6 +725,151 @@ mod tests {
         remote.insert("fp".into(), echo);
         assert_eq!(merge_remote(&mut local, &remote, "pc"), 0);
         assert_eq!(local["fp"].cfi, "a");
+    }
+
+    fn book_record(name: &str, size: u64) -> crate::cloud::BookRecord {
+        crate::cloud::BookRecord { name: name.into(), size, sha256: "abc".into() }
+    }
+
+    #[test]
+    fn wifi_gate_needs_both() {
+        assert!(book_transfer_gate(false, false));
+        assert!(book_transfer_gate(false, true));
+        assert!(book_transfer_gate(true, false));
+        assert!(!book_transfer_gate(true, true));
+    }
+
+    #[test]
+    fn wifi_setting_defaults_to_waiting() {
+        // Absent key means on, like the frontend default.
+        let (_dir, store) = synced_store(&[]);
+        assert!(store.read(|s| s.settings.get("booksWifiOnly").is_none()));
+        assert!(book_transfer_allowed(&store));
+        store.update(|s| { s.settings.insert("booksWifiOnly".into(), serde_json::json!(false)); }).unwrap();
+        assert!(book_transfer_allowed(&store));
+    }
+
+    #[test]
+    fn collect_missing_lists_each_book_once() {
+        let mut a = HashMap::new();
+        a.insert("gone".into(), book_record("A.epub", 1));
+        a.insert("here".into(), book_record("H.epub", 1));
+        let mut b = HashMap::new();
+        b.insert("gone".into(), book_record("A.epub", 1));
+        b.insert("other".into(), book_record("O.epub", 2));
+        let local: std::collections::BTreeSet<String> = ["here".into()].into_iter().collect();
+        let missing = collect_missing(&[&a, &b], &local);
+        assert_eq!(missing.len(), 2);
+        assert!(missing.iter().any(|m| m.fingerprint == "gone" && m.name == "A.epub"));
+        assert!(missing.iter().any(|m| m.fingerprint == "other"));
+    }
+
+    #[test]
+    fn cloud_names_must_stay_inside_the_library() {
+        assert!(safe_relative("Author/Book.epub").is_ok());
+        assert!(safe_relative("/etc/passwd").is_err());
+        assert!(safe_relative("../outside.epub").is_err());
+        assert!(safe_relative("a/../../b.epub").is_err());
+    }
+
+    #[test]
+    fn occupied_names_gain_a_counter() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // Free name passes through.
+        let dest = place_book(root, "Author/Book.epub", "fp").unwrap().unwrap();
+        assert_eq!(dest, root.join("Author/Book.epub"));
+        // Same book already there: nothing to do.
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        let mut file = std::fs::File::create(&dest).unwrap();
+        file.write_all(b"same").unwrap();
+        let fp = crate::fingerprint::fingerprint(&dest).unwrap();
+        assert_eq!(place_book(root, "Author/Book.epub", &fp).unwrap(), None);
+        // Another book under the same name: " (2)", like Organize.
+        let dest2 = place_book(root, "Author/Book.epub", "other").unwrap().unwrap();
+        assert_eq!(dest2, root.join("Author/Book (2).epub"));
+    }
+
+    #[test]
+    fn push_book_missing_uploads_and_records() {
+        use std::cell::RefCell;
+        let uploaded: RefCell<Vec<Vec<u8>>> = RefCell::new(Vec::new());
+        let stored: RefCell<Vec<HashMap<String, crate::cloud::BookRecord>>> = RefCell::new(Vec::new());
+        let record = book_record("A.epub", 10);
+        let ok = push_book_missing(
+            "fp",
+            &record,
+            b"bytes",
+            || None,
+            |_, bytes| {
+                uploaded.borrow_mut().push(bytes.to_vec());
+                Ok::<(), String>(())
+            },
+            |books| {
+                stored.borrow_mut().push(books.clone());
+                Ok::<(), String>(())
+            },
+        )
+        .unwrap();
+        assert!(ok);
+        assert_eq!(uploaded.borrow().as_slice(), [b"bytes".to_vec()]);
+        assert_eq!(stored.borrow().len(), 1);
+        assert_eq!(stored.borrow()[0]["fp"], record);
+    }
+
+    #[test]
+    fn push_book_missing_merges_with_a_fresh_manifest() {
+        use std::cell::{Cell, RefCell};
+        let mut other = HashMap::new();
+        other.insert("old".into(), book_record("O.epub", 1));
+        let calls = Cell::new(0);
+        let stored: RefCell<Vec<HashMap<String, crate::cloud::BookRecord>>> = RefCell::new(Vec::new());
+        let ok = push_book_missing(
+            "new",
+            &book_record("N.epub", 2),
+            b"bytes",
+            || {
+                calls.set(calls.get() + 1);
+                if calls.get() == 1 {
+                    Some(HashMap::new())
+                } else {
+                    Some(other.clone())
+                }
+            },
+            |_, _| Ok::<(), String>(()),
+            |books| {
+                stored.borrow_mut().push(books.clone());
+                Ok::<(), String>(())
+            },
+        )
+        .unwrap();
+        assert!(ok);
+        let stored = stored.borrow();
+        assert_eq!(stored.len(), 1);
+        assert!(stored[0].contains_key("new") && stored[0].contains_key("old"), "both uploads survive");
+    }
+
+    #[test]
+    fn push_book_missing_skips_recorded_books() {
+        use std::cell::RefCell;
+        let mut manifest = HashMap::new();
+        manifest.insert("fp".into(), book_record("A.epub", 10));
+        let uploaded: RefCell<Vec<Vec<u8>>> = RefCell::new(Vec::new());
+        let ok = push_book_missing(
+            "fp",
+            &book_record("A.epub", 10),
+            b"bytes",
+            || Some(manifest.clone()),
+            |_, bytes| {
+                uploaded.borrow_mut().push(bytes.to_vec());
+                Ok::<(), String>(())
+            },
+            |_| Ok::<(), String>(()),
+        )
+        .unwrap();
+        assert!(!ok);
+        assert!(uploaded.borrow().is_empty());
     }
 
     #[test]

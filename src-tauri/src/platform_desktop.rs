@@ -96,6 +96,10 @@ impl Platform for Desktop {
     fn leave(_app: &AppHandle) -> Result<(), String> {
         Ok(())
     }
+
+    fn network_metered() -> bool {
+        false
+    }
 }
 
 /// A file dialog, modal to `window`.
