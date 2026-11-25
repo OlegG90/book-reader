@@ -796,6 +796,9 @@ $('flow-button').addEventListener('click', () => runCommand('toggleFlow'))
 $('bookmark-button').addEventListener('click', () => runCommand('bookmark'))
 $('fullscreen-button').addEventListener('click', () => runCommand('fullscreen'))
 $('more-button').addEventListener('click', toggleMoreMenu)
+$('book-details-button').addEventListener('click', () => {
+  if (reading.book) library.showBookDetails(reading.fingerprint, $('topbar-book').textContent || 'Book', null)
+})
 // A chosen item closes the menu (its own handler above does the work).
 $('more-menu').addEventListener('click', e => {
   if ((e.target as Element).closest('button')) closeMoreMenu()

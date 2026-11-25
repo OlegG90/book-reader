@@ -105,6 +105,15 @@ impl LibraryBooks {
         self.0.lock().unwrap().entries.iter().find(|b| b.path == key).cloned()
     }
 
+    /// The entry with a fingerprint, in the library or its disk cache.
+    pub(crate) fn find_by_fingerprint(&self, store: &Store, fingerprint: &str) -> Option<library::Entry> {
+        if let Some(entry) = self.0.lock().unwrap().entries.iter().find(|b| b.fingerprint == fingerprint).cloned() {
+            return Some(entry);
+        }
+        let root = library_root(store).ok()?;
+        self.cached(store, &root).into_iter().find(|b| b.fingerprint == fingerprint)
+    }
+
     /// The last scan's books from the disk cache, for the pre-scan run.
     pub(crate) fn cached(&self, store: &Store, root: &Path) -> Vec<library::Entry> {
         library_cache(store).load(root)
@@ -192,6 +201,8 @@ pub(crate) fn set_library(window: Window, store: State<Store>, books: State<Libr
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LibraryBook {
     key: String,
+    /// The book's content identity, for sync and details from any window.
+    fingerprint: String,
     title: String,
     /// "First Last", one per author.
     authors: Vec<String>,
@@ -231,6 +242,7 @@ pub(crate) fn scan_library(app: AppHandle, store: State<Store>, books: State<Lib
             .iter()
             .map(|e| LibraryBook {
                 key: e.path.clone(),
+                fingerprint: e.fingerprint.clone(),
                 title: e.book.title.clone(),
                 authors: e.book.authors.iter().map(metadata::Author::display).collect(),
                 author_sort: e.book.authors.first().map(metadata::Author::sort_name).unwrap_or_default(),
@@ -328,22 +340,16 @@ fn cloud_state(
     }
 }
 
-/// The details dialog's contents for one library book, by its key.
+/// The details dialog's contents for one library book, by fingerprint: the
+/// reading window knows only that, so both windows share this command.
 /// Nothing touches the network; the cloud verdicts come separately.
 #[tauri::command(async)]
-pub(crate) fn book_details(store: State<Store>, books: State<LibraryBooks>, key: String) -> CmdResult<BookDetails> {
-    book_details_for(&store, &books, &key)
+pub(crate) fn book_details(store: State<Store>, books: State<LibraryBooks>, fingerprint: String) -> CmdResult<BookDetails> {
+    book_details_for(&store, &books, &fingerprint)
 }
 
-fn book_details_for(store: &Store, books: &LibraryBooks, key: &str) -> CmdResult<BookDetails> {
-    let entry = match books.find(key) {
-        Some(entry) => entry,
-        // Before the first scan the library screen shows the cache instead.
-        None => {
-            let root = library_root(store)?;
-            books.cached(store, &root).into_iter().find(|b| b.path == key).ok_or("That book is no longer in the library")?
-        }
-    };
+fn book_details_for(store: &Store, books: &LibraryBooks, fingerprint: &str) -> CmdResult<BookDetails> {
+    let entry = books.find_by_fingerprint(store, fingerprint).ok_or("That book is no longer in the library")?;
     // The file's own blurb wins; a catalog summary fills the gap for books
     // whose files carry none.
     let annotation = entry.book.annotation.clone().or_else(|| store.read(|s| s.book_blurbs.get(&entry.fingerprint).cloned()));
@@ -469,7 +475,7 @@ mod tests {
     fn book_details_names_everything() {
         let (_dir, store, books) = bookish_state();
         record_book_source(&store, "fp1", "CWA", None).unwrap();
-        let d = book_details_for(&store, &books, "Author/Book.epub").unwrap();
+        let d = book_details_for(&store, &books, "fp1").unwrap();
         assert_eq!(d.title, "T");
         assert_eq!(d.authors, vec!["A B".to_string()]);
         assert_eq!(d.series.as_deref(), Some("S"));
@@ -498,7 +504,7 @@ mod tests {
     fn book_details_falls_back_to_the_catalog_blurb() {
         let (_dir, store, books) = bookish_state_with(None);
         store.update(|s| { s.book_blurbs.insert("fp1".into(), "Catalog says hi.".into()); }).unwrap();
-        let d = book_details_for(&store, &books, "Author/Book.epub").unwrap();
+        let d = book_details_for(&store, &books, "fp1").unwrap();
         assert_eq!(d.annotation.as_deref(), Some("Catalog says hi."));
     }
 

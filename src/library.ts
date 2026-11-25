@@ -1,6 +1,8 @@
 /** A book as the backend's library scan reports it (see scan_library in lib.rs). */
 export interface LibraryBook {
   key: string
+  /** Content identity, for sync and details from any window. */
+  fingerprint: string
   title: string
   authors: string[]
   authorSort: string
