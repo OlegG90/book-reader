@@ -39,10 +39,26 @@ export interface ModuleInfo {
   inUseReason: string | null
 }
 
+/** A cloud store sync can run through; only Dropbox has a transport yet. */
+export const CLOUD_PROVIDERS = [
+  { id: 'dropbox', label: 'Dropbox', available: true },
+  { id: 'onedrive', label: 'OneDrive', available: false },
+  { id: 'google', label: 'Google Drive', available: true },
+] as const
+/** Which cloud `connectCloud` connects; unavailable ones stay picked but never sent. */
+export type CloudProviderId = (typeof CLOUD_PROVIDERS)[number]['id']
+
+/** The Modules switch behind a cloud picker entry. */
+export const cloudModuleId = (id: string) => (id === 'google' ? 'capability:googledrive' : `capability:${id}`)
+
 /** Buttons in the settings page that act instead of changing a value. */
 export interface PanelActions {
   /** Turns a layer-1 module off (or back on) in Settings › Modules. */
   toggleModule(id: string, off: boolean): void
+  /** Connects the chosen cloud (reading positions sync through it). */
+  connectCloud(provider: CloudProviderId): void
+  /** Forgets the connected cloud's token; connecting again starts over. */
+  disconnectCloud(): void
   /** Forgets the recent books list (reading positions are kept). */
   clearHistory(): void
   /** Registers or unregisters the app for its book file types. */
@@ -177,6 +193,11 @@ function checkRow(label: string, hint: string, box: HTMLInputElement) {
   return el('label', { className: 'row' }, ...rowParts(label, hint, [box]))
 }
 
+/** A titled group of settings rows, as in Modules (kind) and System (Library, History, Sync). */
+function group(title: string, ...rows: HTMLElement[]) {
+  return el('div', { className: 'group' }, el('h3', { textContent: title }), ...rows)
+}
+
 const SECTIONS = [
   { id: 'reading', title: 'Reading' },
   { id: 'catalogs', title: 'Catalogs' },
@@ -211,6 +232,39 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const libraryFolder = el('span', { className: 'hint path' })
   const fileTypesStatus = el('span', { className: 'hint' })
   const fileTypesButton = el('button', { type: 'button', onclick: actions.toggleFileTypes })
+  const cloudStatus = el('span', { className: 'hint' })
+  const cloudDisconnect = el('button', { type: 'button', textContent: 'Disconnect', hidden: true, onclick: actions.disconnectCloud })
+  const cloudSelect = el(
+    'select',
+    { ariaLabel: 'Cloud to connect' },
+    ...CLOUD_PROVIDERS.map(p => el('option', { value: p.id, textContent: p.available ? p.label : `${p.label} (soon)`, disabled: !p.available })),
+  ) as HTMLSelectElement
+  const cloudAddHint = el('span', { className: 'hint' })
+  const cloudConnect = el('button', { type: 'button', textContent: 'Connect' })
+  // Whether a cloud is connected: the Add row locks while one is.
+  let cloudConnected = false
+  // The modules switched off; a cloud whose module is off cannot connect.
+  let modulesOff = [...initial.disabledModules]
+  const pickedCloud = () => CLOUD_PROVIDERS.find(p => p.id === cloudSelect.value) ?? CLOUD_PROVIDERS[0]
+  const refreshCloudAdd = () => {
+    const picked = pickedCloud()
+    const off = modulesOff.includes(cloudModuleId(picked.id))
+    for (const option of cloudSelect.options) {
+      const entry = CLOUD_PROVIDERS.find(p => p.id === option.value)
+      if (entry) option.disabled = !entry.available || modulesOff.includes(cloudModuleId(entry.id))
+    }
+    cloudAddHint.textContent = cloudConnected
+      ? 'Disconnect to switch clouds.'
+      : !picked.available
+        ? 'Coming soon — not available yet.'
+        : off
+          ? `Turn on ${picked.label} in Modules to connect.`
+          : ''
+    cloudConnect.disabled = !picked.available || off || cloudConnected
+    cloudSelect.disabled = cloudConnected
+  }
+  cloudSelect.onchange = refreshCloudAdd
+  cloudConnect.onclick = () => actions.connectCloud(pickedCloud().id)
   const catalogs = el('div', { className: 'catalogs' })
   const modules = el('div', { className: 'modules' })
   const moduleBoxes = new Map<string, HTMLInputElement>()
@@ -228,6 +282,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     organizeButton,
   )
   const fileTypesRow = row('File types', fileTypesStatus, fileTypesButton)
+  const cloudRow = row('Cloud connection', cloudStatus, cloudDisconnect)
+  const cloudAddRow = row('Add cloud', cloudAddHint, cloudSelect, cloudConnect)
   const updatesRow = row('Updates', updateStatus, openRelease, checkUpdate)
   const historyLength = el(
     'select',
@@ -247,6 +303,10 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     ),
   )
   uiFont.onchange = () => onChange({ uiFont: uiFont.value as UiFont })
+  const offerRow = checkRow('Offer to add books opened from elsewhere', 'Shows Move / Copy to library when a file is outside the library folder.', offerLibrary)
+  const interfaceRow = row('Interface font', 'The library and the panels; the book has its own (Reading).', uiFont)
+  const continueRow = row('Continue reading', 'How many of the last books read it shows.', historyLength)
+  const clearRow = row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory }))
   // The volume keys are a phone's.
   const volumeKeysRow = checkRow('Volume keys turn pages', 'While a book is open.', volumeKeys)
   volumeKeysRow.classList.add('android-only')
@@ -291,12 +351,11 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       modules,
     ],
     system: [
-      libraryRow,
-      checkRow('Offer to add books opened from elsewhere', 'Shows Move / Copy to library when a file is outside the library folder.', offerLibrary),
+      group('Library', libraryRow, offerRow),
+      group('History', continueRow, clearRow),
+      group('Sync', cloudRow, cloudAddRow),
       fileTypesRow,
-      row('Interface font', 'The library and the panels; the book has its own (Reading).', uiFont),
-      row('Continue reading', 'How many of the last books read it shows.', historyLength),
-      row('History', 'Forgets the recent books list; reading positions are kept.', el('button', { type: 'button', textContent: 'Clear history', onclick: actions.clearHistory })),
+      interfaceRow,
     ],
     shortcuts: [shortcuts],
     about: [
@@ -400,6 +459,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     historyLength.value = String(values.historyLength)
     uiFont.value = values.uiFont
     for (const [id, box] of moduleBoxes) box.checked = !values.disabledModules.includes(id)
+    modulesOff = [...values.disabledModules]
+    refreshCloudAdd()
   }
 
   /** Asks for the latest release and says what it found; a newer one gets a button to its page. */
@@ -424,6 +485,33 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     fileTypesButton.textContent = registered ? 'Unregister' : 'Register'
   }
 
+  /** Hides the cloud rows (every cloud module is off). */
+  function setCloudVisible(visible: boolean) {
+    cloudRow.hidden = !visible
+    cloudAddRow.hidden = !visible
+  }
+
+  /**
+   * Shows which cloud is connected and its last sync failure, if any.
+   * Sync stays quiet; only the settings say what went wrong.
+   */
+  function setCloudConnected(provider: CloudProviderId | null, connected: boolean, error: string | null = null) {
+    cloudConnected = connected
+    const label = CLOUD_PROVIDERS.find(p => p.id === provider)?.label ?? ''
+    if (!connected) {
+      cloudStatus.textContent = 'Not connected'
+      cloudStatus.title = ''
+    } else if (error) {
+      cloudStatus.textContent = label ? `${label} — ${error}` : error
+      cloudStatus.title = error
+    } else {
+      cloudStatus.textContent = `${label} — reading positions sync through it`
+      cloudStatus.title = ''
+    }
+    cloudDisconnect.hidden = !connected
+    refreshCloudAdd()
+  }
+
   function setLibraryFolder(folder: string | null) {
     libraryFolder.textContent = folder ?? 'Not chosen yet'
     libraryFolder.title = folder ?? ''
@@ -431,6 +519,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
 
   show(initial)
   setFileTypesRegistered(false)
+  setCloudConnected(null, false)
   setLibraryFolder(null)
   showSection('reading')
   return {
@@ -438,6 +527,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     setFileTypesRegistered,
     setFileTypesVisible,
     setLibraryFolder,
+    setCloudConnected,
+    setCloudVisible,
     setOrganizeVisible,
     setSectionVisible,
     showSection,

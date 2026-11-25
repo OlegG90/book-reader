@@ -3,20 +3,24 @@
 mod catalog;
 mod cli;
 mod clock;
+mod cloud;
 #[cfg(desktop)]
 #[cfg_attr(not(windows), path = "console_stdout.rs")]
 mod console;
 // Android keeps its data in the app's storage: only `resolve_state_file` is shared.
 #[cfg_attr(mobile, allow(dead_code))]
 mod data_dir;
+mod dropbox;
 mod fingerprint;
 mod formats;
+mod google;
 mod kosync;
 mod library;
 mod metadata;
 mod modules;
 mod naming;
 mod net;
+mod oauth;
 mod opds;
 mod paths;
 #[cfg_attr(not(windows), path = "register_unsupported.rs")]
@@ -95,6 +99,15 @@ pub fn run() {
             system_cmds::register_file_types,
             system_cmds::unregister_file_types,
             system_cmds::file_types_registered,
+            system_cmds::dropbox_status,
+            system_cmds::dropbox_connect,
+            system_cmds::dropbox_disconnect,
+            system_cmds::google_status,
+            system_cmds::google_connect,
+            system_cmds::google_connect_android,
+            system_cmds::google_disconnect,
+            system_cmds::google_finish,
+            system_cmds::google_take_answer,
             system_cmds::app_version,
             system_cmds::open_repository,
             system_cmds::check_for_update,

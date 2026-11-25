@@ -34,3 +34,40 @@ export function initVolumeKeys(onKey: (direction: 'next' | 'prev') => void): voi
   if (!isAndroid) return
   void addPluginListener<{ direction: 'next' | 'prev' }>('system', 'volumeKey', ({ direction }) => onKey(direction)).catch(console.error)
 }
+
+/** A Google sign-in answer arriving on the app's scheme (a phone redirect back
+from the browser): the address to finish the login with. Nothing arrives on
+the desktop, where the login waits on a loopback address instead. */
+export function initOauthAnswer(answer: (url: string) => void): void {
+  if (!isAndroid) return
+  void addPluginListener<{ url: string }>('system', 'oauth', ({ url }) => answer(url)).catch(console.error)
+}
+
+/** Polls the phone's stashed OAuth answer until the browser comes back with it.
+`take` reads the stash exactly once, `finish` completes the login. Stops after
+the answer or after `misses` empty rounds; returns a function that stops it
+sooner. The push event cannot be relied on (logcat-verified on the phone: the
+`system` plugin listeners never register), so the connect flow polls instead. */
+export function pollOauthAnswer(
+  take: () => Promise<string | null>,
+  finish: (url: string) => Promise<void>,
+  misses = 160,
+  everyMs = 1500,
+): () => void {
+  let left = misses
+  const timer = setInterval(() => {
+    void take()
+      .then(answer => {
+        if (answer == null) {
+          if (--left <= 0) clearInterval(timer)
+          return
+        }
+        clearInterval(timer)
+        void finish(answer)
+      })
+      .catch(() => {
+        if (--left <= 0) clearInterval(timer)
+      })
+  }, everyMs)
+  return () => clearInterval(timer)
+}

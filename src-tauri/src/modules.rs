@@ -46,6 +46,12 @@ struct Def {
     extensions: &'static [&'static str],
     needs_network: bool,
     optional: bool,
+    /// Modules that must stay on while this one is on: turning one of them
+    /// off is refused while this module is still on. Transport-level needs
+    /// live in the transports themselves (`sync_cmds.rs`), not here:
+    /// `capability:progress-sync` is only the user's intent ("sync my
+    /// positions"), so a cloud transport keeps working with catalogs off.
+    requires: &'static [&'static str],
 }
 
 /// Every layer-1 module. File associations do nothing on Android (no desktop
@@ -60,6 +66,7 @@ fn definitions() -> Vec<Def> {
             extensions: &["epub"],
             needs_network: false,
             optional: true,
+            requires: &[],
         },
         Def {
             id: "format:fb2",
@@ -69,6 +76,7 @@ fn definitions() -> Vec<Def> {
             extensions: &["fb2.zip", "fbz", "fb2"],
             needs_network: false,
             optional: true,
+            requires: &[],
         },
         Def {
             id: "capability:catalogs",
@@ -78,15 +86,17 @@ fn definitions() -> Vec<Def> {
             extensions: &[],
             needs_network: true,
             optional: true,
+            requires: &[],
         },
         Def {
             id: "capability:progress-sync",
             kind: ModuleKind::Capability,
             label: "Progress sync",
-            hint: "Sync reading positions between devices through the catalog server. Works only for books from a catalog.",
+            hint: "Sync reading positions between your devices, through the catalog server or a cloud store.",
             extensions: &[],
             needs_network: true,
             optional: true,
+            requires: &[],
         },
         Def {
             id: "capability:organize",
@@ -96,6 +106,7 @@ fn definitions() -> Vec<Def> {
             extensions: &[],
             needs_network: false,
             optional: true,
+            requires: &[],
         },
         Def {
             id: "capability:file-types",
@@ -108,6 +119,7 @@ fn definitions() -> Vec<Def> {
             optional: false,
             #[cfg(not(mobile))]
             optional: true,
+            requires: &[],
         },
         Def {
             id: "capability:update-check",
@@ -117,6 +129,27 @@ fn definitions() -> Vec<Def> {
             extensions: &[],
             needs_network: true,
             optional: true,
+            requires: &[],
+        },
+        Def {
+            id: "capability:dropbox",
+            kind: ModuleKind::Capability,
+            label: "Dropbox",
+            hint: "Sync reading positions through your Dropbox, without catalogs.",
+            extensions: &[],
+            needs_network: true,
+            optional: true,
+            requires: &[],
+        },
+        Def {
+            id: "capability:googledrive",
+            kind: ModuleKind::Capability,
+            label: "Google Drive",
+            hint: "Sync reading positions through your Google Drive, without catalogs.",
+            extensions: &[],
+            needs_network: true,
+            optional: true,
+            requires: &[],
         },
     ]
 }
@@ -135,18 +168,24 @@ pub fn is_off(state: &store::State, id: &str) -> bool {
     disabled_ids(state).contains(id)
 }
 
+/// The labels of the enabled modules that require `id`, i.e. that block
+/// turning it off while they are still on.
+fn required_by(state: &store::State, id: &str) -> Vec<&'static str> {
+    let disabled = disabled_ids(state);
+    definitions()
+        .into_iter()
+        .filter(|d| d.id != id && !disabled.contains(d.id) && d.requires.contains(&id))
+        .map(|d| d.label)
+        .collect()
+}
+
 /// Why a module counts as in use (its switch shows the reason): catalogs
-/// hold the OPDS sources, and progress sync needs catalogs to work through.
+/// hold the OPDS sources, and whatever requires the module needs it on.
 fn use_reason(state: &store::State, id: &str) -> Option<String> {
-    match id {
-        "capability:catalogs" if !state.sources.is_empty() => {
-            Some("delete its catalog sources first".into())
-        }
-        "capability:catalogs" if !is_off(state, "capability:progress-sync") => {
-            Some("turn off \"Progress sync\" first".into())
-        }
-        _ => None,
+    if id == "capability:catalogs" && !state.sources.is_empty() {
+        return Some("delete its catalog sources first".into());
     }
+    required_by(state, id).first().map(|label| format!("turn off \"{label}\" first"))
 }
 
 /// Every layer-1 module with its current switch position.
@@ -185,12 +224,21 @@ pub fn check_turning_off(state: &store::State, next: &BTreeSet<String>) -> Resul
             return Err(format!("\"{}\" cannot be turned off.", def.label));
         }
     }
-    if next.contains("capability:catalogs") {
-        if !state.sources.is_empty() {
-            return Err("\"Catalogs\" is in use: delete its catalog sources first.".into());
-        }
-        if !next.contains("capability:progress-sync") {
-            return Err("\"Catalogs\" is in use: turn off \"Progress sync\" first.".into());
+    if next.contains("capability:catalogs") && !state.sources.is_empty() {
+        return Err("\"Catalogs\" is in use: delete its catalog sources first.".into());
+    }
+    // A module stays usable only while what it requires stays on: turning
+    // one of them off is refused while a module that needs it is still on
+    // (unless it turns off together with it).
+    for id in next {
+        let dependent = defs.iter().find(|d| !next.contains(d.id) && d.requires.contains(&id.as_str()));
+        if let Some(d) = dependent {
+            // Unknown ids were already refused above; the fallback never runs.
+            let label: &str = match defs.iter().find(|d| d.id == id.as_str()) {
+                Some(d) => d.label,
+                None => id.as_str(),
+            };
+            return Err(format!("\"{label}\" is in use: turn off \"{}\" first.", d.label));
         }
     }
     Ok(())
@@ -232,10 +280,11 @@ mod tests {
     #[test]
     fn list_reflects_settings() {
         let all = list(&state_with(Map::new()));
-        assert_eq!(all.len(), 7);
+        assert_eq!(all.len(), 9);
         assert!(all.iter().all(|m| m.enabled));
-        // Catalogs show the dependency while progress sync is still on.
-        assert!(all.iter().find(|m| m.id == "capability:catalogs").unwrap().in_use);
+        // Progress sync alone locks nothing: the intent is no blocker,
+        // clouds keep working with catalogs off.
+        assert!(!all.iter().find(|m| m.id == "capability:catalogs").unwrap().in_use);
         assert!(!all.iter().find(|m| m.id == "format:epub").unwrap().in_use);
         let some = list(&state_with(disabled(&["format:fb2"])));
         assert!(!some.iter().find(|m| m.id == "format:fb2").unwrap().enabled);
@@ -250,7 +299,7 @@ mod tests {
         // Unknown ids change nothing; corrupt shapes mean nothing is off.
         let state = state_with(disabled(&["format:fb2", "wizardry:fireball"]));
         assert!(is_off(&state, "format:fb2"));
-        assert_eq!(list(&state).len(), 7);
+        assert_eq!(list(&state).len(), 9);
         let state = state_with(Map::from_iter([("disabledModules".into(), json!("fb2"))]));
         assert!(!is_off(&state, "format:fb2"));
         let state = state_with(Map::from_iter([("disabledModules".into(), json!([42]))]));
@@ -258,11 +307,13 @@ mod tests {
     }
 
     #[test]
-    fn list_names_the_in_use_reason() {
+    fn progress_sync_alone_locks_nothing() {
+        // The intent is no blocker: with no sources catalogs turn off
+        // freely, and clouds keep working afterwards.
         let all = list(&state_with(Map::new()));
         let catalogs = all.iter().find(|m| m.id == "capability:catalogs").unwrap();
-        assert!(catalogs.in_use);
-        assert_eq!(catalogs.in_use_reason.as_deref(), Some("turn off \"Progress sync\" first"));
+        assert!(!catalogs.in_use);
+        assert_eq!(catalogs.in_use_reason, None);
     }
 
     #[test]
@@ -305,6 +356,8 @@ mod tests {
             ("capability:organize", "Organize"),
             ("capability:file-types", "File types"),
             ("capability:update-check", "Update check"),
+            ("capability:dropbox", "Dropbox"),
+            ("capability:googledrive", "Google Drive"),
         ] {
             let off = state_with(disabled(&[id]));
             assert_eq!(require(&off, id), Err(format!("{label} is turned off in Settings > Modules")));
@@ -348,15 +401,10 @@ mod tests {
     }
 
     #[test]
-    fn catalogs_cannot_turn_off_while_progress_sync_is_on() {
+    fn catalogs_turn_off_while_progress_sync_is_on() {
+        // The intent is no blocker: clouds keep working with catalogs off.
         let state = state_with(Map::new());
         let next = BTreeSet::from(["capability:catalogs".into()]);
-        assert_eq!(
-            check_turning_off(&state, &next),
-            Err("\"Catalogs\" is in use: turn off \"Progress sync\" first.".into())
-        );
-        // Turning both off together is allowed.
-        let next = BTreeSet::from(["capability:catalogs".into(), "capability:progress-sync".into()]);
         assert_eq!(check_turning_off(&state, &next), Ok(()));
     }
 
@@ -365,5 +413,36 @@ mod tests {
         let state = state_with(Map::new());
         let next = BTreeSet::from(["format:fb2".into(), "capability:update-check".into()]);
         assert_eq!(check_turning_off(&state, &next), Ok(()));
+    }
+
+    #[test]
+    fn requires_edges_resolve_and_never_point_at_themselves() {
+        let ids: Vec<&str> = definitions().iter().map(|d| d.id).collect();
+        for def in definitions() {
+            for req in def.requires {
+                assert!(ids.contains(req), "{} requires unknown {}", def.id, req);
+                assert_ne!(def.id, *req, "{} requires itself", def.id);
+            }
+        }
+    }
+
+    #[test]
+    fn every_requires_edge_blocks_and_shows() {
+        // The edge is data, not code: each `requires` entry refuses the write
+        // and locks the switch, with the dependent named in both sentences.
+        for def in definitions() {
+            for req in def.requires {
+                let state = state_with(Map::new());
+                let next = BTreeSet::from([req.to_string()]);
+                let req_label = definitions().iter().find(|d| d.id == *req).unwrap().label;
+                assert_eq!(
+                    check_turning_off(&state, &next),
+                    Err(format!("\"{req_label}\" is in use: turn off \"{}\" first.", def.label))
+                );
+                let listed = list(&state).into_iter().find(|m| m.id == *req).unwrap();
+                assert!(listed.in_use);
+                assert_eq!(listed.in_use_reason.as_deref(), Some(format!("turn off \"{}\" first", def.label).as_str()));
+            }
+        }
     }
 }

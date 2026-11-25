@@ -21,6 +21,12 @@ jobs:
     # One x64 runner builds both: MSVC cross-compiles to ARM64 (the runner's
     # LLVM, at the path .cargo/config.toml names, compiles ring's C for it).
     runs-on: windows-latest
+    env:
+      # Baked into google::CLIENT_ID/CLIENT_SECRET at compile time. Empty when
+      # the repository secrets are missing: Google Drive then refuses with
+      # setup help instead of failing the build.
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v7
 

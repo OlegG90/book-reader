@@ -1,6 +1,8 @@
 //! One-off system commands: file types, updates, outside books, the library screen.
 
 use crate::cli::Launch;
+use crate::dropbox;
+use crate::google;
 use crate::formats;
 use crate::modules;
 use crate::platform::{Active, Platform};
@@ -9,6 +11,7 @@ use crate::register;
 use crate::updates;
 use crate::windows::{open_or_focus, show_book, show_here};
 use crate::CmdResult;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -33,6 +36,95 @@ pub(crate) fn unregister_file_types(store: State<Store>) -> CmdResult<()> {
 #[tauri::command(async)]
 pub(crate) fn file_types_registered() -> bool {
     register::registered()
+}
+
+/// Dropbox: whether a refresh token is kept, and the last sync failure,
+/// if any (sync stays quiet, but the settings show what went wrong).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DropboxStatus {
+    connected: bool,
+    last_error: Option<String>,
+}
+
+#[tauri::command(async)]
+pub(crate) fn dropbox_status() -> DropboxStatus {
+    DropboxStatus { connected: dropbox::is_connected(), last_error: dropbox::last_error() }
+}
+
+/// Connects Dropbox: opens its login in the browser, waits for the answer
+/// and keeps the refresh token like a catalog password.
+#[tauri::command(async)]
+pub(crate) fn dropbox_connect(app: AppHandle, store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:dropbox"))?;
+    let pending = dropbox::begin()?;
+    app.opener().open_url(&pending.url, None::<&str>).map_err(|e| e.to_string())?;
+    dropbox::finish(pending)
+}
+
+/// Forgets the Dropbox token; connecting again starts over.
+#[tauri::command(async)]
+pub(crate) fn dropbox_disconnect(store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:dropbox"))?;
+    dropbox::disconnect();
+    Ok(())
+}
+
+/// Google Drive: whether a refresh token is kept, and the last sync failure,
+/// if any (sync stays quiet, but the settings show what went wrong).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GoogleStatus {
+    connected: bool,
+    last_error: Option<String>,
+}
+
+#[tauri::command(async)]
+pub(crate) fn google_status() -> GoogleStatus {
+    GoogleStatus { connected: google::is_connected(), last_error: google::last_error() }
+}
+
+/// Connects Google Drive: opens its login in the browser, waits for the answer
+/// and keeps the refresh token like a catalog password.
+#[tauri::command(async)]
+pub(crate) fn google_connect(app: AppHandle, store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:googledrive"))?;
+    let pending = google::begin()?;
+    app.opener().open_url(&pending.url, None::<&str>).map_err(|e| e.to_string())?;
+    google::finish(pending)
+}
+
+/// Forgets the Google token; connecting again starts over.
+#[tauri::command(async)]
+pub(crate) fn google_disconnect(store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:googledrive"))?;
+    google::disconnect();
+    Ok(())
+}
+
+/// Starts the phone's Google login: opens its page in the browser, and the
+/// answer comes back through the app's intent filter (`google_finish`).
+/// The desktop waits on a loopback address instead (`google_connect`).
+#[tauri::command(async)]
+pub(crate) fn google_connect_android(app: AppHandle, store: State<Store>) -> CmdResult<String> {
+    store.read(|s| modules::require(s, "capability:googledrive"))?;
+    let url = google::begin_android()?;
+    app.opener().open_url(&url, None::<&str>).map_err(|e| e.to_string())?;
+    Ok(url)
+}
+
+/// Finishes the phone's Google login with the address the browser came back to.
+#[tauri::command(async)]
+pub(crate) fn google_finish(answer: String, store: State<Store>) -> CmdResult<()> {
+    store.read(|s| modules::require(s, "capability:googledrive"))?;
+    google::finish_answer(&answer)
+}
+
+/// A Google sign-in answer waiting on a phone, if one arrived. The settings drain
+/// it at startup and on every oauth event, so a cold start cannot lose it.
+#[tauri::command(async)]
+pub(crate) fn google_take_answer() -> CmdResult<Option<String>> {
+    Active::take_oauth_answer()
 }
 
 /// The app version (from Cargo.toml), shown in the About panel.

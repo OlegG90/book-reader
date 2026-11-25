@@ -28,8 +28,8 @@ import { closePopup } from './book-menu'
 import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
-import { createAppearancePanel, createSettingsPage, type ModuleInfo, type SettingsSection } from './settings-panel'
-import { initBackButton, initIncoming, initVolumeKeys, isAndroid, setReading } from './platform'
+import { cloudModuleId, createAppearancePanel, createSettingsPage, type ModuleInfo, type SettingsSection } from './settings-panel'
+import { initBackButton, initIncoming, initOauthAnswer, initVolumeKeys, isAndroid, pollOauthAnswer, setReading } from './platform'
 import { createReadingView, type AddMode, type Offer } from './reading-view'
 import { createLibraryView, type View } from './library-view'
 import { SYNC_EVERY_MS, SYNC_ON_CLOSE_MS } from './sync-manager'
@@ -320,6 +320,7 @@ function openSettings(section?: SettingsSection) {
   closePanels()
   $('settings').hidden = false
   void refreshFileTypesStatus()
+  void refreshCloudStatus()
   refreshModules()
   if (section) settingsPage.showSection(section)
   $('settings').querySelector<HTMLElement>('button')?.focus()
@@ -349,6 +350,8 @@ function closePanels() {
 
 const systemDark = matchMedia('(prefers-color-scheme: dark)')
 let fileTypesRegistered = false
+/** Which cloud is connected, if any: one at a time, like the picker. */
+let connectedCloud: 'dropbox' | 'google' | null = null
 const settingsPage = createSettingsPage($('settings'), settings, changes => void changeSettings(changes), {
   clearHistory: () => {
     void invoke('clear_recent')
@@ -360,6 +363,41 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
   toggleFileTypes: () => {
     const command = fileTypesRegistered ? 'unregister_file_types' : 'register_file_types'
     void invoke(command).then(refreshFileTypesStatus, console.error)
+  },
+  connectCloud: provider => {
+    // The picker never sends an unavailable cloud; a disabled module refuses.
+    // A phone's answer comes back on the app's scheme: the push event is
+    // unreliable there, so a Google connect polls the stash instead; the
+    // desktop waits on a loopback address instead.
+    const command = provider === 'google' && isAndroid ? 'google_connect_android' : provider === 'google' ? 'google_connect' : 'dropbox_connect'
+    if (provider === 'google' && isAndroid) {
+      stopOauthPoll?.()
+      stopOauthPoll = pollOauthAnswer(takeOauthAnswer, finishOauthAnswer)
+    }
+    void invoke(command).then(
+      () => {
+        void refreshCloudStatus()
+        void sourcesPanel.refresh()
+      },
+      e => {
+        stopOauthPoll?.()
+        stopOauthPoll = null
+        showError(undefined, e)
+        void refreshCloudStatus()
+      },
+    )
+  },
+  disconnectCloud: () => {
+    stopOauthPoll?.()
+    stopOauthPoll = null
+    const command = connectedCloud === 'google' ? 'google_disconnect' : 'dropbox_disconnect'
+    void invoke(command).then(
+      () => {
+        void refreshCloudStatus()
+        void sourcesPanel.refresh()
+      },
+      console.error,
+    )
   },
   changeLibrary: () => void library.chooseLibrary(true),
   toggleModule: (id, off) => void toggleModule(id, off),
@@ -376,6 +414,7 @@ const appearancePanel = createAppearancePanel($('appearance'), settings, changes
 // The catalogs (OPDS servers), the key list and the version have their own sections in the settings.
 const sourcesPanel = createSourcesPanel(settingsPage.catalogs, {
   syncOff: () => settings.disabledModules.includes('capability:progress-sync'),
+  cloudReady: () => connectedCloud !== null && !settings.disabledModules.includes(cloudModuleId(connectedCloud)),
 })
 settingsPage.shortcuts.append($('shortcuts').querySelector('dl')!.cloneNode(true))
 const settingsVersion = el('span')
@@ -422,6 +461,7 @@ function showView(to: View) {
     if (!wasSettings) {
       refreshModules()
       void refreshFileTypesStatus()
+      void refreshCloudStatus()
     }
     settingsPage.showSection(to.slice('settings:'.length) as SettingsSection)
     foldSettingsNav(false)
@@ -542,6 +582,7 @@ function applyCapabilities() {
   settingsPage.setSectionVisible('catalogs', catalogs)
   settingsPage.setOrganizeVisible(!off.has('capability:organize'))
   settingsPage.setFileTypesVisible(!isAndroid && !off.has('capability:file-types'))
+  settingsPage.setCloudVisible(!off.has('capability:dropbox') || !off.has('capability:googledrive'))
   settingsPage.setUpdatesVisible(!off.has('capability:update-check'))
   if (!catalogs && (view === 'catalogs' || view === 'settings:catalogs')) {
     showView(view === 'catalogs' ? 'library' : 'settings:modules')
@@ -575,6 +616,30 @@ async function refreshFileTypesStatus() {
   })
   fileTypesRegistered = registered
   settingsPage.setFileTypesRegistered(registered)
+}
+
+/** Shows which cloud is connected, and its last sync failure, if any. */
+async function refreshCloudStatus() {
+  interface CloudStatus {
+    connected: boolean
+    lastError: string | null
+  }
+  const quiet = (e: unknown) => {
+    console.error(e)
+    return { connected: false, lastError: String(e) }
+  }
+  const [dropbox, google] = await Promise.all([
+    invoke<CloudStatus>('dropbox_status').catch(quiet),
+    invoke<CloudStatus>('google_status').catch(quiet),
+  ])
+  // One cloud at a time; the picker lists Dropbox first.
+  const active = dropbox.connected
+    ? { id: 'dropbox' as const, status: dropbox }
+    : google.connected
+      ? { id: 'google' as const, status: google }
+      : null
+  connectedCloud = active?.id ?? null
+  settingsPage.setCloudConnected(connectedCloud, active !== null, active?.status.lastError ?? null)
 }
 
 // ---- Edge controls ----------------------------------------------------------
@@ -764,6 +829,37 @@ initIncoming(() => void invoke('open_incoming').catch(e => showError(undefined, 
 initVolumeKeys(direction => {
   if (reading.book) void runCommand(direction)
 })
+// A Google sign-in answer back from the phone's browser, or one stashed
+// while the app started: finish the login (draining takes it exactly once).
+async function takeOauthAnswer(): Promise<string | null> {
+  const answer = await invoke<string | null>('google_take_answer').catch(e => {
+    console.error(e)
+    return null
+  })
+  return answer
+}
+
+async function finishOauthAnswer(answer: string): Promise<void> {
+  try {
+    await invoke('google_finish', { answer })
+    void refreshCloudStatus()
+    void sourcesPanel.refresh()
+  } catch (e) {
+    showError(undefined, e)
+    void refreshCloudStatus()
+  }
+}
+
+async function drainOauthAnswer(): Promise<void> {
+  const answer = await takeOauthAnswer()
+  if (!answer) return
+  await finishOauthAnswer(answer)
+}
+
+/** Stops the poll started by the last phone Google connect, if any. */
+let stopOauthPoll: (() => void) | null = null
+initOauthAnswer(() => void drainOauthAnswer())
+void drainOauthAnswer()
 // Another window changed a setting: apply it here too (it is already saved).
 appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
   const valid = readSettings({ ...settings, ...payload })
@@ -777,6 +873,7 @@ appWindow.onCloseRequested(async () => {
 systemDark.addEventListener('change', () => settings.theme === 'system' && restyle())
 
 void refreshFileTypesStatus()
+void refreshCloudStatus()
 void invoke<string>('app_version')
   .then(version => {
     $('about-version').textContent = `v${version}`

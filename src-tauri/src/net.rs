@@ -68,6 +68,30 @@ pub fn put_json(url: &str, login: Option<&Login>, auth: Auth, accept: &str, body
     send(url, login, auth, accept, Some(body))
 }
 
+/// POST bytes to `url` with extra headers (a sync store's API).
+pub fn post(url: &str, headers: &[(&str, &str)], body: &[u8]) -> Result<Reply, String> {
+    let mut req = agent().post(url);
+    for (name, value) in headers {
+        req = req.header(*name, *value);
+    }
+    finish(req.send(body), url)
+}
+
+/// PATCH bytes to `url` with extra headers (a sync store's API).
+pub fn patch(url: &str, headers: &[(&str, &str)], body: &[u8]) -> Result<Reply, String> {
+    let mut req = agent().patch(url);
+    for (name, value) in headers {
+        req = req.header(*name, *value);
+    }
+    finish(req.send(body), url)
+}
+
+/// GET `url` with a Bearer token (a sync store's API).
+pub fn bearer_get(url: &str, token: &str) -> Result<Reply, String> {
+    let auth = format!("Bearer {token}");
+    finish(agent().get(url).header("Authorization", auth.as_str()).call(), url)
+}
+
 /// A GET, or with a body a PUT.
 fn send(url: &str, login: Option<&Login>, auth: Auth, accept: &str, body: Option<&str>) -> Result<Reply, String> {
     let origin = origin_of(url);
@@ -101,12 +125,17 @@ fn headers<B>(req: ureq::RequestBuilder<B>, accept: &str, auth: Option<&str>) ->
 }
 
 fn request(url: &str, accept: &str, auth: Option<&str>, body: Option<&str>) -> Result<Reply, String> {
-    let failed = |e: ureq::Error| format!("{}: {e}", host_of(url));
-    let mut response = match body {
+    let response = match body {
         Some(body) => headers(agent().put(url), accept, auth).header("Content-Type", "application/json").send(body),
         None => headers(agent().get(url), accept, auth).call(),
-    }
-    .map_err(failed)?;
+    };
+    finish(response, url)
+}
+
+/// Reads a request's answer, failing closed on errors and off-server redirects.
+fn finish(response: Result<ureq::http::Response<ureq::Body>, ureq::Error>, url: &str) -> Result<Reply, String> {
+    let failed = |e: ureq::Error| format!("{}: {e}", host_of(url));
+    let mut response = response.map_err(failed)?;
     // A redirect may not lead off the server the request was meant for.
     if origin_of(&response.get_uri().to_string()) != origin_of(url) {
         return Err(format!("{} sent the request on to another server", host_of(url)));

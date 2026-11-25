@@ -1447,6 +1447,11 @@ button:hover {
   color: var(--muted);
 }
 
+/* Grouped rows sit one step in, so they read as belonging to their heading. */
+#settings .section .group .row {
+  margin-left: var(--space-4);
+}
+
 #settings .appearance {
   display: grid;
   gap: 18px;
