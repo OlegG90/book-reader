@@ -49,7 +49,8 @@ impl Transport for Kosync {
     }
 
     fn enabled(&self, state: &store::State) -> bool {
-        // Mirrors the requires edge: KOSync works through the catalog server,
+        // KOSync works through the catalog server (its own transport rule,
+        // not a module edge, so clouds survive catalogs being turned off),
         // and needs a source marked for sync.
         !modules::is_off(state, "capability:progress-sync")
             && !modules::is_off(state, "capability:catalogs")
@@ -384,8 +385,20 @@ mod tests {
         assert!(!store.read(|s| Dropbox.enabled(s)));
         let (_dir, store) = synced_store(&["capability:progress-sync"]);
         assert!(!store.read(|s| Dropbox.enabled(s)), "the intent switch gates every transport");
-        // KOSync additionally needs catalogs (its requires edge).
+        // KOSync additionally needs catalogs (its own transport rule).
         let (_dir, store) = synced_store(&["capability:catalogs"]);
+        assert!(!store.read(|s| Kosync.enabled(s)));
+    }
+
+    #[test]
+    fn clouds_work_with_catalogs_off() {
+        // The spec promises it twice; KOSync alone goes quiet.
+        let (_dir, store) = synced_store(&["capability:catalogs"]);
+        // Turning catalogs off takes its sources with it (the write guard
+        // refuses it while any exist); the intent stays on.
+        store.update(|s| s.sources.clear()).unwrap();
+        assert!(store.read(|s| Dropbox.enabled(s)));
+        assert!(store.read(|s| Google.enabled(s)));
         assert!(!store.read(|s| Kosync.enabled(s)));
     }
 

@@ -47,10 +47,10 @@ struct Def {
     needs_network: bool,
     optional: bool,
     /// Modules that must stay on while this one is on: turning one of them
-    /// off is refused while this module is still on. `capability:progress-sync`
-    /// is the user's intent ("sync my positions"); the KOSync transport behind
-    /// it is what needs catalogs — a future transport declares its own edge
-    /// here instead of hardcoding another pair.
+    /// off is refused while this module is still on. Transport-level needs
+    /// live in the transports themselves (`sync_cmds.rs`), not here:
+    /// `capability:progress-sync` is only the user's intent ("sync my
+    /// positions"), so a cloud transport keeps working with catalogs off.
     requires: &'static [&'static str],
 }
 
@@ -92,11 +92,11 @@ fn definitions() -> Vec<Def> {
             id: "capability:progress-sync",
             kind: ModuleKind::Capability,
             label: "Progress sync",
-            hint: "Sync reading positions between devices through the catalog server. Works only for books from a catalog.",
+            hint: "Sync reading positions between your devices, through the catalog server or a cloud store.",
             extensions: &[],
             needs_network: true,
             optional: true,
-            requires: &["capability:catalogs"],
+            requires: &[],
         },
         Def {
             id: "capability:organize",
@@ -282,8 +282,9 @@ mod tests {
         let all = list(&state_with(Map::new()));
         assert_eq!(all.len(), 9);
         assert!(all.iter().all(|m| m.enabled));
-        // Catalogs show the dependency while progress sync is still on.
-        assert!(all.iter().find(|m| m.id == "capability:catalogs").unwrap().in_use);
+        // Progress sync alone locks nothing: the intent is no blocker,
+        // clouds keep working with catalogs off.
+        assert!(!all.iter().find(|m| m.id == "capability:catalogs").unwrap().in_use);
         assert!(!all.iter().find(|m| m.id == "format:epub").unwrap().in_use);
         let some = list(&state_with(disabled(&["format:fb2"])));
         assert!(!some.iter().find(|m| m.id == "format:fb2").unwrap().enabled);
@@ -306,11 +307,13 @@ mod tests {
     }
 
     #[test]
-    fn list_names_the_in_use_reason() {
+    fn progress_sync_alone_locks_nothing() {
+        // The intent is no blocker: with no sources catalogs turn off
+        // freely, and clouds keep working afterwards.
         let all = list(&state_with(Map::new()));
         let catalogs = all.iter().find(|m| m.id == "capability:catalogs").unwrap();
-        assert!(catalogs.in_use);
-        assert_eq!(catalogs.in_use_reason.as_deref(), Some("turn off \"Progress sync\" first"));
+        assert!(!catalogs.in_use);
+        assert_eq!(catalogs.in_use_reason, None);
     }
 
     #[test]
@@ -398,15 +401,10 @@ mod tests {
     }
 
     #[test]
-    fn catalogs_cannot_turn_off_while_progress_sync_is_on() {
+    fn catalogs_turn_off_while_progress_sync_is_on() {
+        // The intent is no blocker: clouds keep working with catalogs off.
         let state = state_with(Map::new());
         let next = BTreeSet::from(["capability:catalogs".into()]);
-        assert_eq!(
-            check_turning_off(&state, &next),
-            Err("\"Catalogs\" is in use: turn off \"Progress sync\" first.".into())
-        );
-        // Turning both off together is allowed.
-        let next = BTreeSet::from(["capability:catalogs".into(), "capability:progress-sync".into()]);
         assert_eq!(check_turning_off(&state, &next), Ok(()));
     }
 

@@ -6,27 +6,19 @@
 //! Secrets stay out of the config: the refresh token is kept like catalog
 //! passwords (the OS credential store, the Android Keystore).
 
+use crate::cloud::{ErrorSlot, RemoteRecord, SyncFile, access_from, merge_for_upload, should_upload, token_json, tokens};
 use crate::platform::{Active, Platform};
 use crate::{kosync, net, oauth};
 use oauth::PendingLogin;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-/// The last sync failure, if any: a dead transport stays quiet, but the
-/// settings show what went wrong instead of failing silently.
-static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
-
-/// Remembers the outcome for the settings: failures stay visible there,
-/// successes clear them.
-fn track<T>(result: Result<T, String>) -> Result<T, String> {
-    *LAST_ERROR.lock().unwrap() = result.as_ref().err().cloned();
-    result
-}
+/// The last Google Drive sync failure, for the settings.
+static LAST_ERROR: ErrorSlot = ErrorSlot::new();
 
 /// The last sync failure, if any.
 pub fn last_error() -> Option<String> {
-    LAST_ERROR.lock().unwrap().clone()
+    LAST_ERROR.last()
 }
 
 /// The Google Cloud OAuth client ID. Desktop: a Desktop client with the
@@ -75,59 +67,6 @@ const SCOPE: &str = "https://www.googleapis.com/auth/drive.appdata";
 const REDIRECT_URI: &str = "http://localhost:51944/googledrive";
 #[cfg(mobile)]
 const REDIRECT_URI: &str = "com.olegg90.bookreader:/oauth2redirect";
-
-/// One book's synced position as the cloud file keeps it: the local shape
-/// (see store::Position) plus who saved it, for the echo check.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoteRecord {
-    pub cfi: String,
-    pub fraction: f64,
-    /// ms since the Unix epoch, like local positions.
-    pub time: u64,
-    pub device: String,
-    pub device_id: String,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct SyncFile {
-    version: u32,
-    #[serde(default)]
-    positions: HashMap<String, RemoteRecord>,
-}
-
-/// Merges remote records into the local positions for the upload: newest per
-/// book wins; ties and local-only books keep the local position, stamped
-/// with this install (the echo check needs a writer).
-pub fn merge_for_upload(
-    local: &HashMap<String, crate::store::Position>,
-    remote: &HashMap<String, RemoteRecord>,
-    device: &str,
-    device_id: &str,
-) -> HashMap<String, RemoteRecord> {
-    let mut merged = remote.clone();
-    for (fingerprint, pos) in local {
-        let newer_remote = remote.get(fingerprint).is_some_and(|r| r.time > pos.time);
-        if !newer_remote {
-            merged.insert(
-                fingerprint.clone(),
-                RemoteRecord {
-                    cfi: pos.cfi.clone(),
-                    fraction: pos.fraction,
-                    time: pos.time,
-                    device: device.into(),
-                    device_id: device_id.into(),
-                },
-            );
-        }
-    }
-    merged
-}
-
-/// Whether the merged file differs from what the cloud has.
-pub fn should_upload(merged: &HashMap<String, RemoteRecord>, remote: &HashMap<String, RemoteRecord>) -> bool {
-    merged != remote
-}
 
 /// The client ID and secret, or why Google Drive cannot work yet. The phone's
 /// Android client has no secret; the desktop one must send its own.
@@ -235,7 +174,7 @@ fn exchange(code: &str, verifier: &str, stored: Option<String>) -> Result<(Strin
     if reply.status != 200 {
         return Err(format!("Google login failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
     }
-    tokens(&reply.body, stored)
+    tokens(&reply.body, stored, "Google")
 }
 
 /// Trades the kept refresh token for an access token.
@@ -259,32 +198,7 @@ fn access_token() -> Result<String, String> {
         return Err(format!("Google login failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
     }
     // A refresh answer carries no refresh token (only the code exchange does).
-    access_from(&token_json(&reply.body)?)
-}
-
-fn token_json(body: &[u8]) -> Result<serde_json::Value, String> {
-    serde_json::from_slice(body).map_err(|e| format!("login: {e}"))
-}
-
-fn access_from(tokens: &serde_json::Value) -> Result<String, String> {
-    tokens["access_token"]
-        .as_str()
-        .ok_or_else(|| "login: Google gave no access token".to_string())
-        .map(str::to_string)
-}
-
-/// A re-authorization may come back without a new refresh token (no consent
-/// screen is shown): keep working with the one already kept instead of
-/// failing the login.
-fn pick_refresh(fresh: Option<String>, stored: Option<String>) -> Result<String, String> {
-    fresh.or(stored).ok_or_else(|| "login: Google gave no refresh token (ask for offline access again)".into())
-}
-
-fn tokens(body: &[u8], stored: Option<String>) -> Result<(String, String), String> {
-    let tokens = token_json(body)?;
-    let access = access_from(&tokens)?;
-    let fresh = tokens["refresh_token"].as_str().map(str::to_string);
-    Ok((access, pick_refresh(fresh, stored)?))
+    access_from(&token_json(&reply.body)?, "Google")
 }
 
 /// The positions file's id in the app folder, if the app ever synced.
@@ -355,7 +269,7 @@ fn upload(access: &str, file_id: Option<&str>, positions: &HashMap<String, Remot
 /// The open book's remote position, if any: a dead transport reports
 /// nothing instead of failing the pull.
 pub fn pull(fingerprint: &str) -> Option<kosync::Progress> {
-    track(pull_inner(fingerprint)).ok().flatten()
+    LAST_ERROR.track(pull_inner(fingerprint)).ok().flatten()
 }
 
 fn pull_inner(fingerprint: &str) -> Result<Option<kosync::Progress>, String> {
@@ -384,7 +298,7 @@ pub fn push(
     device: &str,
     device_id: &str,
 ) -> Result<(), String> {
-    track(push_inner(local, fingerprint, cfi, fraction, device, device_id))
+    LAST_ERROR.track(push_inner(local, fingerprint, cfi, fraction, device, device_id))
 }
 
 fn push_inner(
@@ -416,13 +330,10 @@ fn push_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cloud::pick_refresh;
 
     fn record(cfi: &str, time: u64) -> RemoteRecord {
         RemoteRecord { cfi: cfi.into(), fraction: 0.5, time, device: "phone".into(), device_id: "phone".into() }
-    }
-
-    fn position(cfi: &str, time: u64) -> crate::store::Position {
-        crate::store::Position { cfi: cfi.into(), fraction: 0.5, time }
     }
 
     #[test]
@@ -455,16 +366,16 @@ mod tests {
     fn refresh_answer_carries_no_refresh_token() {
         // What oauth2.googleapis.com answers to a refresh grant: access only.
         let body = br#"{"access_token": "ya29.XXXX", "expires_in": 3599, "scope": "https://www.googleapis.com/auth/drive.appdata", "token_type": "Bearer"}"#;
-        assert_eq!(access_from(&token_json(body).unwrap()).unwrap(), "ya29.XXXX");
-        assert!(tokens(body, None).is_err(), "a code exchange without one still fails");
-        assert_eq!(tokens(body, Some("old".into())), Ok(("ya29.XXXX".into(), "old".into())));
+        assert_eq!(access_from(&token_json(body).unwrap(), "Google").unwrap(), "ya29.XXXX");
+        assert!(tokens(body, None, "Google").is_err(), "a code exchange without one still fails");
+        assert_eq!(tokens(body, Some("old".into()), "Google"), Ok(("ya29.XXXX".into(), "old".into())));
     }
 
     #[test]
     fn reauth_without_a_new_token_keeps_the_kept_one() {
-        assert_eq!(pick_refresh(Some("new".into()), Some("old".into())), Ok("new".into()));
-        assert_eq!(pick_refresh(None, Some("old".into())), Ok("old".into()));
-        assert!(pick_refresh(None, None).is_err());
+        assert_eq!(pick_refresh(Some("new".into()), Some("old".into()), "Google"), Ok("new".into()));
+        assert_eq!(pick_refresh(None, Some("old".into()), "Google"), Ok("old".into()));
+        assert!(pick_refresh(None, None, "Google").is_err());
     }
 
     #[test]
@@ -482,31 +393,6 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(future.positions["fp"].cfi, "a");
-    }
-
-    #[test]
-    fn merge_newest_wins_and_ties_keep_local() {
-        let mut local = HashMap::new();
-        local.insert("new-remote".into(), position("a", 100));
-        local.insert("new-local".into(), position("a", 300));
-        local.insert("tie".into(), position("a", 200));
-        local.insert("local-only".into(), position("a", 50));
-        let mut remote = HashMap::new();
-        remote.insert("new-remote".into(), record("b", 200));
-        remote.insert("new-local".into(), record("b", 100));
-        remote.insert("tie".into(), record("b", 200));
-        remote.insert("remote-only".into(), record("c", 400));
-        let merged = merge_for_upload(&local, &remote, "pc", "pc");
-        assert_eq!(merged["new-remote"].cfi, "b");
-        assert_eq!(merged["new-remote"].device_id, "phone");
-        assert_eq!(merged["new-local"].cfi, "a");
-        assert_eq!(merged["new-local"].device_id, "pc");
-        assert_eq!(merged["tie"].cfi, "a");
-        assert_eq!(merged["local-only"].cfi, "a");
-        assert_eq!(merged["remote-only"].cfi, "c");
-        assert_eq!(merged.len(), 5, "union of both sides");
-        assert!(should_upload(&merged, &remote));
-        assert!(!should_upload(&merge_for_upload(&HashMap::new(), &remote, "pc", "pc"), &remote));
     }
 
     #[test]

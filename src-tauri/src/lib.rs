@@ -3,6 +3,7 @@
 mod catalog;
 mod cli;
 mod clock;
+mod cloud;
 #[cfg(desktop)]
 #[cfg_attr(not(windows), path = "console_stdout.rs")]
 mod console;
