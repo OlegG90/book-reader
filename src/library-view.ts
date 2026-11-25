@@ -61,7 +61,6 @@ interface BookDetails {
   seriesIndex: string | null
   language: string | null
   annotation: string | null
-  hasCover: boolean
   path: string
   size: number
   format: string
@@ -96,7 +95,7 @@ export interface LibraryView {
   /** The book details dialog is open. */
   isDetailsOpen(): boolean
   /** Shows the details dialog for a book, by fingerprint. */
-  showBookDetails(fingerprint: string, title: string, coverKey: string | null): void
+  showBookDetails(fingerprint: string, title: string): void
   /** The organize preview is open. */
   isOrganizeOpen(): boolean
   showScreen(): Promise<void>
@@ -349,7 +348,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     const open = (fromStart = false) =>
       void invoke('open_library_book', { key: book.key, fromStart }).catch(e => deps.showError(book.title, e))
     // A book read before: continue where it was, or start over (asked); a new one just opens.
-    const details = { label: 'Book details', action: () => void showBookDetails(book.fingerprint, book.title, book.hasCover ? book.key : null) }
+    const details = { label: 'Book details', action: () => void showBookDetails(book.fingerprint, book.title) }
     const choices: MenuItem[] =
       status === 'new'
         ? [{ label: 'Open', action: () => open() }, details]
@@ -466,14 +465,11 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
   let detailsKey: string | null = null
 
   /** Shows everything known about a book: metadata, file, catalog origin and cloud presence. */
-  async function showBookDetails(fingerprint: string, title: string, coverKey: string | null) {
+  async function showBookDetails(fingerprint: string, title: string) {
     detailsKey = fingerprint
     $('book-details-title').textContent = title
     $('book-details-rows').replaceChildren()
     $('book-details-annotation').textContent = ''
-    const cover = $('book-details-cover') as HTMLImageElement
-    cover.hidden = true
-    cover.removeAttribute('src')
     $('book-details').hidden = false
     let details: BookDetails | null = null
     try {
@@ -497,16 +493,6 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     row('Fingerprint', details.fingerprint)
     row('From catalog', details.catalogSource ?? 'Not from a catalog')
     if (details.annotation) $('book-details-annotation').textContent = details.annotation
-    if (details.hasCover && coverKey) {
-      try {
-        const bytes = await invoke<ArrayBuffer>('library_cover', { key: coverKey })
-        if (detailsKey !== fingerprint) return
-        cover.src = URL.createObjectURL(new Blob([bytes]))
-        cover.hidden = false
-      } catch (e) {
-        console.warn('details:', e)
-      }
-    }
     void fillCloudState(fingerprint, details.fingerprint)
   }
 
@@ -616,7 +602,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     applyOrganize,
     isOrganizeOpen: organizeOpen,
     isDetailsOpen,
-    showBookDetails: (fingerprint: string, title: string, coverKey: string | null) => void showBookDetails(fingerprint, title, coverKey),
+    showBookDetails: (fingerprint: string, title: string) => void showBookDetails(fingerprint, title),
     showScreen,
     refreshScreen,
     refreshRecent,

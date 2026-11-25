@@ -570,16 +570,6 @@ body:has(#bottombar.shown) :is(#offer, #sync-bar, #cloud-offer) {
   font-size: 16px;
 }
 
-#book-details-body {
-  display: flex;
-  gap: 12px;
-}
-
-#book-details-cover {
-  width: 96px;
-  align-self: flex-start;
-}
-
 #book-details-rows {
   display: grid;
   grid-template-columns: auto 1fr;

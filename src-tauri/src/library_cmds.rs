@@ -304,7 +304,6 @@ pub(crate) struct BookDetails {
     series_index: Option<String>,
     language: Option<String>,
     annotation: Option<String>,
-    has_cover: bool,
     path: String,
     size: u64,
     format: String,
@@ -360,7 +359,6 @@ fn book_details_for(store: &Store, books: &LibraryBooks, fingerprint: &str) -> C
         series_index: entry.book.series_index.clone(),
         language: entry.book.language.clone(),
         annotation,
-        has_cover: entry.cover.is_some(),
         path: entry.path.clone(),
         size: entry.size,
         format: entry.reader().map(|r| r.label().to_string()).unwrap_or_default(),
@@ -482,7 +480,6 @@ mod tests {
         assert_eq!(d.series_index.as_deref(), Some("1"));
         assert_eq!(d.language.as_deref(), Some("en"));
         assert_eq!(d.annotation.as_deref(), Some("Blurb."));
-        assert!(d.has_cover);
         assert_eq!(d.path, "Author/Book.epub");
         assert_eq!(d.size, 10);
         assert_eq!(d.format, "EPUB");
