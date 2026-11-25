@@ -62,6 +62,74 @@ pub fn should_upload(merged: &HashMap<String, RemoteRecord>, remote: &HashMap<St
     merged != remote
 }
 
+/// One book file the cloud keeps, keyed by fingerprint in `BookManifest`.
+/// Same fingerprint means same bytes, so records never conflict.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookRecord {
+    pub name: String,
+    pub size: u64,
+    pub sha256: String,
+}
+
+/// The fingerprint-keyed book manifest envelope; unknown fields are
+/// tolerated on load, for forward compatibility.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct BookManifest {
+    pub version: u32,
+    #[serde(default)]
+    pub books: HashMap<String, BookRecord>,
+}
+
+/// Parses a cloud book manifest.
+pub fn parse_manifest(bytes: &[u8]) -> Result<HashMap<String, BookRecord>, String> {
+    let manifest: BookManifest =
+        serde_json::from_slice(bytes).map_err(|e| format!("book manifest is not ours: {e}"))?;
+    Ok(manifest.books)
+}
+
+/// Renders a cloud book manifest.
+pub fn render_manifest(books: &HashMap<String, BookRecord>) -> Result<Vec<u8>, String> {
+    let manifest = BookManifest { version: BOOKS_VERSION, books: books.clone() };
+    serde_json::to_vec(&manifest).map_err(|e| e.to_string())
+}
+
+/// The manifest envelope version, shared by every cloud transport.
+pub const BOOKS_VERSION: u32 = 1;
+
+/// The cloud file name for a book: fingerprint first (unique), then the
+/// library name made path-safe (it can hold folders). The manifest maps
+/// the fingerprint back, so the name is only a hint.
+pub fn remote_book_name(fingerprint: &str, name: &str) -> String {
+    let safe: String = name
+        .chars()
+        .map(|c| if c == '/' || c == '\\' || c.is_control() { '_' } else { c })
+        .collect();
+    format!("book-{fingerprint}-{safe}")
+}
+
+/// Uploads a book file the cloud manifest lacks, then records it: the
+/// fingerprint means same bytes, so an entry already there means nothing to
+/// do. The manifest is re-read before writing, so two devices uploading at
+/// once keep both books.
+pub fn push_book_missing(
+    fingerprint: &str,
+    record: &BookRecord,
+    bytes: &[u8],
+    manifest: impl Fn() -> Option<HashMap<String, BookRecord>>,
+    upload: impl Fn(&str, &[u8]) -> Result<(), String>,
+    store: impl Fn(&HashMap<String, BookRecord>) -> Result<(), String>,
+) -> Result<bool, String> {
+    if manifest().is_some_and(|books| books.contains_key(fingerprint)) {
+        return Ok(false);
+    }
+    upload(&remote_book_name(fingerprint, &record.name), bytes)?;
+    let mut fresh = manifest().unwrap_or_default();
+    fresh.entry(fingerprint.into()).or_insert_with(|| record.clone());
+    store(&fresh)?;
+    Ok(true)
+}
+
 /// Parses a token endpoint answer.
 pub fn token_json(body: &[u8]) -> Result<serde_json::Value, String> {
     serde_json::from_slice(body).map_err(|e| format!("login: {e}"))
@@ -158,5 +226,31 @@ mod tests {
         let mut changed = merged.clone();
         changed.get_mut("tie").unwrap().cfi = "z".into();
         assert!(should_upload(&changed, &remote));
+    }
+
+    fn book_record(name: &str) -> BookRecord {
+        BookRecord { name: name.into(), size: 10, sha256: "abc".into() }
+    }
+
+    #[test]
+    fn manifest_round_trips_with_unknown_fields_tolerated() {
+        let mut books = HashMap::new();
+        books.insert("fp".into(), book_record("Author/Book.epub"));
+        let back = parse_manifest(&render_manifest(&books).unwrap()).unwrap();
+        assert_eq!(back["fp"], book_record("Author/Book.epub"));
+        let future: BookManifest = serde_json::from_value(serde_json::json!({
+            "version": 2,
+            "books": { "fp": { "name": "a", "size": 1, "sha256": "b" } },
+            "future": true,
+        }))
+        .unwrap();
+        assert_eq!(future.books["fp"].name, "a");
+    }
+
+    #[test]
+    fn remote_names_are_unique_and_path_safe() {
+        assert_eq!(remote_book_name("fp", "Author/Book.epub"), "book-fp-Author_Book.epub");
+        assert_eq!(remote_book_name("fp", "a\\b"), "book-fp-a_b");
+        assert_ne!(remote_book_name("fp1", "Book.epub"), remote_book_name("fp2", "Book.epub"));
     }
 }

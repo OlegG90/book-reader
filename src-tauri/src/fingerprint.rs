@@ -20,10 +20,30 @@ pub fn fingerprint(path: &Path) -> io::Result<String> {
     Ok(format!("{size:x}-{hex}"))
 }
 
+/// The file's full SHA-256, streamed: the fingerprint above covers only the
+/// head, so this proves the bytes the cloud keeps.
+pub fn full_sha256(path: &Path) -> io::Result<String> {
+    let mut file = File::open(path)?;
+    let mut hash = Sha256::new();
+    io::copy(&mut file, &mut hash)?;
+    Ok(format!("{:x}", hash.finalize()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn full_sha256_matches_the_known_vector() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.epub");
+        fs::write(&a, b"abc").unwrap();
+        assert_eq!(
+            full_sha256(&a).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 
     #[test]
     fn same_content_same_fingerprint_regardless_of_name() {
