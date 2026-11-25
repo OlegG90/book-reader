@@ -5,7 +5,7 @@ import type { Settings } from './settings'
 
 function setup(view: View | null, catalogsBack = false, seriesBack = false, hasBook = false) {
   // As on the library screen, where the settings sit in the content.
-  document.body.innerHTML = '<div id="settings" class="embedded"></div><div id="cloud-offer" hidden><span id="cloud-offer-text"></span><span id="cloud-offer-buttons"><button id="cloud-download">Download</button><button id="cloud-later">Not now</button></span></div>'
+  document.body.innerHTML = '<div id="settings" class="embedded"></div><div id="cloud-offer" hidden><span id="cloud-offer-text"></span><span id="cloud-offer-buttons"><button id="cloud-download">Download</button><button id="cloud-later">Not now</button></span></div><section id="book-details" hidden><h2 id="book-details-title"></h2><dl id="book-details-rows"></dl><p id="book-details-annotation"></p><p class="book-details-actions"><button id="book-details-close">Close</button></p></section>'
   const shown: View[] = []
   const deps: LibraryDeps = {
     getSettings: () => ({}) as Settings,

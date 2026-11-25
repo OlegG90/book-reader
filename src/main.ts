@@ -250,7 +250,7 @@ function closeTopLayer() {
   if (closePopup()) return true
   const open = reading.book
   if (open?.footnoteOpen) open.hideFootnote()
-  else if (tocOpen() || library.isOrganizeOpen() || settingsOpen() || scrimlessOpen()) closePanels()
+  else if (tocOpen() || library.isOrganizeOpen() || library.isDetailsOpen() || settingsOpen() || scrimlessOpen()) closePanels()
   else return false
   return true
 }
@@ -339,6 +339,7 @@ function closePanels() {
   $('scrim').hidden = true
   $('organize').hidden = true
   $('toc').hidden = true
+  $('book-details').hidden = true
   if (!library.isSettingsEmbedded()) $('settings').hidden = true
   $('appearance').hidden = true
   $('settings-button').setAttribute('aria-expanded', 'false')
@@ -795,6 +796,9 @@ $('flow-button').addEventListener('click', () => runCommand('toggleFlow'))
 $('bookmark-button').addEventListener('click', () => runCommand('bookmark'))
 $('fullscreen-button').addEventListener('click', () => runCommand('fullscreen'))
 $('more-button').addEventListener('click', toggleMoreMenu)
+$('book-details-button').addEventListener('click', () => {
+  if (reading.book) library.showBookDetails(reading.fingerprint, $('topbar-book').textContent || 'Book')
+})
 // A chosen item closes the menu (its own handler above does the work).
 $('more-menu').addEventListener('click', e => {
   if ((e.target as Element).closest('button')) closeMoreMenu()

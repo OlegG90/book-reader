@@ -3,6 +3,7 @@ import { filterBooks, groupSeries, seriesLabel, sortBooks, statusOf, type Librar
 
 const book = (overrides: Partial<LibraryBook>): LibraryBook => ({
   key: overrides.title ?? 'key',
+  fingerprint: overrides.key ?? 'fp',
   title: '',
   authors: [],
   authorSort: '',

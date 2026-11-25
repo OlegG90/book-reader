@@ -300,6 +300,11 @@ fn upload_bytes(access: &str, file_id: Option<&str>, name: &str, data: &[u8]) ->
     store_bytes(access, file_id, metadata, data.to_vec(), "application/octet-stream")
 }
 
+/// The cloud's book manifest, distinguishing "not there yet" from failure.
+pub fn manifest_checked() -> Result<Option<HashMap<String, BookRecord>>, String> {
+    manifest_map()
+}
+
 /// The cloud's book manifest, if the app ever synced books.
 pub fn book_manifest() -> Option<HashMap<String, BookRecord>> {
     LAST_ERROR.track(manifest_map()).ok().flatten()

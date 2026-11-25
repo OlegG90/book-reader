@@ -182,6 +182,11 @@ fn upload(access: &str, positions: &HashMap<String, RemoteRecord>) -> Result<(),
     upload_bytes(access, FILE_PATH, &body)
 }
 
+/// The cloud's book manifest, distinguishing "not there yet" from failure.
+pub fn manifest_checked() -> Result<Option<HashMap<String, BookRecord>>, String> {
+    manifest_map()
+}
+
 /// The cloud's book manifest, if the app ever synced books.
 pub fn book_manifest() -> Option<HashMap<String, BookRecord>> {
     LAST_ERROR.track(manifest_map()).ok().flatten()

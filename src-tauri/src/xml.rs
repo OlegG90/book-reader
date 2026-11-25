@@ -20,24 +20,40 @@ pub enum Xml<'a> {
 }
 
 /// Walks an XML document, reporting element starts, text and element ends
-/// (an empty element, `<a/>`, reports its start only).
+/// (an empty element, `<a/>`, reports its start only). Neighbouring text
+/// (plain text and `&...;` references) arrives as one event, so markup
+/// split across entities does not fragment words.
 pub fn walk_xml(xml: &str, mut on: impl FnMut(Xml)) -> io::Result<()> {
     let mut reader = Reader::from_str(xml);
     let mut stack: Vec<String> = Vec::new();
+    let mut text = String::new();
+    macro_rules! flush {
+        () => {
+            if !text.is_empty() {
+                let chunk = std::mem::take(&mut text);
+                on(Xml::Text(&stack, &chunk));
+            }
+        };
+    }
     loop {
         match reader.read_event().map_err(invalid)? {
             Event::Start(e) => {
+                flush!();
                 on(Xml::Start(&stack, &e));
                 stack.push(local_name(&e));
             }
-            Event::Empty(e) => on(Xml::Start(&stack, &e)),
+            Event::Empty(e) => {
+                flush!();
+                on(Xml::Start(&stack, &e));
+            }
             Event::End(_) => {
+                flush!();
                 if let Some(name) = stack.pop() {
                     on(Xml::End(&stack, &name));
                 }
             }
-            Event::Text(t) => on(Xml::Text(&stack, &t.decode().map_err(invalid)?)),
-            Event::CData(t) => on(Xml::Text(&stack, &t.decode().map_err(invalid)?)),
+            Event::Text(t) => text.push_str(&t.decode().map_err(invalid)?),
+            Event::CData(t) => text.push_str(&t.decode().map_err(invalid)?),
             Event::GeneralRef(r) => {
                 let named = r.decode().map_err(invalid)?;
                 let c = r.resolve_char_ref().ok().flatten().or(match named.as_ref() {
@@ -49,10 +65,13 @@ pub fn walk_xml(xml: &str, mut on: impl FnMut(Xml)) -> io::Result<()> {
                     _ => None,
                 });
                 if let Some(c) = c {
-                    on(Xml::Text(&stack, c.encode_utf8(&mut [0; 4])));
+                    text.push(c);
                 }
             }
-            Event::Eof => return Ok(()),
+            Event::Eof => {
+                flush!();
+                return Ok(());
+            }
             _ => {}
         }
     }

@@ -152,6 +152,7 @@ export function createCatalogView(deps: CatalogViewDeps) {
             id: source.id,
             url: file.href,
             format: file.format,
+            summary: book.summary,
           })
           // The book is in the library now (or was already): offer to read it.
           action.disabled = false

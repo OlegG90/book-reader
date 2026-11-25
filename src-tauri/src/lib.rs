@@ -120,6 +120,8 @@ pub fn run() {
             library_cmds::set_library,
             library_cmds::scan_library,
             library_cmds::library_cover,
+            library_cmds::book_details,
+            library_cmds::book_cloud,
             library_cmds::open_library_book,
             system_cmds::show_library,
             system_cmds::leave_app,

@@ -154,6 +154,8 @@ mod tests {
             authors: authors.to_vec(),
             series: series.map(Into::into),
             series_index: index.map(Into::into),
+            language: None,
+            annotation: None,
         };
         template_path(&book, extension)
     }

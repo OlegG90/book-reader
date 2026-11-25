@@ -121,6 +121,7 @@
         <button id="more-button" class="icon on-bottom" title="More" aria-label="More" aria-haspopup="menu"><svg class="icon" aria-hidden="true"><use href="#i-ellipsis"/></svg></button>
       </div>
       <div id="more-menu" role="menu" hidden>
+        <button id="book-details-button" class="reader-only" role="menuitem">Book details</button>
         <button id="shortcuts-button" class="desktop-only" role="menuitem">Shortcuts</button>
         <button id="about-button" role="menuitem">About</button>
         <button id="fullscreen-button" class="desktop-only reader-only" role="menuitem">Full screen <kbd>F11</kbd></button>
@@ -192,6 +193,13 @@
         <button id="cloud-later">Not now</button>
       </span>
     </div>
+
+    <section id="book-details" role="dialog" aria-labelledby="book-details-title" hidden>
+      <h2 id="book-details-title"></h2>
+      <dl id="book-details-rows"></dl>
+      <p id="book-details-annotation"></p>
+      <p class="book-details-actions"><button id="book-details-close" class="primary">Close</button></p>
+    </section>
 
     <section id="organize" role="dialog" aria-labelledby="organize-title" hidden>
       <h2 id="organize-title">Organize library</h2>

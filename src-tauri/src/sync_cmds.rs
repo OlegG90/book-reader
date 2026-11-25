@@ -258,13 +258,13 @@ pub(crate) fn sync_pull_all(store: State<Store>) -> CmdResult<usize> {
 }
 
 fn pull_all_clouds(store: &Store) -> CmdResult<usize> {
-    let device = device_id(&store)?;
+    let device = device_id(store)?;
     let mut updated = 0;
     for t in transports() {
         if !store.read(|s| t.enabled(s)) {
             continue;
         }
-        if let Some(remote) = t.remote(&store) {
+        if let Some(remote) = t.remote(store) {
             store
                 .update(|s| {
                     updated += merge_remote(&mut s.positions, &remote, &device);
@@ -285,11 +285,11 @@ pub(crate) fn sync_push_book(store: State<Store>, books: State<LibraryBooks>, fi
 }
 
 fn push_book_to_cloud(store: &Store, books: &LibraryBooks, fingerprint: &str) -> CmdResult<bool> {
-    if !book_transfer_allowed(&store) {
+    if !book_transfer_allowed(store) {
         return Ok(false);
     }
-    let root = library_root(&store)?;
-    let entry = books.snapshot(&store, &root).into_iter().find(|b| b.fingerprint == fingerprint);
+    let root = library_root(store)?;
+    let entry = books.snapshot(store, &root).into_iter().find(|b| b.fingerprint == fingerprint);
     let Some(entry) = entry else { return Ok(false) };
     let path = entry.absolute(&root);
     // The scan may be older than the file: never upload changed bytes.
@@ -311,7 +311,7 @@ fn push_book_to_cloud(store: &Store, books: &LibraryBooks, fingerprint: &str) ->
         if !t.connected() {
             continue;
         }
-        pushed |= t.push_book(&fingerprint, &record, &bytes).map_err(|e| e.to_string())?;
+        pushed |= t.push_book(fingerprint, &record, &bytes).map_err(|e| e.to_string())?;
     }
     Ok(pushed)
 }
@@ -365,8 +365,8 @@ pub(crate) fn sync_missing_books(store: State<Store>, books: State<LibraryBooks>
 }
 
 fn missing_cloud_books(store: &Store, books: &LibraryBooks) -> CmdResult<Vec<MissingBook>> {
-    let root = library_root(&store)?;
-    let local: BTreeSet<String> = books.snapshot(&store, &root).into_iter().map(|b| b.fingerprint).collect();
+    let root = library_root(store)?;
+    let local: BTreeSet<String> = books.snapshot(store, &root).into_iter().map(|b| b.fingerprint).collect();
     let mut manifests = Vec::new();
     for t in transports() {
         if !store.read(|s| t.enabled(s)) || !t.connected() {
@@ -422,23 +422,23 @@ pub(crate) fn sync_pull_book(store: State<Store>, fingerprint: String) -> CmdRes
 }
 
 fn pull_book_from_cloud(store: &Store, fingerprint: &str) -> CmdResult<bool> {
-    if !book_transfer_allowed(&store) {
+    if !book_transfer_allowed(store) {
         return Ok(false);
     }
-    let root = library_root(&store)?;
+    let root = library_root(store)?;
     for t in transports() {
         if !store.read(|s| t.enabled(s)) || !t.connected() {
             continue;
         }
         let Some(manifest) = t.books() else { continue };
         let Some(record) = manifest.get(fingerprint) else { continue };
-        let remote_name = crate::cloud::remote_book_name(&fingerprint, &record.name);
+        let remote_name = crate::cloud::remote_book_name(fingerprint, &record.name);
         let Some(bytes) = t.pull_book(&remote_name).map_err(|e| e.to_string())? else { continue };
         // Same bytes as recorded, or nothing lands in the library.
         if fingerprint::sha256_bytes(&bytes) != record.sha256 {
             return Err("The cloud copy failed its hash check.".into());
         }
-        let Some(dest) = place_book(&root, &record.name, &fingerprint)? else { return Ok(false) };
+        let Some(dest) = place_book(&root, &record.name, fingerprint)? else { return Ok(false) };
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
@@ -903,7 +903,7 @@ mod tests {
                 size: content.len() as u64,
                 modified: 0,
                 fingerprint: crate::fingerprint::fingerprint(&path).unwrap(),
-                book: crate::metadata::Book { title: name.to_string(), authors: Vec::new(), series: None, series_index: None },
+                book: crate::metadata::Book { title: name.to_string(), authors: Vec::new(), series: None, series_index: None, language: None, annotation: None },
                 cover: None,
                 added: 0,
             });

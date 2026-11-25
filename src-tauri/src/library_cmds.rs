@@ -105,6 +105,15 @@ impl LibraryBooks {
         self.0.lock().unwrap().entries.iter().find(|b| b.path == key).cloned()
     }
 
+    /// The entry with a fingerprint, in the library or its disk cache.
+    pub(crate) fn find_by_fingerprint(&self, store: &Store, fingerprint: &str) -> Option<library::Entry> {
+        if let Some(entry) = self.0.lock().unwrap().entries.iter().find(|b| b.fingerprint == fingerprint).cloned() {
+            return Some(entry);
+        }
+        let root = library_root(store).ok()?;
+        self.cached(store, &root).into_iter().find(|b| b.fingerprint == fingerprint)
+    }
+
     /// The last scan's books from the disk cache, for the pre-scan run.
     pub(crate) fn cached(&self, store: &Store, root: &Path) -> Vec<library::Entry> {
         library_cache(store).load(root)
@@ -192,6 +201,8 @@ pub(crate) fn set_library(window: Window, store: State<Store>, books: State<Libr
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LibraryBook {
     key: String,
+    /// The book's content identity, for sync and details from any window.
+    fingerprint: String,
     title: String,
     /// "First Last", one per author.
     authors: Vec<String>,
@@ -231,6 +242,7 @@ pub(crate) fn scan_library(app: AppHandle, store: State<Store>, books: State<Lib
             .iter()
             .map(|e| LibraryBook {
                 key: e.path.clone(),
+                fingerprint: e.fingerprint.clone(),
                 title: e.book.title.clone(),
                 authors: e.book.authors.iter().map(metadata::Author::display).collect(),
                 author_sort: e.book.authors.first().map(metadata::Author::sort_name).unwrap_or_default(),
@@ -259,6 +271,254 @@ pub(crate) fn library_cover(store: State<Store>, books: State<LibraryBooks>, key
         }
     };
     std::fs::read(library_cache(&store).covers().join(cover)).map(Response::new).map_err(|e| e.to_string())
+}
+
+/// Whether the cloud holds the book: recorded, missing, never checked
+/// (no login or a failed fetch), or switched off with its module.
+#[derive(Serialize, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum CloudState {
+    Synced,
+    Absent,
+    Unknown,
+    Off,
+}
+
+/// One cloud's verdict for the details dialog.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CloudStatus {
+    id: &'static str,
+    label: String,
+    state: CloudState,
+}
+
+/// Everything the details dialog shows about one library book, except the
+/// cloud verdicts (those arrive separately, as they may wait on the network).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BookDetails {
+    title: String,
+    authors: Vec<String>,
+    series: Option<String>,
+    series_index: Option<String>,
+    language: Option<String>,
+    annotation: Option<String>,
+    path: String,
+    size: u64,
+    format: String,
+    fingerprint: String,
+    catalog_source: Option<String>,
+}
+
+/// One cloud's verdict for the book: off when its module is off, unknown
+/// without a login or when the manifest cannot be fetched, otherwise
+/// recorded or not.
+fn cloud_state(
+    off: bool,
+    connected: bool,
+    manifest: Result<Option<HashMap<String, crate::cloud::BookRecord>>, String>,
+    fingerprint: &str,
+) -> CloudState {
+    if off {
+        CloudState::Off
+    } else if !connected {
+        CloudState::Unknown
+    } else {
+        match manifest {
+            Err(_) => CloudState::Unknown,
+            Ok(None) => CloudState::Absent,
+            Ok(Some(books)) => {
+                if books.contains_key(fingerprint) {
+                    CloudState::Synced
+                } else {
+                    CloudState::Absent
+                }
+            }
+        }
+    }
+}
+
+/// The details dialog's contents for one library book, by fingerprint: the
+/// reading window knows only that, so both windows share this command.
+/// Nothing touches the network; the cloud verdicts come separately.
+#[tauri::command(async)]
+pub(crate) fn book_details(store: State<Store>, books: State<LibraryBooks>, fingerprint: String) -> CmdResult<BookDetails> {
+    book_details_for(&store, &books, &fingerprint)
+}
+
+fn book_details_for(store: &Store, books: &LibraryBooks, fingerprint: &str) -> CmdResult<BookDetails> {
+    let entry = books.find_by_fingerprint(store, fingerprint).ok_or("That book is no longer in the library")?;
+    // The file's own blurb wins; a catalog summary fills the gap for books
+    // whose files carry none.
+    let annotation = entry.book.annotation.clone().or_else(|| store.read(|s| s.book_blurbs.get(&entry.fingerprint).cloned()));
+    Ok(BookDetails {
+        title: entry.book.title.clone(),
+        authors: entry.book.authors.iter().map(|a| a.display()).collect(),
+        series: entry.book.series.clone(),
+        series_index: entry.book.series_index.clone(),
+        language: entry.book.language.clone(),
+        annotation,
+        path: entry.path.clone(),
+        size: entry.size,
+        format: entry.reader().map(|r| r.label().to_string()).unwrap_or_default(),
+        fingerprint: entry.fingerprint.clone(),
+        catalog_source: store.read(|s| s.book_sources.get(&entry.fingerprint).cloned()),
+    })
+}
+
+/// A cloud manifest fetch, for the details dialog.
+type ManifestFetch = fn() -> Result<Option<HashMap<String, crate::cloud::BookRecord>>, String>;
+
+/// One cloud transport for the details dialog: its module, connection check
+/// and manifest fetch.
+type CloudTransport = (&'static str, fn() -> bool, ManifestFetch);
+
+/// The cloud verdicts for one fingerprint, for the details dialog. Slow when
+/// the login is stale (the manifest fetch has the network timeout); the
+/// dialog shows local details first and fills these in on arrival.
+#[tauri::command(async)]
+pub(crate) fn book_cloud(store: State<Store>, fingerprint: String) -> CmdResult<Vec<CloudStatus>> {
+    book_cloud_for(&store, &fingerprint)
+}
+
+fn book_cloud_for(store: &Store, fingerprint: &str) -> CmdResult<Vec<CloudStatus>> {
+    let labels: HashMap<&str, &str> = store.read(modules::list).into_iter().map(|m| (m.id, m.label)).collect();
+    let clouds: [CloudTransport; 2] = [
+        ("capability:dropbox", crate::dropbox::is_connected, crate::dropbox::manifest_checked),
+        ("capability:googledrive", crate::google::is_connected, crate::google::manifest_checked),
+    ];
+    let mut out = Vec::new();
+    for (module, connected, manifest) in clouds {
+        let off = store.read(|s| modules::is_off(s, module));
+        out.push(CloudStatus {
+            id: module,
+            label: labels.get(module).copied().unwrap_or(module).into(),
+            state: cloud_state(off, connected(), manifest(), fingerprint),
+        });
+    }
+    Ok(out)
+}
+
+/// Remembers which catalog a book came from and what it said about it, for
+/// the details dialog. Best-effort: a good download must not fail over
+/// bookkeeping.
+pub(crate) fn record_book_source(store: &Store, fingerprint: &str, source: &str, blurb: Option<&str>) -> CmdResult<()> {
+    store
+        .update(|s| {
+            s.book_sources.insert(fingerprint.into(), source.into());
+            if let Some(text) = blurb.map(str::trim).filter(|t| !t.is_empty()) {
+                s.book_blurbs.insert(fingerprint.into(), text.into());
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metadata::{Author, Book};
+    use std::collections::HashMap;
+
+    fn bookish_state() -> (tempfile::TempDir, Store, LibraryBooks) {
+        bookish_state_with(Some("Blurb."))
+    }
+
+    fn bookish_state_with(annotation: Option<&str>) -> (tempfile::TempDir, Store, LibraryBooks) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::load(dir.path().join("breader.json"));
+        store
+            .update(|s| {
+                s.settings.insert("disabledModules".into(), serde_json::json!(["capability:dropbox", "capability:googledrive"]));
+            })
+            .unwrap();
+        let books = LibraryBooks::default();
+        books.replace(
+            vec![crate::library::Entry {
+                path: "Author/Book.epub".into(),
+                size: 10,
+                modified: 0,
+                fingerprint: "fp1".into(),
+                book: Book {
+                    title: "T".into(),
+                    authors: vec![Author { first: "A".into(), last: "B".into() }],
+                    series: Some("S".into()),
+                    series_index: Some("1".into()),
+                    language: Some("en".into()),
+                    annotation: annotation.map(str::to_string),
+                },
+                cover: Some("fp1.jpg".into()),
+                added: 0,
+            }],
+            dir.path(),
+        );
+        (dir, store, books)
+    }
+
+    #[test]
+    fn cloud_state_names_every_case() {
+        let books: HashMap<String, crate::cloud::BookRecord> =
+            [("fp".into(), crate::cloud::BookRecord { name: "a".into(), size: 1, sha256: "s".into() })]
+                .into_iter()
+                .collect();
+        assert_eq!(cloud_state(true, true, Ok(Some(books.clone())), "fp"), CloudState::Off);
+        assert_eq!(cloud_state(false, false, Ok(Some(books.clone())), "fp"), CloudState::Unknown);
+        assert_eq!(cloud_state(false, true, Err("down".into()), "fp"), CloudState::Unknown);
+        assert_eq!(cloud_state(false, true, Ok(None), "fp"), CloudState::Absent);
+        assert_eq!(cloud_state(false, true, Ok(Some(books.clone())), "fp"), CloudState::Synced);
+        assert_eq!(cloud_state(false, true, Ok(Some(books)), "other"), CloudState::Absent);
+    }
+
+    #[test]
+    fn book_details_names_everything() {
+        let (_dir, store, books) = bookish_state();
+        record_book_source(&store, "fp1", "CWA", None).unwrap();
+        let d = book_details_for(&store, &books, "fp1").unwrap();
+        assert_eq!(d.title, "T");
+        assert_eq!(d.authors, vec!["A B".to_string()]);
+        assert_eq!(d.series.as_deref(), Some("S"));
+        assert_eq!(d.series_index.as_deref(), Some("1"));
+        assert_eq!(d.language.as_deref(), Some("en"));
+        assert_eq!(d.annotation.as_deref(), Some("Blurb."));
+        assert_eq!(d.path, "Author/Book.epub");
+        assert_eq!(d.size, 10);
+        assert_eq!(d.format, "EPUB");
+        assert_eq!(d.fingerprint, "fp1");
+        assert_eq!(d.catalog_source.as_deref(), Some("CWA"));
+    }
+
+    #[test]
+    fn record_book_source_remembers_the_catalog() {
+        let (_dir, store, _books) = bookish_state();
+        record_book_source(&store, "fp9", "CWA", Some("A blurb.  ")).unwrap();
+        assert_eq!(store.read(|s| s.book_sources.get("fp9").cloned()).as_deref(), Some("CWA"));
+        assert_eq!(store.read(|s| s.book_blurbs.get("fp9").cloned()).as_deref(), Some("A blurb."));
+        record_book_source(&store, "fp8", "CWA", Some("   ")).unwrap();
+        assert_eq!(store.read(|s| s.book_blurbs.get("fp8").cloned()), None);
+    }
+
+    #[test]
+    fn book_details_falls_back_to_the_catalog_blurb() {
+        let (_dir, store, books) = bookish_state_with(None);
+        store.update(|s| { s.book_blurbs.insert("fp1".into(), "Catalog says hi.".into()); }).unwrap();
+        let d = book_details_for(&store, &books, "fp1").unwrap();
+        assert_eq!(d.annotation.as_deref(), Some("Catalog says hi."));
+    }
+
+    #[test]
+    fn book_details_refuses_a_missing_book() {
+        let (_dir, store, books) = bookish_state();
+        assert!(book_details_for(&store, &books, "Missing/Book.epub").is_err());
+    }
+
+    #[test]
+    fn book_cloud_is_off_with_the_modules() {
+        let (_dir, store, _books) = bookish_state();
+        let cloud = book_cloud_for(&store, "fp1").unwrap();
+        assert_eq!(cloud.len(), 2);
+        assert!(cloud.iter().all(|c| c.state == CloudState::Off));
+        assert_eq!(cloud[0].id, "capability:dropbox");
+    }
 }
 
 /// Opens a library book: in a window of its own, or on a phone in its one window.
@@ -298,7 +558,7 @@ pub(crate) fn delete_library_book(app: AppHandle, store: State<Store>, books: St
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Added {
     /// Where the book is now, inside the library.
-    path: String,
+    pub(crate) path: String,
     /// The library already held this book, so nothing was copied or moved.
     existed: bool,
     /// Moved, but the original (a phone's document) couldn't be deleted.

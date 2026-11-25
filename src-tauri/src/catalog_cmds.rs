@@ -2,8 +2,9 @@
 
 use crate::catalog;
 use crate::clock;
+use crate::fingerprint;
 use crate::formats;
-use crate::library_cmds::{put_in_library, AddMode, Added, LibraryBooks, CACHE_DIR};
+use crate::library_cmds::{library_root, put_in_library, record_book_source, AddMode, Added, LibraryBooks, CACHE_DIR};
 use crate::modules;
 use crate::opds;
 use crate::platform::{Active, Platform};
@@ -149,6 +150,7 @@ pub(crate) fn catalog_download(
     id: String,
     url: String,
     format: opds::FileFormat,
+    blurb: Option<String>,
 ) -> CmdResult<Added> {
     store.read(|s| modules::require(s, "capability:catalogs"))?;
     let source = source_by_id(&store, &id)?;
@@ -160,6 +162,13 @@ pub(crate) fn catalog_download(
     // Left behind when the library already had the book, or on a failure.
     let _ = std::fs::remove_file(&file);
     let added = result?.added;
+    // Remember where the book came from, for its details. Best-effort:
+    // a good download must not fail over bookkeeping.
+    if let Ok(path) = library_root(&store).map(|root| root.join(&added.path)) {
+        if let Ok(fp) = fingerprint::fingerprint(&path) {
+            let _ = record_book_source(&store, &fp, &source.name, blurb.as_deref());
+        }
+    }
     let _ = app.emit("library-updated", ());
     Ok(added)
 }
