@@ -173,9 +173,18 @@ pub fn pull(fingerprint: &str) -> Option<kosync::Progress> {
     LAST_ERROR.track(pull_inner(fingerprint)).ok().flatten()
 }
 
-fn pull_inner(fingerprint: &str) -> Result<Option<kosync::Progress>, String> {
+/// The cloud's whole positions file, if the app ever synced.
+pub fn remote_positions() -> Option<HashMap<String, RemoteRecord>> {
+    LAST_ERROR.track(remote_map()).ok().flatten()
+}
+
+fn remote_map() -> Result<Option<HashMap<String, RemoteRecord>>, String> {
     let access = access_token()?;
-    let remote = download(&access)?;
+    download(&access)
+}
+
+fn pull_inner(fingerprint: &str) -> Result<Option<kosync::Progress>, String> {
+    let remote = remote_map()?;
     // `time` is ms here like locally; KOSync counts seconds.
     Ok(remote.as_ref().and_then(|positions| positions.get(fingerprint)).map(|r| kosync::Progress {
         progress: r.cfi.clone(),
