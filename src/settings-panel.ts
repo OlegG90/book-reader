@@ -43,10 +43,13 @@ export interface ModuleInfo {
 export const CLOUD_PROVIDERS = [
   { id: 'dropbox', label: 'Dropbox', available: true },
   { id: 'onedrive', label: 'OneDrive', available: false },
-  { id: 'google', label: 'Google Drive', available: false },
+  { id: 'google', label: 'Google Drive', available: true },
 ] as const
 /** Which cloud `connectCloud` connects; unavailable ones stay picked but never sent. */
 export type CloudProviderId = (typeof CLOUD_PROVIDERS)[number]['id']
+
+/** The Modules switch behind a cloud picker entry. */
+export const cloudModuleId = (id: string) => (id === 'google' ? 'capability:googledrive' : `capability:${id}`)
 
 /** Buttons in the settings page that act instead of changing a value. */
 export interface PanelActions {
@@ -240,12 +243,24 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const cloudConnect = el('button', { type: 'button', textContent: 'Connect' })
   // Whether a cloud is connected: the Add row locks while one is.
   let cloudConnected = false
-  // The picker never sends an unavailable cloud: the button stays disabled on one.
+  // The modules switched off; a cloud whose module is off cannot connect.
+  let modulesOff = [...initial.disabledModules]
   const pickedCloud = () => CLOUD_PROVIDERS.find(p => p.id === cloudSelect.value) ?? CLOUD_PROVIDERS[0]
   const refreshCloudAdd = () => {
     const picked = pickedCloud()
-    cloudAddHint.textContent = cloudConnected ? 'Disconnect to switch clouds.' : picked.available ? '' : 'Coming soon — not available yet.'
-    cloudConnect.disabled = !picked.available || cloudConnected
+    const off = modulesOff.includes(cloudModuleId(picked.id))
+    for (const option of cloudSelect.options) {
+      const entry = CLOUD_PROVIDERS.find(p => p.id === option.value)
+      if (entry) option.disabled = !entry.available || modulesOff.includes(cloudModuleId(entry.id))
+    }
+    cloudAddHint.textContent = cloudConnected
+      ? 'Disconnect to switch clouds.'
+      : !picked.available
+        ? 'Coming soon — not available yet.'
+        : off
+          ? `Turn on ${picked.label} in Modules to connect.`
+          : ''
+    cloudConnect.disabled = !picked.available || off || cloudConnected
     cloudSelect.disabled = cloudConnected
   }
   cloudSelect.onchange = refreshCloudAdd
@@ -444,6 +459,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     historyLength.value = String(values.historyLength)
     uiFont.value = values.uiFont
     for (const [id, box] of moduleBoxes) box.checked = !values.disabledModules.includes(id)
+    modulesOff = [...values.disabledModules]
+    refreshCloudAdd()
   }
 
   /** Asks for the latest release and says what it found; a newer one gets a button to its page. */

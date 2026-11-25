@@ -49,7 +49,8 @@ impl Transport for Kosync {
     }
 
     fn enabled(&self, state: &store::State) -> bool {
-        // Mirrors the requires edge: KOSync works through the catalog server,
+        // KOSync works through the catalog server (its own transport rule,
+        // not a module edge, so clouds survive catalogs being turned off),
         // and needs a source marked for sync.
         !modules::is_off(state, "capability:progress-sync")
             && !modules::is_off(state, "capability:catalogs")
@@ -94,12 +95,36 @@ impl Transport for Dropbox {
     }
 }
 
+/// Progress sync through the reader's Google Drive (see google.rs).
+struct Google;
+
+impl Transport for Google {
+    fn id(&self) -> &'static str {
+        "google"
+    }
+
+    fn enabled(&self, state: &store::State) -> bool {
+        !modules::is_off(state, "capability:progress-sync") && !modules::is_off(state, "capability:googledrive")
+    }
+
+    fn pull(&self, _store: &Store, book: &BookKey) -> Result<Option<kosync::Progress>, String> {
+        Ok(crate::google::pull(book.fingerprint))
+    }
+
+    fn push(&self, store: &Store, book: &BookKey, cfi: &str, fraction: f64) -> Result<(), String> {
+        let local = store.read(|s| s.positions.clone());
+        let device_id = device_id(store)?;
+        crate::google::push(&local, book.fingerprint, cfi, fraction, DEVICE_NAME, &device_id)
+    }
+}
+
 static KOSYNC: Kosync = Kosync;
 static DROPBOX: Dropbox = Dropbox;
+static GOOGLE: Google = Google;
 
 /// Every transport, in merge order (first wins timestamp ties).
-fn transports() -> [&'static dyn Transport; 2] {
-    [&KOSYNC, &DROPBOX]
+fn transports() -> [&'static dyn Transport; 3] {
+    [&KOSYNC, &DROPBOX, &GOOGLE]
 }
 
 /// The newest remote position across the transports. A transport that fails
@@ -262,7 +287,7 @@ pub(crate) fn sync_push(
 
 #[cfg(test)]
 mod tests {
-    use super::{compare_positions, pull_merged, push_all, sync_source, BookKey, Dropbox, Kosync, Transport};
+    use super::{compare_positions, pull_merged, push_all, sync_source, BookKey, Dropbox, Google, Kosync, Transport};
     use crate::kosync::Progress;
     use crate::store::{self, Position, Store};
 
@@ -360,9 +385,31 @@ mod tests {
         assert!(!store.read(|s| Dropbox.enabled(s)));
         let (_dir, store) = synced_store(&["capability:progress-sync"]);
         assert!(!store.read(|s| Dropbox.enabled(s)), "the intent switch gates every transport");
-        // KOSync additionally needs catalogs (its requires edge).
+        // KOSync additionally needs catalogs (its own transport rule).
         let (_dir, store) = synced_store(&["capability:catalogs"]);
         assert!(!store.read(|s| Kosync.enabled(s)));
+    }
+
+    #[test]
+    fn clouds_work_with_catalogs_off() {
+        // The spec promises it twice; KOSync alone goes quiet.
+        let (_dir, store) = synced_store(&["capability:catalogs"]);
+        // Turning catalogs off takes its sources with it (the write guard
+        // refuses it while any exist); the intent stays on.
+        store.update(|s| s.sources.clear()).unwrap();
+        assert!(store.read(|s| Dropbox.enabled(s)));
+        assert!(store.read(|s| Google.enabled(s)));
+        assert!(!store.read(|s| Kosync.enabled(s)));
+    }
+
+    #[test]
+    fn google_needs_its_module_and_the_intent() {
+        let (_dir, store) = synced_store(&[]);
+        assert!(store.read(|s| Google.enabled(s)));
+        let (_dir, store) = synced_store(&["capability:googledrive"]);
+        assert!(!store.read(|s| Google.enabled(s)));
+        let (_dir, store) = synced_store(&["capability:progress-sync"]);
+        assert!(!store.read(|s| Google.enabled(s)), "the intent switch gates every transport");
     }
 
     #[test]

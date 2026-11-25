@@ -55,6 +55,7 @@ export function timeAgo(time: number) {
   return days === 1 ? 'yesterday' : `${days} days ago`
 }
 
+/** Keeps the open book's sync offer, its unsent position and the transports that still owe an ack. */
 export function createSyncManager(deps: SyncDeps): SyncManager {
   let offer: SyncOffer | null = null
   /** The open book's id on the sync server; null when it doesn't sync. */

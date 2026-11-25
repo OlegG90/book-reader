@@ -280,6 +280,30 @@ describe('settings page', () => {
     expect(rowsOf('Sync')).toEqual(['Cloud connection', 'Add cloud'])
   })
 
+  it('connects the picked cloud', () => {
+    const { host, actions, button } = page()
+    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Cloud to connect"]')
+    if (!select) throw new Error('no cloud select')
+    select.value = 'google'
+    select.dispatchEvent(new Event('change'))
+    expect(button('Connect').disabled).toBe(false)
+    button('Connect').click()
+    expect(actions.connectCloud).toHaveBeenCalledWith('google')
+  })
+
+  it('locks a cloud whose module is off', () => {
+    const { host, panel, button } = page()
+    panel.show({ ...initial, disabledModules: ['capability:googledrive'] })
+    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Cloud to connect"]')
+    if (!select) throw new Error('no cloud select')
+    const google = [...select.options].find(o => o.value === 'google')
+    expect(google?.disabled).toBe(true)
+    select.value = 'google'
+    select.dispatchEvent(new Event('change'))
+    expect(button('Connect').disabled).toBe(true)
+    expect(host.textContent).toContain('Turn on Google Drive in Modules to connect.')
+  })
+
   it('shows the library folder', () => {
     const { host, panel } = page()
     expect(host.textContent).toContain('Not chosen yet')
@@ -305,8 +329,8 @@ describe('settings page', () => {
     const { host, panel, actions, button } = page()
     const select = host.querySelector<HTMLSelectElement>('select[aria-label="Cloud to connect"]')
     if (!select) throw new Error('no cloud select')
-    // Only Dropbox has a transport; the rest wait for theirs.
-    expect([...select.options].map(o => o.textContent)).toEqual(['Dropbox', 'OneDrive (soon)', 'Google Drive (soon)'])
+    // Only OneDrive waits for its transport; the rest connect.
+    expect([...select.options].map(o => o.textContent)).toEqual(['Dropbox', 'OneDrive (soon)', 'Google Drive'])
     select.value = 'onedrive'
     select.dispatchEvent(new Event('change'))
     expect(button('Connect').disabled).toBe(true)

@@ -84,6 +84,15 @@ impl Platform for Android {
         Ok(run::<Copied>("takeIncoming", ())?.outside())
     }
 
+    /// A Google sign-in answer waiting to be finished.
+    fn take_oauth_answer() -> Result<Option<String>, String> {
+        #[derive(Deserialize)]
+        struct Answer {
+            url: Option<String>,
+        }
+        Ok(run::<Answer>("takeOauthAnswer", ())?.url)
+    }
+
     /// Deletes the original of a book moved into the library; false where
     /// Android doesn't allow it (the book is then copied, not moved).
     fn delete_original(original: &str) -> bool {
