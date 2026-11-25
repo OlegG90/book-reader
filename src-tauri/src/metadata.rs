@@ -55,12 +55,48 @@ fn push_text(acc: &mut String, chunk: &str) {
     if chunk.is_empty() {
         return;
     }
-    let starts_with_punct =
-        chunk.starts_with(['.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'', '”', '’', '…']);
-    if !acc.is_empty() && !acc.ends_with(char::is_whitespace) && !starts_with_punct {
+    if !acc.is_empty() && !acc.ends_with(char::is_whitespace) && !starts_with_punct(chunk) {
         acc.push(' ');
     }
     acc.push_str(chunk);
+}
+
+/// Whether the text starts (or the character is) punctuation that hugs the
+/// previous word instead of starting a new one.
+fn starts_with_punct(chunk: &str) -> bool {
+    chunk.chars().next().is_some_and(is_punct)
+}
+
+fn is_punct(c: char) -> bool {
+    matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '"' | '\'' | '”' | '’' | '…')
+}
+
+/// Drops `<...>` markup: some books carry escaped HTML in what should be
+/// plain text (e.g. an EPUB description of `&lt;p&gt;...`). A tag boundary
+/// becomes a space only when real words would otherwise glue together (and
+/// never before punctuation); a bare `<` or `>` outside a tag stays as is.
+fn strip_tags(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_tag = false;
+    let mut pending_space = false;
+    for c in text.chars() {
+        match c {
+            '<' => {
+                in_tag = true;
+                pending_space = !out.is_empty() && !out.ends_with(char::is_whitespace);
+            }
+            '>' if in_tag => in_tag = false,
+            _ if in_tag => {}
+            _ => {
+                if pending_space && !c.is_whitespace() && !is_punct(c) {
+                    out.push(' ');
+                }
+                pending_space = false;
+                out.push(c);
+            }
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -190,7 +226,7 @@ pub(crate) fn fb2(bytes: &[u8]) -> io::Result<Metadata> {
     meta.book.authors.retain(|a| !a.first.is_empty() || !a.last.is_empty());
     meta.book.title = clean(&meta.book.title);
     meta.book.language = langs.into_iter().map(|l| clean(&l)).find(|l| !l.is_empty());
-    meta.book.annotation = Some(clean(&annotation)).filter(|s| !s.is_empty());
+    meta.book.annotation = Some(clean(&strip_tags(&annotation))).filter(|s| !s.is_empty());
     if let Some((content_type, data)) = cover_id.and_then(|id| binaries.remove(&id)) {
         let data: String = data.split_whitespace().collect();
         if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) {
@@ -301,7 +337,7 @@ pub(crate) fn epub<R: Read + Seek>(file: R) -> io::Result<Metadata> {
 
     meta.book.title = titles.first().map(|t| clean(t)).unwrap_or_default();
     meta.book.language = languages.into_iter().map(|l| clean(&l)).find(|l| !l.is_empty());
-    meta.book.annotation = Some(clean(&description)).filter(|s| !s.is_empty());
+    meta.book.annotation = Some(clean(&strip_tags(&description))).filter(|s| !s.is_empty());
     meta.book.authors = creators
         .iter()
         .filter(|c| c.role.as_deref().is_none_or(|r| r == "aut") && !c.name.trim().is_empty())
@@ -430,6 +466,26 @@ mod tests {
         let meta = fb2(xml.as_bytes()).unwrap();
         assert_eq!(meta.book.language.as_deref(), Some("uk"));
         assert_eq!(meta.book.annotation.as_deref(), Some("First paragraph. Second one."));
+    }
+
+    #[test]
+    fn escaped_markup_in_annotations_is_dropped() {
+        let xml = r##"<?xml version="1.0" encoding="utf-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
+ <description><title-info>
+  <book-title>Book</book-title>
+  <annotation>&lt;div&gt;&lt;p&gt;Escaped.&lt;/p&gt;&lt;p&gt;Kept apart.&lt;/p&gt;&lt;/div&gt;</annotation>
+ </title-info></description>
+ <body><section><p>Text</p></section></body>
+</FictionBook>"##;
+        let meta = fb2(xml.as_bytes()).unwrap();
+        assert_eq!(meta.book.annotation.as_deref(), Some("Escaped. Kept apart."));
+        let opf = r#"<package xmlns:opf="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1">
+            <dc:title>Book</dc:title>
+            <dc:description>&lt;div&gt;Escaped &lt;b&gt;too&lt;/b&gt;.&lt;/div&gt;</dc:description>
+          </metadata><manifest></manifest></package>"#;
+        let meta = epub(Cursor::new(make_epub(opf, &[]))).unwrap();
+        assert_eq!(meta.book.annotation.as_deref(), Some("Escaped too."));
     }
 
     #[test]
