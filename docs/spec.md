@@ -59,7 +59,7 @@ Inherited from Simple Reader unless noted:
 - **Reading chrome:** a slim top bar (← Library, Contents · the book's title and author · Bookmark, Aa, the mode, ⋯ with Shortcuts, About, Full screen) and a bottom bar: the chapter · a track with a tick at each chapter and a knob (click or drag to go there) · `p. 14 of 30 · 12%` (pages count within the chapter; the book-wide position is the percentage). Both come and go together: the mouse near the top or bottom edge, or a tap in the page's middle; while hidden, a hairline shows the progress. On the phone the top bar keeps ←, the title and the bookmark, and the bottom bar adds Contents / Appearance / Mode / More under the slider.
 - **Navigation:** a drawer with **Contents | Bookmarks (n)** (`T`; the current chapter in the accent; the last tab stays for the session), the reading chrome's progress row, footnotes in a pop-up, images.
 - **Bookmarks:** new. Local to each device. `B` (or the top bar's bookmark, filled when the page has one) bookmarks the page or removes the bookmark on it; the list is the drawer's Bookmarks tab. A bookmark is a point in the text, so it stays found when the font or window size changes the pages. `--no-save` windows keep none.
-- **Reading position:** saved automatically, synced between devices through the server (see [Progress sync](#progress-sync)).
+- **Reading position:** saved automatically, synced between devices through the server or a cloud (see [Progress sync](#progress-sync)).
 
 ### Android interaction
 
