@@ -860,6 +860,14 @@ async function drainOauthAnswer(): Promise<void> {
 let stopOauthPoll: (() => void) | null = null
 initOauthAnswer(() => void drainOauthAnswer())
 void drainOauthAnswer()
+// The clouds' newer positions, once per start: Continue reading shows the
+// fresh percent, and opening such a book goes straight to it (no Jump offer).
+// Silent when offline: a failed start is the normal no-network case.
+void invoke<number>('sync_pull_all')
+  .then(updated => {
+    if (updated > 0) void library.refreshScreen()
+  })
+  .catch(console.error)
 // Another window changed a setting: apply it here too (it is already saved).
 appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
   const valid = readSettings({ ...settings, ...payload })

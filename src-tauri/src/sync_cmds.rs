@@ -2,13 +2,14 @@
 
 use crate::catalog;
 use crate::clock::now_ms;
+use crate::cloud::RemoteRecord;
 use crate::kosync;
 use crate::modules;
 use crate::store::{self, Position, Store};
 use crate::windows::ReaderWindows;
 use crate::CmdResult;
 use serde::Serialize;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use tauri::{Manager, State, Window};
 
 /// The source that syncs progress, if one is set and sync is on: with the
@@ -38,6 +39,11 @@ trait Transport {
     fn pull(&self, store: &Store, book: &BookKey) -> Result<Option<kosync::Progress>, String>;
     /// Sends the position.
     fn push(&self, store: &Store, book: &BookKey, cfi: &str, fraction: f64) -> Result<(), String>;
+    /// The cloud's whole positions file, for the startup pull; transports
+    /// without one (KOSync) have nothing to fetch in bulk.
+    fn remote(&self, _store: &Store) -> Option<HashMap<String, RemoteRecord>> {
+        None
+    }
 }
 
 /// Progress sync through the catalog server (see kosync.rs).
@@ -93,6 +99,10 @@ impl Transport for Dropbox {
         let device_id = device_id(store)?;
         crate::dropbox::push(&local, book.fingerprint, cfi, fraction, DEVICE_NAME, &device_id)
     }
+
+    fn remote(&self, _store: &Store) -> Option<HashMap<String, RemoteRecord>> {
+        crate::dropbox::remote_positions()
+    }
 }
 
 /// Progress sync through the reader's Google Drive (see google.rs).
@@ -115,6 +125,10 @@ impl Transport for Google {
         let local = store.read(|s| s.positions.clone());
         let device_id = device_id(store)?;
         crate::google::push(&local, book.fingerprint, cfi, fraction, DEVICE_NAME, &device_id)
+    }
+
+    fn remote(&self, _store: &Store) -> Option<HashMap<String, RemoteRecord>> {
+        crate::google::remote_positions()
     }
 }
 
@@ -152,6 +166,52 @@ fn newest(current: Option<kosync::Progress>, next: Option<kosync::Progress>) -> 
         (Some(a), Some(b)) if b.timestamp > a.timestamp => Some(b),
         (Some(a), _) => Some(a),
     }
+}
+
+/// Refreshes local positions from one cloud file: the cloud wins per book
+/// when it is newer and from another device (this install's own echoes are
+/// skipped); books the cloud never saw keep their place. Returns how many
+/// books changed.
+fn merge_remote(
+    local: &mut HashMap<String, Position>,
+    remote: &HashMap<String, RemoteRecord>,
+    own_device: &str,
+) -> usize {
+    let mut changed = 0;
+    for (fingerprint, record) in remote {
+        let Some(here) = local.get_mut(fingerprint) else { continue };
+        if record.device_id != own_device && record.time > here.time {
+            here.cfi = record.cfi.clone();
+            here.fraction = record.fraction;
+            here.time = record.time;
+            changed += 1;
+        }
+    }
+    changed
+}
+
+/// Downloads every cloud's positions file once and refreshes the local
+/// positions where the cloud is newer (newest-wins, the same rule as pull on
+/// open): Continue reading shows the fresh percent, and opening such a book
+/// goes straight to it. Silent: no offers, no pushes, a dead transport is
+/// skipped like in a pull.
+#[tauri::command(async)]
+pub(crate) fn sync_pull_all(store: State<Store>) -> CmdResult<usize> {
+    let device = device_id(&store)?;
+    let mut updated = 0;
+    for t in transports() {
+        if !store.read(|s| t.enabled(s)) {
+            continue;
+        }
+        if let Some(remote) = t.remote(&store) {
+            store
+                .update(|s| {
+                    updated += merge_remote(&mut s.positions, &remote, &device);
+                })
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(updated)
 }
 
 /// What one push round achieved, per transport: the frontend retries only
@@ -287,9 +347,10 @@ pub(crate) fn sync_push(
 
 #[cfg(test)]
 mod tests {
-    use super::{compare_positions, pull_merged, push_all, sync_source, BookKey, Dropbox, Google, Kosync, Transport};
+    use super::{compare_positions, merge_remote, pull_merged, push_all, sync_source, BookKey, Dropbox, Google, Kosync, Transport};
     use crate::kosync::Progress;
     use crate::store::{self, Position, Store};
+    use std::collections::HashMap;
 
     /// A scripted transport: answers as told and records its calls.
     struct Fake {
@@ -400,6 +461,51 @@ mod tests {
         assert!(store.read(|s| Dropbox.enabled(s)));
         assert!(store.read(|s| Google.enabled(s)));
         assert!(!store.read(|s| Kosync.enabled(s)));
+    }
+
+    fn cloud_record(cfi: &str, time: u64) -> crate::cloud::RemoteRecord {
+        crate::cloud::RemoteRecord {
+            cfi: cfi.into(),
+            fraction: 0.5,
+            time,
+            device: "phone".into(),
+            device_id: "phone".into(),
+        }
+    }
+
+    #[test]
+    fn startup_pull_takes_newer_remote_positions() {
+        let mut local = HashMap::new();
+        local.insert("newer-remote".into(), here("a", 100));
+        local.insert("newer-local".into(), here("a", 300));
+        local.insert("same".into(), here("a", 200));
+        local.insert("unseen".into(), here("a", 50));
+        let mut remote = HashMap::new();
+        remote.insert("newer-remote".into(), cloud_record("b", 200));
+        remote.insert("newer-local".into(), cloud_record("b", 100));
+        remote.insert("same".into(), cloud_record("a", 200));
+        remote.insert("elsewhere".into(), cloud_record("c", 400));
+        assert_eq!(merge_remote(&mut local, &remote, "pc"), 1);
+        assert_eq!(local["newer-remote"].cfi, "b");
+        assert_eq!(local["newer-remote"].time, 200);
+        assert_eq!(local["newer-local"].cfi, "a");
+        assert_eq!(local["same"].time, 200);
+        assert!(
+            !local.contains_key("elsewhere"),
+            "books never opened here gain nothing"
+        );
+    }
+
+    #[test]
+    fn startup_pull_ignores_this_installs_echoes() {
+        let mut local = HashMap::new();
+        local.insert("fp".into(), here("a", 100));
+        let mut remote = HashMap::new();
+        let mut echo = cloud_record("b", 500);
+        echo.device_id = "pc".into();
+        remote.insert("fp".into(), echo);
+        assert_eq!(merge_remote(&mut local, &remote, "pc"), 0);
+        assert_eq!(local["fp"].cfi, "a");
     }
 
     #[test]

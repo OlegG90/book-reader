@@ -132,6 +132,7 @@ pub fn run() {
             catalog_cmds::catalog_download,
             sync_cmds::sync_document,
             sync_cmds::sync_pull,
+            sync_cmds::sync_pull_all,
             sync_cmds::sync_push,
             library_cmds::add_to_library,
             books::decline_library,
