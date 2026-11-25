@@ -29,7 +29,7 @@ import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
 import { cloudModuleId, createAppearancePanel, createSettingsPage, type ModuleInfo, type SettingsSection } from './settings-panel'
-import { initBackButton, initIncoming, initOauthAnswer, initVolumeKeys, isAndroid, setReading } from './platform'
+import { initBackButton, initIncoming, initOauthAnswer, initVolumeKeys, isAndroid, pollOauthAnswer, setReading } from './platform'
 import { createReadingView, type AddMode, type Offer } from './reading-view'
 import { createLibraryView, type View } from './library-view'
 import { SYNC_EVERY_MS, SYNC_ON_CLOSE_MS } from './sync-manager'
@@ -366,21 +366,30 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
   },
   connectCloud: provider => {
     // The picker never sends an unavailable cloud; a disabled module refuses.
-    // A phone's answer comes back on the app's scheme (initOauthAnswer);
-    // the desktop waits on a loopback address instead.
+    // A phone's answer comes back on the app's scheme: the push event is
+    // unreliable there, so a Google connect polls the stash instead; the
+    // desktop waits on a loopback address instead.
     const command = provider === 'google' && isAndroid ? 'google_connect_android' : provider === 'google' ? 'google_connect' : 'dropbox_connect'
+    if (provider === 'google' && isAndroid) {
+      stopOauthPoll?.()
+      stopOauthPoll = pollOauthAnswer(takeOauthAnswer, finishOauthAnswer)
+    }
     void invoke(command).then(
       () => {
         void refreshCloudStatus()
         void sourcesPanel.refresh()
       },
       e => {
+        stopOauthPoll?.()
+        stopOauthPoll = null
         showError(undefined, e)
         void refreshCloudStatus()
       },
     )
   },
   disconnectCloud: () => {
+    stopOauthPoll?.()
+    stopOauthPoll = null
     const command = connectedCloud === 'google' ? 'google_disconnect' : 'dropbox_disconnect'
     void invoke(command).then(
       () => {
@@ -822,12 +831,15 @@ initVolumeKeys(direction => {
 })
 // A Google sign-in answer back from the phone's browser, or one stashed
 // while the app started: finish the login (draining takes it exactly once).
-async function drainOauthAnswer() {
+async function takeOauthAnswer(): Promise<string | null> {
   const answer = await invoke<string | null>('google_take_answer').catch(e => {
     console.error(e)
     return null
   })
-  if (!answer) return
+  return answer
+}
+
+async function finishOauthAnswer(answer: string): Promise<void> {
   try {
     await invoke('google_finish', { answer })
     void refreshCloudStatus()
@@ -837,6 +849,15 @@ async function drainOauthAnswer() {
     void refreshCloudStatus()
   }
 }
+
+async function drainOauthAnswer(): Promise<void> {
+  const answer = await takeOauthAnswer()
+  if (!answer) return
+  await finishOauthAnswer(answer)
+}
+
+/** Stops the poll started by the last phone Google connect, if any. */
+let stopOauthPoll: (() => void) | null = null
 initOauthAnswer(() => void drainOauthAnswer())
 void drainOauthAnswer()
 // Another window changed a setting: apply it here too (it is already saved).

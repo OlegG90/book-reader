@@ -42,3 +42,32 @@ export function initOauthAnswer(answer: (url: string) => void): void {
   if (!isAndroid) return
   void addPluginListener<{ url: string }>('system', 'oauth', ({ url }) => answer(url)).catch(console.error)
 }
+
+/** Polls the phone's stashed OAuth answer until the browser comes back with it.
+`take` reads the stash exactly once, `finish` completes the login. Stops after
+the answer or after `misses` empty rounds; returns a function that stops it
+sooner. The push event cannot be relied on (logcat-verified on the phone: the
+`system` plugin listeners never register), so the connect flow polls instead. */
+export function pollOauthAnswer(
+  take: () => Promise<string | null>,
+  finish: (url: string) => Promise<void>,
+  misses = 160,
+  everyMs = 1500,
+): () => void {
+  let left = misses
+  const timer = setInterval(() => {
+    void take()
+      .then(answer => {
+        if (answer == null) {
+          if (--left <= 0) clearInterval(timer)
+          return
+        }
+        clearInterval(timer)
+        void finish(answer)
+      })
+      .catch(() => {
+        if (--left <= 0) clearInterval(timer)
+      })
+  }, everyMs)
+  return () => clearInterval(timer)
+}
