@@ -164,6 +164,14 @@ impl Platform for Android {
     fn leave(_app: &AppHandle) -> Result<(), String> {
         call("moveTaskToBack", ())
     }
+
+    fn network_metered() -> bool {
+        #[derive(Deserialize)]
+        struct Metered {
+            metered: bool,
+        }
+        run::<Metered>("networkMetered", ()).map(|m| m.metered).unwrap_or(false)
+    }
 }
 
 /// Runs a `SystemPlugin.kt` command.

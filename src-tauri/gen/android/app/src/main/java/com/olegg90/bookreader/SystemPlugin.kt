@@ -319,6 +319,14 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
 
   private fun prefs() = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+  /** Whether the active network is metered (mobile data): book files wait for Wi-Fi. */
+  @Command
+  fun networkMetered(invoke: Invoke) {
+    val manager = activity.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+    val metered = runCatching { manager.isActiveNetworkMetered }.getOrDefault(false)
+    invoke.resolve(JSObject().put("metered", metered))
+  }
+
   /** Keeps a catalog's password, encrypted with the Keystore key: "iv:ciphertext". */
   @Command
   fun savePassword(invoke: Invoke) {

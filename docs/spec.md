@@ -161,7 +161,9 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 - **Pull:** when a book is opened. If the server has a different, newer position, a bar offers to jump to it, e.g. "Jump to 63% (Android, 2 h ago)?" — never a silent jump.
 - **Startup pull:** once per start the app downloads each cloud's positions file and refreshes the local positions where the cloud is newer (the same newest-wins as pull on open, but silent: no offers, no pushes). Continue reading shows the fresh percent; opening such a book goes straight to it.
 - **Offline:** failures are silent; pending pushes are retried later.
-- **Book files:** reading books follow their positions: when such a book closes and the cloud has no record of its fingerprint, the file is uploaded next to a fingerprint-keyed manifest (`sync-books.json`; books as `book-<fingerprint>-<name>`). The manifest never deletes: same fingerprint means same bytes, so nothing can conflict. Fetching books back is a separate step.
+- **Book files:** reading books follow their positions: when such a book closes and the cloud has no record of its fingerprint, the file is uploaded next to a fingerprint-keyed manifest (`sync-books.json`; books as `book-<fingerprint>-<name>`). The manifest never deletes: same fingerprint means same bytes, so nothing can conflict.
+- **Book downloads:** on every library scan the app compares the cloud manifests with the local books and offers what is missing (never silently, never automatically). Downloads land in the library under their manifest names (a name taken by another book gains ` (2)`); the bytes are verified against the manifest hash.
+- **Book files wait for Wi-Fi:** the `booksWifiOnly` setting (on by default) holds book uploads and downloads on metered networks; positions always sync, they are tiny. On the desktop every network counts as unmetered.
 
 ### Later: editing on the server (phase "e")
 

@@ -493,7 +493,8 @@ body.library-mode .reader-only {
 
 /* "Add to library" bar for books opened from outside the library */
 #offer,
-#sync-bar {
+#sync-bar,
+#cloud-offer {
   position: fixed;
   left: 50%;
   bottom: calc(24px + var(--safe-bottom));
@@ -514,7 +515,7 @@ body.library-mode .reader-only {
 }
 
 /* With the bottom bar shown, the bars sit above it */
-body:has(#bottombar.shown) :is(#offer, #sync-bar) {
+body:has(#bottombar.shown) :is(#offer, #sync-bar, #cloud-offer) {
   bottom: calc(var(--bottombar-height) + 20px + var(--safe-bottom));
 }
 
@@ -524,13 +525,15 @@ body:has(#bottombar.shown) :is(#offer, #sync-bar) {
 }
 
 #offer-buttons,
+#cloud-offer-buttons,
 #sync-bar .bar-buttons {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
 
-#offer-buttons .primary {
+#offer-buttons .primary,
+#cloud-offer-buttons .primary {
   order: -1;
 }
 

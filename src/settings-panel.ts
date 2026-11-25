@@ -10,6 +10,8 @@ export interface PanelValues extends Appearance {
   offerLibrary: boolean
   /** Android: the volume keys turn pages. */
   volumeKeys: boolean
+  /** Book files travel only on unmetered networks; positions always sync. */
+  booksWifiOnly: boolean
   /** How many books "Continue reading" shows (1–5). */
   historyLength: number
   /** The interface's font: "classic" (Lora, Cormorant Garamond for headings) or one of the system fonts. */
@@ -220,7 +222,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const appearance = el('div', { className: 'appearance' })
   const appearancePanel = createAppearancePanel(appearance, initial, onChange)
 
-  const checkbox = (key: 'savePositions' | 'offerLibrary' | 'volumeKeys') => {
+  const checkbox = (key: 'savePositions' | 'offerLibrary' | 'volumeKeys' | 'booksWifiOnly') => {
     const box = el('input', { type: 'checkbox' })
     box.onchange = () => onChange({ [key]: box.checked })
     return box
@@ -228,6 +230,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const savePositions = checkbox('savePositions')
   const offerLibrary = checkbox('offerLibrary')
   const volumeKeys = checkbox('volumeKeys')
+  const booksWifiOnly = checkbox('booksWifiOnly')
 
   const libraryFolder = el('span', { className: 'hint path' })
   const fileTypesStatus = el('span', { className: 'hint' })
@@ -284,6 +287,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const fileTypesRow = row('File types', fileTypesStatus, fileTypesButton)
   const cloudRow = row('Cloud connection', cloudStatus, cloudDisconnect)
   const cloudAddRow = row('Add cloud', cloudAddHint, cloudSelect, cloudConnect)
+  const booksWifiRow = checkRow('Sync books only on Wi-Fi', 'Book files wait for an unmetered network; positions always sync.', booksWifiOnly)
   const updatesRow = row('Updates', updateStatus, openRelease, checkUpdate)
   const historyLength = el(
     'select',
@@ -353,7 +357,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     system: [
       group('Library', libraryRow, offerRow),
       group('History', continueRow, clearRow),
-      group('Sync', cloudRow, cloudAddRow),
+      group('Sync', cloudRow, cloudAddRow, booksWifiRow),
       fileTypesRow,
       interfaceRow,
     ],
@@ -456,6 +460,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     savePositions.checked = values.savePositions
     offerLibrary.checked = values.offerLibrary
     volumeKeys.checked = values.volumeKeys
+    booksWifiOnly.checked = values.booksWifiOnly
     historyLength.value = String(values.historyLength)
     uiFont.value = values.uiFont
     for (const [id, box] of moduleBoxes) box.checked = !values.disabledModules.includes(id)

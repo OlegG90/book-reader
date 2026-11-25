@@ -326,6 +326,17 @@ fn upload_book_file(remote_name: &str, bytes: &[u8]) -> Result<(), String> {
     upload_bytes(&access, file_id.as_deref(), remote_name, bytes)
 }
 
+/// Downloads a book file by its cloud name (`None` when the cloud never saw it).
+pub fn download_book(remote_name: &str) -> Result<Option<Vec<u8>>, String> {
+    LAST_ERROR.track(download_book_inner(remote_name))
+}
+
+fn download_book_inner(remote_name: &str) -> Result<Option<Vec<u8>>, String> {
+    let access = access_token()?;
+    let Some(id) = find_file(&access, remote_name)? else { return Ok(None) };
+    download_bytes(&access, &id).map(Some)
+}
+
 /// Uploads a book file the cloud lacks, and records it in the manifest.
 pub fn push_book(fingerprint: &str, record: &BookRecord, bytes: &[u8]) -> Result<bool, String> {
     LAST_ERROR.track(crate::cloud::push_book_missing(

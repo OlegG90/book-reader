@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_APPEARANCE } from 'reader-core'
 import { createAppearancePanel, createSettingsPage, type ModuleInfo, type PanelValues } from './settings-panel'
 
-const initial: PanelValues = { ...DEFAULT_APPEARANCE, disabledModules: [], savePositions: true, offerLibrary: true, volumeKeys: false, historyLength: 3, uiFont: 'classic' }
+const initial: PanelValues = { ...DEFAULT_APPEARANCE, disabledModules: [], savePositions: true, offerLibrary: true, volumeKeys: false, booksWifiOnly: true, historyLength: 3, uiFont: 'classic' }
 
 const buttonIn = (host: HTMLElement) => (text: string) => {
   const found = [...host.querySelectorAll('button')].find(b => b.textContent === text)
@@ -244,6 +244,16 @@ describe('settings page', () => {
     expect(onChange).toHaveBeenCalledWith({ savePositions: false })
   })
 
+  it('toggles books-only-on-Wi-Fi', () => {
+    const { host, onChange } = page()
+    const remember = [...host.querySelectorAll('label')].find(l => l.textContent?.includes('Sync books only on Wi-Fi'))
+    const box = remember?.querySelector('input')
+    if (!box) throw new Error('no "Sync books only on Wi-Fi"')
+    box.checked = false
+    box.dispatchEvent(new Event('change'))
+    expect(onChange).toHaveBeenCalledWith({ booksWifiOnly: false })
+  })
+
   it('forwards the action buttons', () => {
     const { actions, button, panel } = page()
     button('Clear history').click()
@@ -277,7 +287,7 @@ describe('settings page', () => {
     }
     expect(rowsOf('Library')).toEqual(['Library folder', 'Offer to add books opened from elsewhere'])
     expect(rowsOf('History')).toEqual(['Continue reading', 'History'])
-    expect(rowsOf('Sync')).toEqual(['Cloud connection', 'Add cloud'])
+    expect(rowsOf('Sync')).toEqual(['Cloud connection', 'Add cloud', 'Sync books only on Wi-Fi'])
   })
 
   it('connects the picked cloud', () => {

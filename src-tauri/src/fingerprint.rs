@@ -20,6 +20,11 @@ pub fn fingerprint(path: &Path) -> io::Result<String> {
     Ok(format!("{size:x}-{hex}"))
 }
 
+/// The SHA-256 of bytes already in memory.
+pub fn sha256_bytes(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
 /// The file's full SHA-256, streamed: the fingerprint above covers only the
 /// head, so this proves the bytes the cloud keeps.
 pub fn full_sha256(path: &Path) -> io::Result<String> {
