@@ -150,6 +150,7 @@ pub(crate) fn catalog_download(
     id: String,
     url: String,
     format: opds::FileFormat,
+    blurb: Option<String>,
 ) -> CmdResult<Added> {
     store.read(|s| modules::require(s, "capability:catalogs"))?;
     let source = source_by_id(&store, &id)?;
@@ -165,7 +166,7 @@ pub(crate) fn catalog_download(
     // a good download must not fail over bookkeeping.
     if let Ok(path) = library_root(&store).map(|root| root.join(&added.path)) {
         if let Ok(fp) = fingerprint::fingerprint(&path) {
-            let _ = record_book_source(&store, &fp, &source.name);
+            let _ = record_book_source(&store, &fp, &source.name, blurb.as_deref());
         }
     }
     let _ = app.emit("library-updated", ());

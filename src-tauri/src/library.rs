@@ -87,8 +87,14 @@ pub fn organize_plan(root: &Path, books: &[Entry]) -> io::Result<Vec<(Entry, Str
     Ok(plan)
 }
 
+/// Bumped when `Entry` gains fields, so old caches rescan once instead of
+/// serving stale metadata.
+const CACHE_VERSION: u32 = 1;
+
 #[derive(Default, Serialize, Deserialize)]
 struct CacheFile {
+    #[serde(default)]
+    version: u32,
     root: PathBuf,
     books: Vec<Entry>,
 }
@@ -111,19 +117,20 @@ impl Cache {
         self.dir.join("covers")
     }
 
-    /// The books found by the last scan of `root` (empty for another folder).
+    /// The books found by the last scan of `root` (empty for another folder,
+    /// or for a cache written before the current entry shape).
     pub fn load(&self, root: &Path) -> Vec<Entry> {
         fs::read(self.index())
             .ok()
             .and_then(|bytes| serde_json::from_slice::<CacheFile>(&bytes).ok())
-            .filter(|c| c.root == root)
+            .filter(|c| c.root == root && c.version == CACHE_VERSION)
             .map(|c| c.books)
             .unwrap_or_default()
     }
 
     fn save(&self, root: &Path, books: &[Entry]) -> io::Result<()> {
         fs::create_dir_all(&self.dir)?;
-        let file = CacheFile { root: root.to_path_buf(), books: books.to_vec() };
+        let file = CacheFile { version: CACHE_VERSION, root: root.to_path_buf(), books: books.to_vec() };
         crate::store::write_atomically(&self.index(), &serde_json::to_vec(&file)?)
     }
 }
@@ -251,6 +258,20 @@ mod tests {
         fs::copy(samples().join("sample-utf8.fb2.zip"), root.join(".hidden/skip.fb2.zip")).unwrap();
         fs::write(root.join("notes.txt"), "not a book").unwrap();
         (dir, root)
+    }
+
+    #[test]
+    fn old_caches_rescan_instead_of_serving_stale_metadata() {
+        let (dir, root) = library_with_samples();
+        let cache = Cache::new(dir.path().join("cache"));
+        // A cache from before the version field: same shape otherwise.
+        std::fs::create_dir_all(cache.dir.join("covers")).unwrap();
+        let old = serde_json::json!({ "root": root, "books": [] });
+        std::fs::write(cache.index(), serde_json::to_vec(&old).unwrap()).unwrap();
+        assert!(cache.load(&root).is_empty(), "unknown versions rescan");
+        let books = scan(&root, &cache, &mut |_| {}, &|_| true).unwrap();
+        assert!(!books.is_empty());
+        assert!(!cache.load(&root).is_empty(), "the rescan sticks");
     }
 
     #[test]

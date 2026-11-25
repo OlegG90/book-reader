@@ -344,13 +344,16 @@ fn book_details_for(store: &Store, books: &LibraryBooks, key: &str) -> CmdResult
             books.cached(store, &root).into_iter().find(|b| b.path == key).ok_or("That book is no longer in the library")?
         }
     };
+    // The file's own blurb wins; a catalog summary fills the gap for books
+    // whose files carry none.
+    let annotation = entry.book.annotation.clone().or_else(|| store.read(|s| s.book_blurbs.get(&entry.fingerprint).cloned()));
     Ok(BookDetails {
         title: entry.book.title.clone(),
         authors: entry.book.authors.iter().map(|a| a.display()).collect(),
         series: entry.book.series.clone(),
         series_index: entry.book.series_index.clone(),
         language: entry.book.language.clone(),
-        annotation: entry.book.annotation.clone(),
+        annotation,
         has_cover: entry.cover.is_some(),
         path: entry.path.clone(),
         size: entry.size,
@@ -393,11 +396,16 @@ fn book_cloud_for(store: &Store, fingerprint: &str) -> CmdResult<Vec<CloudStatus
     Ok(out)
 }
 
-/// Remembers which catalog a book came from, for the details dialog.
-pub(crate) fn record_book_source(store: &Store, fingerprint: &str, source: &str) -> CmdResult<()> {
+/// Remembers which catalog a book came from and what it said about it, for
+/// the details dialog. Best-effort: a good download must not fail over
+/// bookkeeping.
+pub(crate) fn record_book_source(store: &Store, fingerprint: &str, source: &str, blurb: Option<&str>) -> CmdResult<()> {
     store
         .update(|s| {
             s.book_sources.insert(fingerprint.into(), source.into());
+            if let Some(text) = blurb.map(str::trim).filter(|t| !t.is_empty()) {
+                s.book_blurbs.insert(fingerprint.into(), text.into());
+            }
         })
         .map_err(|e| e.to_string())
 }
@@ -409,6 +417,10 @@ mod tests {
     use std::collections::HashMap;
 
     fn bookish_state() -> (tempfile::TempDir, Store, LibraryBooks) {
+        bookish_state_with(Some("Blurb."))
+    }
+
+    fn bookish_state_with(annotation: Option<&str>) -> (tempfile::TempDir, Store, LibraryBooks) {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::load(dir.path().join("breader.json"));
         store
@@ -429,7 +441,7 @@ mod tests {
                     series: Some("S".into()),
                     series_index: Some("1".into()),
                     language: Some("en".into()),
-                    annotation: Some("Blurb.".into()),
+                    annotation: annotation.map(str::to_string),
                 },
                 cover: Some("fp1.jpg".into()),
                 added: 0,
@@ -456,7 +468,7 @@ mod tests {
     #[test]
     fn book_details_names_everything() {
         let (_dir, store, books) = bookish_state();
-        record_book_source(&store, "fp1", "CWA").unwrap();
+        record_book_source(&store, "fp1", "CWA", None).unwrap();
         let d = book_details_for(&store, &books, "Author/Book.epub").unwrap();
         assert_eq!(d.title, "T");
         assert_eq!(d.authors, vec!["A B".to_string()]);
@@ -475,8 +487,19 @@ mod tests {
     #[test]
     fn record_book_source_remembers_the_catalog() {
         let (_dir, store, _books) = bookish_state();
-        record_book_source(&store, "fp9", "CWA").unwrap();
+        record_book_source(&store, "fp9", "CWA", Some("A blurb.  ")).unwrap();
         assert_eq!(store.read(|s| s.book_sources.get("fp9").cloned()).as_deref(), Some("CWA"));
+        assert_eq!(store.read(|s| s.book_blurbs.get("fp9").cloned()).as_deref(), Some("A blurb."));
+        record_book_source(&store, "fp8", "CWA", Some("   ")).unwrap();
+        assert_eq!(store.read(|s| s.book_blurbs.get("fp8").cloned()), None);
+    }
+
+    #[test]
+    fn book_details_falls_back_to_the_catalog_blurb() {
+        let (_dir, store, books) = bookish_state_with(None);
+        store.update(|s| { s.book_blurbs.insert("fp1".into(), "Catalog says hi.".into()); }).unwrap();
+        let d = book_details_for(&store, &books, "Author/Book.epub").unwrap();
+        assert_eq!(d.annotation.as_deref(), Some("Catalog says hi."));
     }
 
     #[test]

@@ -547,12 +547,13 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
   }
 
   $('book-details-close').addEventListener('click', hideBookDetails)
+  document.addEventListener('mousedown', e => {
+    if (!$('book-details').hidden && !(e.target as HTMLElement).closest('#book-details')) hideBookDetails()
+  })
 
   function formatSize(bytes: number): string {
     return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
   }
-
-  $('book-details-close').addEventListener('click', hideBookDetails)
 
   /** Fingerprints the download offer skipped this run. */
   const dismissedCloud = new Set<string>()
