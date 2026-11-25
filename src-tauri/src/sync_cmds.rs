@@ -3,7 +3,9 @@
 use crate::catalog;
 use crate::clock::now_ms;
 use crate::cloud::RemoteRecord;
+use crate::fingerprint;
 use crate::kosync;
+use crate::library_cmds::{library_root, LibraryBooks};
 use crate::modules;
 use crate::store::{self, Position, Store};
 use crate::windows::ReaderWindows;
@@ -43,6 +45,17 @@ trait Transport {
     /// without one (KOSync) have nothing to fetch in bulk.
     fn remote(&self, _store: &Store) -> Option<HashMap<String, RemoteRecord>> {
         None
+    }
+    /// Whether the transport is connected (a refresh token is kept).
+    /// A disconnected cloud is skipped silently, like a dead one.
+    fn connected(&self) -> bool {
+        false
+    }
+    /// Uploads a book file the cloud lacks, and records it in the cloud
+    /// manifest; true when the cloud gained the book.
+    fn push_book(&self, fingerprint: &str, record: &crate::cloud::BookRecord, bytes: &[u8]) -> Result<bool, String> {
+        let _ = (fingerprint, record, bytes);
+        Ok(false)
     }
 }
 
@@ -103,6 +116,14 @@ impl Transport for Dropbox {
     fn remote(&self, _store: &Store) -> Option<HashMap<String, RemoteRecord>> {
         crate::dropbox::remote_positions()
     }
+
+    fn connected(&self) -> bool {
+        crate::dropbox::is_connected()
+    }
+
+    fn push_book(&self, fingerprint: &str, record: &crate::cloud::BookRecord, bytes: &[u8]) -> Result<bool, String> {
+        crate::dropbox::push_book(fingerprint, record, bytes)
+    }
 }
 
 /// Progress sync through the reader's Google Drive (see google.rs).
@@ -129,6 +150,14 @@ impl Transport for Google {
 
     fn remote(&self, _store: &Store) -> Option<HashMap<String, RemoteRecord>> {
         crate::google::remote_positions()
+    }
+
+    fn connected(&self) -> bool {
+        crate::google::is_connected()
+    }
+
+    fn push_book(&self, fingerprint: &str, record: &crate::cloud::BookRecord, bytes: &[u8]) -> Result<bool, String> {
+        crate::google::push_book(fingerprint, record, bytes)
     }
 }
 
@@ -212,6 +241,40 @@ pub(crate) fn sync_pull_all(store: State<Store>) -> CmdResult<usize> {
         }
     }
     Ok(updated)
+}
+
+/// Uploads a reading book's file to every connected cloud that lacks it.
+/// Best-effort and silent: without a login there is nothing to push to, and
+/// books the library scan never saw are skipped. True when at least one
+/// cloud gained the book.
+#[tauri::command(async)]
+pub(crate) fn sync_push_book(store: State<Store>, books: State<LibraryBooks>, fingerprint: String) -> CmdResult<bool> {
+    let root = library_root(&store)?;
+    let entry = books.snapshot(&store, &root).into_iter().find(|b| b.fingerprint == fingerprint);
+    let Some(entry) = entry else { return Ok(false) };
+    let path = entry.absolute(&root);
+    // The scan may be older than the file: never upload changed bytes.
+    if fingerprint::fingerprint(&path).map_err(|e| e.to_string())? != fingerprint {
+        return Ok(false);
+    }
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    let record = crate::cloud::BookRecord {
+        name: entry.path.clone(),
+        size: bytes.len() as u64,
+        sha256: fingerprint::full_sha256(&path).map_err(|e| e.to_string())?,
+    };
+    let enabled: Vec<_> = transports().into_iter().filter(|t| store.read(|s| t.enabled(s))).collect();
+    if !enabled.iter().any(|t| t.connected()) {
+        return Ok(false);
+    }
+    let mut pushed = false;
+    for t in enabled {
+        if !t.connected() {
+            continue;
+        }
+        pushed |= t.push_book(&fingerprint, &record, &bytes).map_err(|e| e.to_string())?;
+    }
+    Ok(pushed)
 }
 
 /// What one push round achieved, per transport: the frontend retries only

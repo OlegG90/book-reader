@@ -6,7 +6,7 @@
 //! config: the refresh token is kept like catalog passwords (the OS
 //! credential store, the Android Keystore).
 
-use crate::cloud::{ErrorSlot, RemoteRecord, SyncFile, access_from, merge_for_upload, should_upload, token_json, tokens};
+use crate::cloud::{parse_manifest, render_manifest, BookRecord, ErrorSlot, RemoteRecord, SyncFile, access_from, merge_for_upload, should_upload, token_json, tokens};
 use crate::platform::{Active, Platform};
 use crate::{kosync, net, oauth};
 use oauth::PendingLogin;
@@ -132,17 +132,20 @@ fn access_token() -> Result<String, String> {
     access_from(&token_json(&reply.body)?, "Dropbox")
 }
 
-/// Downloads the positions file; `None` when there is none yet.
-fn download(access: &str) -> Result<Option<HashMap<String, RemoteRecord>>, String> {
-    let arg = serde_json::json!({ "path": FILE_PATH }).to_string();
+/// The book manifest in the app's Dropbox folder; the envelope leaves room
+/// for more book-keeping later.
+const BOOKS_MANIFEST: &str = "/sync-books.json";
+
+/// Downloads an opaque cloud file (`None` when there is none yet).
+fn download_bytes(access: &str, path: &str) -> Result<Option<Vec<u8>>, String> {
+    let arg = serde_json::json!({ "path": path }).to_string();
     let reply = net::post(
         "https://content.dropboxapi.com/2/files/download",
         &[("Authorization", &format!("Bearer {access}")), ("Dropbox-API-Arg", &arg)],
         &[],
     )?;
     if reply.status == 200 {
-        let file: SyncFile = serde_json::from_slice(&reply.body).map_err(|e| format!("Dropbox file is not ours: {e}"))?;
-        return Ok(Some(file.positions));
+        return Ok(Some(reply.body));
     }
     if reply.status == 409 && String::from_utf8_lossy(&reply.body).contains("not_found") {
         return Ok(None);
@@ -150,21 +153,68 @@ fn download(access: &str) -> Result<Option<HashMap<String, RemoteRecord>>, Strin
     Err(format!("Dropbox download failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)))
 }
 
-/// Uploads the merged positions file.
-fn upload(access: &str, positions: &HashMap<String, RemoteRecord>) -> Result<(), String> {
-    let file = SyncFile { version: FILE_VERSION, positions: positions.clone() };
-    let body = serde_json::to_vec(&file).map_err(|e| e.to_string())?;
-    let arg = serde_json::json!({ "path": FILE_PATH, "mode": "overwrite", "autorename": false, "mute": true }).to_string();
+/// Downloads the positions file; `None` when there is none yet.
+fn download(access: &str) -> Result<Option<HashMap<String, RemoteRecord>>, String> {
+    let Some(body) = download_bytes(access, FILE_PATH)? else { return Ok(None) };
+    let file: SyncFile = serde_json::from_slice(&body).map_err(|e| format!("Dropbox file is not ours: {e}"))?;
+    Ok(Some(file.positions))
+}
+
+/// Uploads an opaque cloud file, replacing what is there.
+fn upload_bytes(access: &str, path: &str, body: &[u8]) -> Result<(), String> {
+    let arg = serde_json::json!({ "path": path, "mode": "overwrite", "autorename": false, "mute": true }).to_string();
     let reply = net::post(
         "https://content.dropboxapi.com/2/files/upload",
         &[("Authorization", &format!("Bearer {access}")), ("Content-Type", "application/octet-stream"), ("Dropbox-API-Arg", &arg)],
-        &body,
+        body,
     )?;
     if reply.status == 200 {
         Ok(())
     } else {
         Err(format!("Dropbox upload failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)))
     }
+}
+
+/// Uploads the merged positions file.
+fn upload(access: &str, positions: &HashMap<String, RemoteRecord>) -> Result<(), String> {
+    let file = SyncFile { version: FILE_VERSION, positions: positions.clone() };
+    let body = serde_json::to_vec(&file).map_err(|e| e.to_string())?;
+    upload_bytes(access, FILE_PATH, &body)
+}
+
+/// The cloud's book manifest, if the app ever synced books.
+pub fn book_manifest() -> Option<HashMap<String, BookRecord>> {
+    LAST_ERROR.track(manifest_map()).ok().flatten()
+}
+
+fn manifest_map() -> Result<Option<HashMap<String, BookRecord>>, String> {
+    let access = access_token()?;
+    let Some(body) = download_bytes(&access, BOOKS_MANIFEST)? else { return Ok(None) };
+    parse_manifest(&body).map(Some)
+}
+
+/// Stores the cloud book manifest.
+fn store_manifest(books: &HashMap<String, BookRecord>) -> Result<(), String> {
+    let access = access_token()?;
+    upload_bytes(&access, BOOKS_MANIFEST, &render_manifest(books)?)
+}
+
+/// Uploads a book file under its fingerprint name.
+fn upload_book_file(remote_name: &str, bytes: &[u8]) -> Result<(), String> {
+    let access = access_token()?;
+    upload_bytes(&access, &format!("/{remote_name}"), bytes)
+}
+
+/// Uploads a book file the cloud lacks, and records it in the manifest.
+pub fn push_book(fingerprint: &str, record: &BookRecord, bytes: &[u8]) -> Result<bool, String> {
+    LAST_ERROR.track(crate::cloud::push_book_missing(
+        fingerprint,
+        record,
+        bytes,
+        book_manifest,
+        upload_book_file,
+        store_manifest,
+    ))
 }
 
 /// The open book's remote position, if any: a dead transport reports

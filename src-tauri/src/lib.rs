@@ -134,6 +134,7 @@ pub fn run() {
             sync_cmds::sync_pull,
             sync_cmds::sync_pull_all,
             sync_cmds::sync_push,
+            sync_cmds::sync_push_book,
             library_cmds::add_to_library,
             books::decline_library,
             books::get_bookmarks,

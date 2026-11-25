@@ -28,7 +28,7 @@ export type Sort = (typeof SORTS)[number]
 export const SORT_LABELS: Record<Sort, string> = { author: 'Author', title: 'Title', added: 'Recently added' }
 
 /** Past this share a book counts as finished (the last pages are often notes or ads). */
-const FINISHED_AT = 0.98
+export const FINISHED_AT = 0.98
 
 export function statusOf(book: LibraryBook): Exclude<Status, 'all'> {
   if (book.fraction == null || book.fraction <= 0) return 'new'

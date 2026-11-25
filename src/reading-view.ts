@@ -5,6 +5,7 @@ import { createTOCView } from 'reader-core/foliate-js/ui/tree.js'
 import { setReading } from './platform'
 import { createSyncManager, type SyncManager } from './sync-manager'
 import { SAVE_DELAY_MS, type Settings } from './settings'
+import { FINISHED_AT } from './library'
 import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
@@ -176,9 +177,17 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
     void sync.pull()
   }
 
+  /** Uploads the open book's file when it counts as reading. */
+  function pushBookFile() {
+    const fraction = book?.view.lastLocation?.fraction
+    if (fraction == null || fraction <= 0 || fraction >= FINISHED_AT || !fingerprint) return
+    void invoke<boolean>('sync_push_book', { fingerprint }).catch(e => console.warn('sync:', e))
+  }
+
   function close() {
     if (book) setReading(false, deps.getSettings().volumeKeys)
     void sync.push()
+    void pushBookFile()
     sync.reset()
     deps.hideOffer()
     book?.destroy()

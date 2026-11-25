@@ -6,7 +6,7 @@
 //! Secrets stay out of the config: the refresh token is kept like catalog
 //! passwords (the OS credential store, the Android Keystore).
 
-use crate::cloud::{ErrorSlot, RemoteRecord, SyncFile, access_from, merge_for_upload, should_upload, token_json, tokens};
+use crate::cloud::{parse_manifest, render_manifest, BookRecord, ErrorSlot, RemoteRecord, SyncFile, access_from, merge_for_upload, should_upload, token_json, tokens};
 use crate::platform::{Active, Platform};
 use crate::{kosync, net, oauth};
 use oauth::PendingLogin;
@@ -201,11 +201,14 @@ fn access_token() -> Result<String, String> {
     access_from(&token_json(&reply.body)?, "Google")
 }
 
+/// The book manifest's name in the app folder.
+const MANIFEST_NAME: &str = "sync-books.json";
+
 /// The positions file's id in the app folder, if the app ever synced.
-fn find_file(access: &str) -> Result<Option<String>, String> {
+fn find_file(access: &str, name: &str) -> Result<Option<String>, String> {
     let query = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("spaces", "appDataFolder")
-        .append_pair("q", "name = 'sync-state.json' and trashed = false")
+        .append_pair("q", &format!("name = '{name}' and trashed = false"))
         .append_pair("fields", "files(id)")
         .append_pair("pageSize", "10")
         .finish();
@@ -217,38 +220,48 @@ fn find_file(access: &str) -> Result<Option<String>, String> {
     Ok(list["files"].as_array().and_then(|files| files.first()).and_then(|file| file["id"].as_str()).map(str::to_string))
 }
 
-/// Downloads the positions file.
-fn download(access: &str, file_id: &str) -> Result<HashMap<String, RemoteRecord>, String> {
+/// Downloads an opaque cloud file by its id.
+fn download_bytes(access: &str, file_id: &str) -> Result<Vec<u8>, String> {
     let reply = net::bearer_get(&format!("https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"), access)?;
     if reply.status != 200 {
         return Err(format!("Google Drive download failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
     }
-    let file: SyncFile = serde_json::from_slice(&reply.body).map_err(|e| format!("Google Drive file is not ours: {e}"))?;
+    Ok(reply.body)
+}
+
+/// Downloads the positions file.
+fn download(access: &str, file_id: &str) -> Result<HashMap<String, RemoteRecord>, String> {
+    let body = download_bytes(access, file_id)?;
+    let file: SyncFile = serde_json::from_slice(&body).map_err(|e| format!("Google Drive file is not ours: {e}"))?;
     Ok(file.positions)
 }
 
-/// The multipart body for creating or replacing the positions file: its
-/// metadata (the app folder on create, nothing on update) and its content.
-fn multipart_body(file_id: Option<&str>, positions: &HashMap<String, RemoteRecord>) -> Result<(String, Vec<u8>), String> {
-    let metadata = match file_id {
-        Some(_) => serde_json::json!({}),
-        None => serde_json::json!({ "name": FILE_NAME, "parents": ["appDataFolder"] }),
-    };
-    let data = serde_json::to_vec(&SyncFile { version: FILE_VERSION, positions: positions.clone() }).map_err(|e| e.to_string())?;
+/// The multipart body for creating or replacing a file: its metadata (the
+/// app folder on create, nothing on update) and its content.
+fn multipart_body(
+    metadata: serde_json::Value,
+    data: Vec<u8>,
+    content_type: &str,
+) -> Result<(String, Vec<u8>), String> {
     let boundary = oauth::random_string(32);
     let mut body = Vec::new();
     body.extend_from_slice(format!("--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n").as_bytes());
     body.extend_from_slice(&serde_json::to_vec(&metadata).map_err(|e| e.to_string())?);
-    body.extend_from_slice(format!("\r\n--{boundary}\r\nContent-Type: application/json\r\n\r\n").as_bytes());
+    body.extend_from_slice(format!("\r\n--{boundary}\r\nContent-Type: {content_type}\r\n\r\n").as_bytes());
     body.extend_from_slice(&data);
     body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
     Ok((format!("multipart/related; boundary={boundary}"), body))
 }
 
-/// Uploads the merged positions file: created in the app folder the first
-/// time, replaced afterwards.
-fn upload(access: &str, file_id: Option<&str>, positions: &HashMap<String, RemoteRecord>) -> Result<(), String> {
-    let (content_type, body) = multipart_body(file_id, positions)?;
+/// Creates or replaces a file in the app folder.
+fn store_bytes(
+    access: &str,
+    file_id: Option<&str>,
+    metadata: serde_json::Value,
+    data: Vec<u8>,
+    content_type: &str,
+) -> Result<(), String> {
+    let (content_type, body) = multipart_body(metadata, data, content_type)?;
     let url = match file_id {
         Some(id) => format!("https://www.googleapis.com/upload/drive/v3/files/{id}?uploadType=multipart"),
         None => "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart".into(),
@@ -266,6 +279,65 @@ fn upload(access: &str, file_id: Option<&str>, positions: &HashMap<String, Remot
     }
 }
 
+/// Uploads the merged positions file: created in the app folder the first
+/// time, replaced afterwards.
+fn upload(access: &str, file_id: Option<&str>, positions: &HashMap<String, RemoteRecord>) -> Result<(), String> {
+    let metadata = match file_id {
+        Some(_) => serde_json::json!({}),
+        None => serde_json::json!({ "name": FILE_NAME, "parents": ["appDataFolder"] }),
+    };
+    let data = serde_json::to_vec(&SyncFile { version: FILE_VERSION, positions: positions.clone() }).map_err(|e| e.to_string())?;
+    store_bytes(access, file_id, metadata, data, "application/json")
+}
+
+/// Uploads an opaque cloud file: created in the app folder the first time,
+/// replaced afterwards.
+fn upload_bytes(access: &str, file_id: Option<&str>, name: &str, data: &[u8]) -> Result<(), String> {
+    let metadata = match file_id {
+        Some(_) => serde_json::json!({}),
+        None => serde_json::json!({ "name": name, "parents": ["appDataFolder"] }),
+    };
+    store_bytes(access, file_id, metadata, data.to_vec(), "application/octet-stream")
+}
+
+/// The cloud's book manifest, if the app ever synced books.
+pub fn book_manifest() -> Option<HashMap<String, BookRecord>> {
+    LAST_ERROR.track(manifest_map()).ok().flatten()
+}
+
+fn manifest_map() -> Result<Option<HashMap<String, BookRecord>>, String> {
+    let access = access_token()?;
+    let Some(id) = find_file(&access, MANIFEST_NAME)? else { return Ok(None) };
+    let body = download_bytes(&access, &id)?;
+    parse_manifest(&body).map(Some)
+}
+
+/// Stores the cloud book manifest.
+fn store_manifest(books: &HashMap<String, BookRecord>) -> Result<(), String> {
+    let access = access_token()?;
+    let file_id = find_file(&access, MANIFEST_NAME)?;
+    upload_bytes(&access, file_id.as_deref(), MANIFEST_NAME, &render_manifest(books)?)
+}
+
+/// Uploads a book file under its fingerprint name.
+fn upload_book_file(remote_name: &str, bytes: &[u8]) -> Result<(), String> {
+    let access = access_token()?;
+    let file_id = find_file(&access, remote_name)?;
+    upload_bytes(&access, file_id.as_deref(), remote_name, bytes)
+}
+
+/// Uploads a book file the cloud lacks, and records it in the manifest.
+pub fn push_book(fingerprint: &str, record: &BookRecord, bytes: &[u8]) -> Result<bool, String> {
+    LAST_ERROR.track(crate::cloud::push_book_missing(
+        fingerprint,
+        record,
+        bytes,
+        book_manifest,
+        upload_book_file,
+        store_manifest,
+    ))
+}
+
 /// The open book's remote position, if any: a dead transport reports
 /// nothing instead of failing the pull.
 pub fn pull(fingerprint: &str) -> Option<kosync::Progress> {
@@ -279,7 +351,7 @@ pub fn remote_positions() -> Option<HashMap<String, RemoteRecord>> {
 
 fn remote_map() -> Result<Option<HashMap<String, RemoteRecord>>, String> {
     let access = access_token()?;
-    match find_file(&access)? {
+    match find_file(&access, FILE_NAME)? {
         Some(id) => Ok(Some(download(&access, &id)?)),
         None => Ok(None),
     }
@@ -319,7 +391,7 @@ fn push_inner(
     device_id: &str,
 ) -> Result<(), String> {
     let access = access_token()?;
-    let file_id = find_file(&access)?;
+    let file_id = find_file(&access, FILE_NAME)?;
     let remote = match &file_id {
         Some(id) => download(&access, id)?,
         None => HashMap::new(),
@@ -406,21 +478,22 @@ mod tests {
 
     #[test]
     fn multipart_body_carries_metadata_and_content() {
-        let mut positions = HashMap::new();
-        positions.insert("fp".into(), record("a", 100));
+        let data = br#"{"positions":{}}"#.to_vec();
+        let metadata = serde_json::json!({ "name": "sync-state.json", "parents": ["appDataFolder"] });
         // First upload: the file is created in the app folder.
-        let (content_type, body) = multipart_body(None, &positions).unwrap();
+        let (content_type, body) = multipart_body(metadata, data.clone(), "application/json").unwrap();
         let boundary = content_type.strip_prefix("multipart/related; boundary=").unwrap();
         let text = String::from_utf8(body).unwrap();
         assert!(text.starts_with(&format!("--{boundary}\r\n")));
         assert!(text.contains(r#""name":"sync-state.json""#));
         assert!(text.contains(r#""parents":["appDataFolder"]"#));
-        assert!(text.contains(r#""cfi":"a""#));
+        assert!(text.contains(r#""positions":{}"#));
+        assert!(text.contains("Content-Type: application/json"));
         assert!(text.ends_with(&format!("\r\n--{boundary}--\r\n")));
         // Later uploads replace the file: no metadata needed.
-        let (_, body) = multipart_body(Some("id"), &positions).unwrap();
+        let (_, body) = multipart_body(serde_json::json!({}), data, "application/octet-stream").unwrap();
         let text = String::from_utf8(body).unwrap();
         assert!(!text.contains("appDataFolder"), "{text}");
-        assert!(text.contains(r#""cfi":"a""#));
+        assert!(text.contains("Content-Type: application/octet-stream"));
     }
 }
