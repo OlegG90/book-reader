@@ -182,11 +182,9 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
     // doesn't list FB2's upgradeCFI yet.
     const parsed = opened.view.book as { upgradeCFI?: (cfi: string) => string } | undefined
     const upgraded = upgradeBookmarks(stored, parsed?.upgradeCFI)
-    if (upgraded && !noSave) setBookmarks(upgraded)
-    else {
-      bookmarks = upgraded ?? stored
-      renderBookmarks()
-    }
+    bookmarks = upgraded ?? stored
+    renderBookmarks()
+    if (upgraded && !noSave) saveBookmarks()
     setReading(true, deps.getSettings().volumeKeys)
     void sync.pull()
   }
@@ -266,7 +264,12 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
   function setBookmarks(list: Bookmark[]) {
     bookmarks = list
     renderBookmarks()
-    void invoke('set_bookmarks', { fingerprint, bookmarks: list }).catch(console.error)
+    saveBookmarks()
+  }
+
+  /** Saves the book's bookmarks as they are now. */
+  function saveBookmarks() {
+    void invoke('set_bookmarks', { fingerprint, bookmarks }).catch(console.error)
   }
 
   /** Draws the drawer's Bookmarks tab and its count. */
