@@ -775,8 +775,12 @@ $('organize-apply').addEventListener('click', () => void library.applyOrganize()
 $('sync-jump').addEventListener('click', () => void reading.sync.jump())
 $('sync-stay').addEventListener('click', () => reading.sync.hide())
 setInterval(() => void reading.sync.push(), SYNC_EVERY_MS)
-// Going to the background (minimising, switching apps on the phone) sends the position too.
-document.addEventListener('visibilitychange', () => document.hidden && void reading.sync.push())
+// Going to the background (minimising, switching apps on the phone) hands the
+// position to the sync engine; coming back has the engine look at what it owes.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) void reading.sync.push()
+  else void invoke('sync_wake').catch(console.error)
+})
 $('organize-cancel').addEventListener('click', closePanels)
 // The library window's pane (desktop): its items, Settings folding out, its width.
 for (const item of navItems) item.addEventListener('click', () => showView(item.dataset.nav as View))
@@ -868,14 +872,15 @@ let stopOauthPoll: (() => void) | null = null
 initOauthAnswer(() => void drainOauthAnswer())
 void drainOauthAnswer()
 // The sync engine's startup pull brought newer positions: Continue reading
-// shows the fresh percent, and opening such a book goes straight to it.
-appWindow.listen('sync-positions-updated', () => void library.refreshScreen())
+// shows the fresh percent, and opening such a book goes straight to it. The
+// pull may have finished before this window listened, so it asks too.
+void appWindow.listen('sync-positions-updated', () => void library.refreshScreen()).then(() =>
+  invoke<boolean>('sync_pulled').then(pulled => {
+    if (pulled) void library.refreshScreen()
+  }),
+)
 // Books downloaded from a cloud have landed in the library.
 appWindow.listen('sync-books-arrived', () => void library.refreshScreen())
-// Back at the front: the engine looks at what it still owes at once.
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') void invoke('sync_wake').catch(console.error)
-})
 // Another window changed a setting: apply it here too (it is already saved).
 appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
   const valid = readSettings({ ...settings, ...payload })
@@ -883,7 +888,9 @@ appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
 })
 // reading.flush never throws, so a failed save cannot keep the window open.
 appWindow.onCloseRequested(async () => {
-  const lastPush = Promise.race([reading.sync.push(), new Promise(done => setTimeout(done, SYNC_ON_CLOSE_MS))])
+  // The engine's worker ends with the app: the last position goes now, 3 s at most.
+  const sendLast = reading.sync.push().then(() => invoke('sync_flush'))
+  const lastPush = Promise.race([sendLast.catch(console.warn), new Promise(done => setTimeout(done, SYNC_ON_CLOSE_MS))])
   await Promise.all([reading.flush(), flushSettings(), lastPush])
 })
 systemDark.addEventListener('change', () => settings.theme === 'system' && restyle())

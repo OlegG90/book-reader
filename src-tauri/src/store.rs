@@ -36,7 +36,15 @@ pub struct State {
     pub device_id: String,
     /// Sync work still owed to the transports (see sync_cmds::engine); kept
     /// here so it survives a restart.
+    #[serde(deserialize_with = "lenient_outbox")]
     pub outbox: Vec<Pending>,
+}
+
+/// Reads the outbox, skipping entries this build doesn't know (a job kind
+/// from a newer version), so they never cost the rest of the config.
+fn lenient_outbox<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Pending>, D::Error> {
+    let raw = Vec::<Value>::deserialize(d)?;
+    Ok(raw.into_iter().filter_map(|v| serde_json::from_value(v).ok()).collect())
 }
 
 /// One piece of sync work the engine still owes.

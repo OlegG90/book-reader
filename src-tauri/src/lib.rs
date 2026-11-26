@@ -140,6 +140,8 @@ pub fn run() {
             sync_cmds::sync_queue_upload,
             sync_cmds::sync_queue_downloads,
             sync_cmds::sync_wake,
+            sync_cmds::sync_flush,
+            sync_cmds::sync_pulled,
             library_cmds::add_to_library,
             books::decline_library,
             books::get_bookmarks,

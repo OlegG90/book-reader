@@ -11,6 +11,8 @@ use crate::clock::now_ms;
 use crate::library_cmds::LibraryBooks;
 use crate::store::{Job, Pending, Store};
 use crate::sync_error::Kind;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
@@ -18,13 +20,15 @@ use tauri::{AppHandle, Emitter, Manager};
 /// How long the worker sleeps with nothing due: it also looks again whether
 /// an unmetered network is back for held book files.
 const IDLE_MS: u64 = 60_000;
-/// How long a book file waits before the network is checked again.
-const HOLD_MS: u64 = 60_000;
 /// The first retry's wait; each failure doubles it, up to `BACKOFF_MAX_MS`.
 const BACKOFF_FIRST_MS: u64 = 30_000;
 const BACKOFF_MAX_MS: u64 = 30 * 60_000;
 /// A server that asks to slow down waits at least this long.
 const RATE_LIMIT_MS: u64 = 5 * 60_000;
+/// A job that failed this often is dropped: what still fails after hours of
+/// tries (a broken file, a library gone, a wrong password) won't heal by
+/// itself. Queueing the same work again starts over.
+const MAX_ATTEMPTS: u32 = 12;
 
 /// Adds a job to the outbox; the same work already waiting is replaced, so
 /// only a book's newest position per transport is kept, and the new job is
@@ -39,8 +43,6 @@ pub(crate) fn queue(outbox: &mut Vec<Pending>, job: Job) {
 enum Verdict {
     /// Done, or nothing left to do (the transport is off or has no login).
     Done,
-    /// Waits for an unmetered network; not a failure.
-    Hold,
     /// Failed; tried again later, the wait set by the failure's kind.
     Retry(Kind),
 }
@@ -53,6 +55,17 @@ fn backoff(attempts: u32, kind: Kind) -> u64 {
     } else {
         wait
     }
+}
+
+/// Whether a job moves a book file (held on metered networks).
+fn moves_a_file(job: &Job) -> bool {
+    matches!(job, Job::Upload { .. } | Job::Download { .. })
+}
+
+/// Whether a job may run at `now`: it is due, and a book file only when the
+/// network allows book files. A held file waits without a write or a retry.
+fn runnable(pending: &Pending, now: u64, files_allowed: bool) -> bool {
+    pending.not_before <= now && (files_allowed || !moves_a_file(&pending.job))
 }
 
 /// Tries one job; a book that arrives from a cloud is added to `arrived`.
@@ -69,7 +82,6 @@ fn work(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], job:
                 Err(e) => Verdict::Retry(e.kind),
             }
         }
-        Job::Upload { .. } | Job::Download { .. } if !book_transfer_allowed(store) => Verdict::Hold,
         Job::Upload { fingerprint } => match push_book_to_cloud(store, books, transports, fingerprint) {
             Ok(_) => Verdict::Done,
             Err(_) => Verdict::Retry(Kind::Other),
@@ -94,37 +106,70 @@ fn settle(outbox: &mut Vec<Pending>, tried: &Pending, verdict: Verdict, now: u64
         Verdict::Done => {
             outbox.remove(i);
         }
-        Verdict::Hold => outbox[i].not_before = now + HOLD_MS,
         Verdict::Retry(kind) => {
             outbox[i].attempts += 1;
-            outbox[i].not_before = now + backoff(outbox[i].attempts, kind);
+            if outbox[i].attempts >= MAX_ATTEMPTS {
+                outbox.remove(i);
+            } else {
+                outbox[i].not_before = now + backoff(outbox[i].attempts, kind);
+            }
         }
     }
 }
 
-/// Runs every job that is due at `now`, once; returns the fingerprints of
-/// books that arrived from a cloud.
-pub(super) fn run_due(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], now: u64) -> Vec<String> {
-    let due: Vec<Pending> = store.read(|s| s.outbox.iter().filter(|p| p.not_before <= now).cloned().collect());
-    let mut arrived = Vec::new();
-    for tried in due {
-        let verdict = work(store, books, transports, &tried.job, &mut arrived);
-        let _ = store.update(|s| settle(&mut s.outbox, &tried, verdict, now));
+/// Runs every job that may run at `now` and that `pick` chooses, once, and
+/// records the outcomes in one write; returns the fingerprints of books
+/// that arrived from a cloud. A job that panics counts as failed, so one bad
+/// job never stops the engine.
+fn run(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], now: u64, pick: impl Fn(&Job) -> bool) -> Vec<String> {
+    let files_allowed = book_transfer_allowed(store);
+    let due: Vec<Pending> =
+        store.read(|s| s.outbox.iter().filter(|p| runnable(p, now, files_allowed) && pick(&p.job)).cloned().collect());
+    if due.is_empty() {
+        return Vec::new();
     }
+    let mut arrived = Vec::new();
+    let mut verdicts = Vec::new();
+    for tried in due {
+        let verdict = catch_unwind(AssertUnwindSafe(|| work(store, books, transports, &tried.job, &mut arrived)))
+            .unwrap_or(Verdict::Retry(Kind::Other));
+        verdicts.push((tried, verdict));
+    }
+    let _ = store.update(|s| {
+        for (tried, verdict) in verdicts {
+            settle(&mut s.outbox, &tried, verdict, now);
+        }
+    });
     arrived
 }
 
-/// How long the worker may sleep: until the next job is due, at most `IDLE_MS`.
+/// Runs every job that may run at `now`; returns the books that arrived.
+pub(super) fn run_due(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], now: u64) -> Vec<String> {
+    run(store, books, transports, now, |_| true)
+}
+
+/// Sends the positions that are due now, in the caller's thread: a closing
+/// window waits for them, as the worker dies with the app.
+pub(super) fn run_positions(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], now: u64) {
+    run(store, books, transports, now, |job| matches!(job, Job::Position { .. }));
+}
+
+/// How long the worker may sleep: until the next job that can run is due,
+/// at most `IDLE_MS`.
 fn sleep_for(store: &Store, now: u64) -> u64 {
-    let next = store.read(|s| s.outbox.iter().map(|p| p.not_before).min());
+    let files_allowed = book_transfer_allowed(store);
+    let next = store.read(|s| s.outbox.iter().filter(|p| files_allowed || !moves_a_file(&p.job)).map(|p| p.not_before).min());
     next.map_or(IDLE_MS, |due| due.saturating_sub(now)).clamp(1_000, IDLE_MS)
 }
 
-/// Wakes the worker early: new work was queued, or the app came back to the front.
+/// The worker's doorbell, and what the windows ask it.
 #[derive(Default)]
 pub(crate) struct SyncEngine {
     woken: Mutex<bool>,
     bell: Condvar,
+    /// The startup pull changed positions (for a window that started
+    /// listening after it said so).
+    pulled: AtomicBool,
 }
 
 impl SyncEngine {
@@ -132,6 +177,11 @@ impl SyncEngine {
     pub(crate) fn wake(&self) {
         *self.woken.lock().unwrap() = true;
         self.bell.notify_one();
+    }
+
+    /// Whether the startup pull changed positions.
+    pub(crate) fn pulled(&self) -> bool {
+        self.pulled.load(Ordering::SeqCst)
     }
 
     /// Sleeps up to `ms`, or until woken.
@@ -154,6 +204,7 @@ pub(crate) fn start(app: &AppHandle) {
         let engine = app.state::<SyncEngine>();
         // Silent when offline: a failed start is the normal no-network case.
         if pull_all_clouds(&store, &books, &transports()).is_ok_and(|updated| updated > 0) {
+            engine.pulled.store(true, Ordering::SeqCst);
             let _ = app.emit("sync-positions-updated", ());
         }
         loop {
@@ -209,8 +260,26 @@ mod tests {
         let tried = outbox[0].clone();
         settle(&mut outbox, &tried, Verdict::Retry(Kind::Offline), 1_000);
         assert_eq!((outbox[0].attempts, outbox[0].not_before), (1, 31_000));
-        let tried = outbox[0].clone();
-        settle(&mut outbox, &tried, Verdict::Hold, 2_000);
-        assert_eq!((outbox[0].attempts, outbox[0].not_before), (1, 2_000 + HOLD_MS), "a hold is no failure");
+    }
+
+    #[test]
+    fn a_job_that_keeps_failing_is_dropped() {
+        let mut outbox = Vec::new();
+        queue(&mut outbox, Job::Download { fingerprint: "fp".into() });
+        for _ in 0..MAX_ATTEMPTS {
+            let tried = outbox[0].clone();
+            settle(&mut outbox, &tried, Verdict::Retry(Kind::Other), 0);
+        }
+        assert!(outbox.is_empty());
+    }
+
+    #[test]
+    fn book_files_wait_for_an_allowed_network_without_counting_a_failure() {
+        let upload = Pending { job: Job::Upload { fingerprint: "fp".into() }, attempts: 0, not_before: 0 };
+        let push = Pending { job: position("kosync", "a"), attempts: 0, not_before: 0 };
+        assert!(!runnable(&upload, 10, false));
+        assert!(runnable(&push, 10, false), "positions always go");
+        assert!(runnable(&upload, 10, true));
+        assert!(!runnable(&Pending { not_before: 20, ..push }, 10, true), "not due yet");
     }
 }

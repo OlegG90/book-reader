@@ -573,7 +573,8 @@ pub(crate) fn sync_queue_position(
 }
 
 /// Queues a library book's file for the clouds that lack it (when a book
-/// being read closes); held on metered networks until Wi-Fi is back.
+/// being read closes); held on metered networks until Wi-Fi is back, and
+/// dropped when no cloud has a login.
 #[tauri::command(async)]
 pub(crate) fn sync_queue_upload(store: State<Store>, engine: State<SyncEngine>, fingerprint: String) -> CmdResult<()> {
     queue_jobs(&store, &engine, [Job::Upload { fingerprint }])
@@ -590,6 +591,20 @@ pub(crate) fn sync_queue_downloads(store: State<Store>, engine: State<SyncEngine
 #[tauri::command]
 pub(crate) fn sync_wake(engine: State<SyncEngine>) {
     engine.wake();
+}
+
+/// Sends the positions still owed, before a window closes: the engine's
+/// worker ends with the app, so the last window can't leave them to it.
+#[tauri::command(async)]
+pub(crate) fn sync_flush(store: State<Store>, books: State<LibraryBooks>) {
+    engine::run_positions(&store, &books, &transports(), crate::clock::now_ms());
+}
+
+/// Whether the engine's startup pull changed positions, for a window that
+/// started listening for `sync-positions-updated` after it was said.
+#[tauri::command]
+pub(crate) fn sync_pulled(engine: State<SyncEngine>) -> bool {
+    engine.pulled()
 }
 
 /// Puts jobs in the outbox and wakes the engine.
