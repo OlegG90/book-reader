@@ -34,13 +34,13 @@ import { createReadingView, type AddMode, type Offer } from './reading-view'
 import { createLibraryView, type View } from './library-view'
 import { SYNC_EVERY_MS, SYNC_ON_CLOSE_MS } from './sync-manager'
 import { readSettings, SAVE_DELAY_MS, type Settings } from './settings'
+import { $ } from './dom'
 
 /** The top bar shows when the mouse comes this close to the top edge. */
 const TOP_EDGE_PX = 48
 /** The bottom bar shows when the mouse comes this close to the bottom edge. */
 const BOTTOM_EDGE_PX = 56
 
-const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const appWindow = getCurrentWindow()
 const topbar = $('topbar')
 
@@ -583,7 +583,10 @@ function applyCapabilities() {
   settingsPage.setSectionVisible('catalogs', catalogs)
   settingsPage.setOrganizeVisible(!off.has('capability:organize'))
   settingsPage.setFileTypesVisible(!isAndroid && !off.has('capability:file-types'))
-  settingsPage.setCloudVisible(!off.has('capability:dropbox') || !off.has('capability:googledrive'))
+  const cloudsOn = !off.has('capability:dropbox') || !off.has('capability:googledrive')
+  settingsPage.setCloudVisible(cloudsOn)
+  // The desktop counts every network as unmetered, so the rule means nothing there.
+  settingsPage.setBooksWifiVisible(cloudsOn && isAndroid)
   settingsPage.setUpdatesVisible(!off.has('capability:update-check'))
   if (!catalogs && (view === 'catalogs' || view === 'settings:catalogs')) {
     showView(view === 'catalogs' ? 'library' : 'settings:modules')

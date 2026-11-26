@@ -7,6 +7,7 @@
    - Remove Markdown (marked, Mermaid, highlight.js) and unused foliate-js modules.
    - First-run library folder choice, library scan and metadata cache, library screen.
    - Naming template, Copy / Move to library, "Organize library" with preview.
+   - Formats: EPUB, FB2 and zipped FB2 (`.fb2.zip`, and `.fbz` added with the format modules in 11.2026).
    - Local bookmarks.
 2. **Android spike** — done (21.11.2026). The Tauri app builds for Android from the same crate in GitHub Actions and runs on the phone; with **All files access** (Android 11+, so `minSdk` 30) the library is `Documents/Books` and the Rust library code works there unchanged (books in subfolders, FB2 in windows-1251, PDFs skipped). Findings:
    - The Android SDK and NDK have no Windows-on-ARM64 builds, so APKs come from CI (as in PswManager); `cargo check --target aarch64-linux-android` still catches compile errors locally.

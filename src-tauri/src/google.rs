@@ -370,6 +370,7 @@ pub fn download_book(remote_name: &str) -> Result<Option<Vec<u8>>, String> {
     LAST_ERROR.track(download_book_inner(remote_name))
 }
 
+/// A book file's bytes by its cloud name; `None` when the cloud doesn't have it.
 fn download_book_inner(remote_name: &str) -> Result<Option<Vec<u8>>, String> {
     let access = access_token()?;
     let Some(id) = find_file(&access, remote_name)? else { return Ok(None) };
@@ -399,6 +400,7 @@ pub fn remote_positions() -> Option<HashMap<String, RemoteRecord>> {
     LAST_ERROR.track(remote_map()).ok().flatten()
 }
 
+/// The positions file, or `None` before the first sync; an error when it cannot be read.
 fn remote_map() -> Result<Option<HashMap<String, RemoteRecord>>, String> {
     let access = access_token()?;
     match find_file(&access, FILE_NAME)? {
@@ -407,6 +409,8 @@ fn remote_map() -> Result<Option<HashMap<String, RemoteRecord>>, String> {
     }
 }
 
+/// One book's position from the positions file, in KOSync's shape (time in
+/// seconds), so it merges with the other transports' answers.
 fn pull_inner(fingerprint: &str) -> Result<Option<kosync::Progress>, String> {
     let remote = remote_map()?;
     // `time` is ms here like locally; KOSync counts seconds.
@@ -432,6 +436,8 @@ pub fn push(
     LAST_ERROR.track(push_inner(local, fingerprint, cfi, fraction, device, device_id))
 }
 
+/// Adds this book's new position to the local ones, merges them with the
+/// cloud file, and uploads it when anything changed.
 fn push_inner(
     local: &HashMap<String, crate::store::Position>,
     fingerprint: &str,

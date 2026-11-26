@@ -1,8 +1,7 @@
 import { el } from 'reader-core'
 import { crumbs } from './crumbs'
+import { $ } from './dom'
 import { groupSeries, type LibraryBook } from './library'
-
-const $ = (id: string) => document.getElementById(id)!
 
 /** The Series page: the library's series as cards, or one series' books in reading order. */
 export function createSeriesView(deps: {

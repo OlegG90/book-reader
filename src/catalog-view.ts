@@ -3,6 +3,7 @@ import { fetchSources, formatLabel, inLibrary, preferredFile, type CatalogBook, 
 import { el } from 'reader-core'
 import { crumbs } from './crumbs'
 import { icon } from './icons'
+import { $ } from './dom'
 
 /** A page the reader went to, kept so Back shows it again without a refetch. */
 interface Page {
@@ -22,7 +23,6 @@ interface CatalogViewDeps {
 
 /** The Catalogs tab: browse a catalog's folders, search it, download books into the library. */
 export function createCatalogView(deps: CatalogViewDeps) {
-  const $ = (id: string) => document.getElementById(id) as HTMLElement
   const sourceSelect = $('catalog-source') as HTMLSelectElement
   const search = $('catalog-search') as HTMLInputElement
   const more = $('catalog-more') as HTMLButtonElement

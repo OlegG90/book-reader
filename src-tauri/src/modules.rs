@@ -185,7 +185,7 @@ fn use_reason(state: &store::State, id: &str) -> Option<String> {
     if id == "capability:catalogs" && !state.sources.is_empty() {
         return Some("delete its catalog sources first".into());
     }
-    required_by(state, id).first().map(|label| format!("turn off \"{label}\" first"))
+    required_by(state, id).first().map(|label| format!("turn off {label} first"))
 }
 
 /// Every layer-1 module with its current switch position.
@@ -221,11 +221,11 @@ pub fn check_turning_off(state: &store::State, next: &BTreeSet<String>) -> Resul
             return Err(format!("Unknown module: \"{id}\"."));
         };
         if !def.optional {
-            return Err(format!("\"{}\" cannot be turned off.", def.label));
+            return Err(format!("{} cannot be turned off.", def.label));
         }
     }
     if next.contains("capability:catalogs") && !state.sources.is_empty() {
-        return Err("\"Catalogs\" is in use: delete its catalog sources first.".into());
+        return Err("Catalogs is in use: delete its catalog sources first.".into());
     }
     // A module stays usable only while what it requires stays on: turning
     // one of them off is refused while a module that needs it is still on
@@ -238,7 +238,7 @@ pub fn check_turning_off(state: &store::State, next: &BTreeSet<String>) -> Resul
                 Some(d) => d.label,
                 None => id.as_str(),
             };
-            return Err(format!("\"{label}\" is in use: turn off \"{}\" first.", d.label));
+            return Err(format!("{label} is in use: turn off {} first.", d.label));
         }
     }
     Ok(())
@@ -437,11 +437,11 @@ mod tests {
                 let req_label = definitions().iter().find(|d| d.id == *req).unwrap().label;
                 assert_eq!(
                     check_turning_off(&state, &next),
-                    Err(format!("\"{req_label}\" is in use: turn off \"{}\" first.", def.label))
+                    Err(format!("{req_label} is in use: turn off {} first.", def.label))
                 );
                 let listed = list(&state).into_iter().find(|m| m.id == *req).unwrap();
                 assert!(listed.in_use);
-                assert_eq!(listed.in_use_reason.as_deref(), Some(format!("turn off \"{}\" first", def.label).as_str()));
+                assert_eq!(listed.in_use_reason.as_deref(), Some(format!("turn off {} first", def.label).as_str()));
             }
         }
     }

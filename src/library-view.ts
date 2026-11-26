@@ -15,8 +15,7 @@ import {
 import { deleteFileNote } from './platform'
 import type { Settings } from './settings'
 import type { SettingsSection } from './settings-panel'
-
-const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
+import { $ } from './dom'
 
 /** How far a book is read, as the library shows it: at least 1% once started. */
 const percent = (fraction: number) => `${Math.max(1, Math.round(fraction * 100))}%`
@@ -119,6 +118,7 @@ export interface LibraryView {
   embedSettings(embed: boolean): void
 }
 
+/** The library window: Continue reading, the book grid with its search and filters, Organize, book details and the cloud download offer. */
 export function createLibraryView(deps: LibraryDeps): LibraryView {
   /** A library folder is chosen (else the first-run choice shows). */
   let libraryReady = false
@@ -192,6 +192,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     await Promise.all([refreshRecent(), refreshLibrary()])
   }
 
+  /** Fills Continue reading with the newest books from the history, as many as the setting asks. */
   async function refreshRecent() {
     const books = await invoke<RecentBook[]>('recent_books').catch((e): RecentBook[] => {
       console.error(e)
@@ -226,6 +227,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     }
   }
 
+  /** Shows what Organize would rename, before anything moves. */
   function showOrganizePlan(renames: Rename[]) {
     $('organize-summary').textContent = renames.length
       ? `${renames.length === 1 ? 'This book' : `These ${renames.length} books`} will be renamed to “Author/Series NN - Title”. Nothing is deleted or overwritten.`
@@ -239,6 +241,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     ;(renames.length ? $('organize-apply') : $('organize-cancel')).focus()
   }
 
+  /** Renames the books in the shown plan and says how many moved. */
   async function applyOrganize() {
     $('organize-apply').hidden = true
     $('organize-summary').textContent = 'Renaming…'
@@ -285,16 +288,19 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     return scanning
   }
 
+  /** Shows a line above the grid (empty hides it). */
   function showLibraryMessage(text: string) {
     $('library-message').textContent = text
     $('library-message').hidden = !text
   }
 
+  /** Puts the saved sort into the library's controls and draws the grid. */
   function showControls() {
     $<HTMLSelectElement>('library-sort').value = deps.getSettings().librarySort
     renderLibrary()
   }
 
+  /** Draws the grid for the current search, status and sort, with the counts on the status switch. */
   function renderLibrary() {
     const settings = deps.getSettings()
     const query = $<HTMLInputElement>('library-search').value
@@ -341,6 +347,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     return line
   }
 
+  /** One book in the grid: its cover and progress, a click to open (or choose where to start), and its menu. */
   function bookCard(book: LibraryBook) {
     const status = statusOf(book)
     const progress =
@@ -391,6 +398,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
 
   /** Loads covers as their cards come near the visible part of the library. */
   let coverObserver: IntersectionObserver | null = null
+  /** The observer that loads covers as they scroll into view, made on first use. */
   function observer() {
     // Created late: importing this module (as the tests do) must not need a browser.
     return (coverObserver ??= new IntersectionObserver(
@@ -412,6 +420,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     ))
   }
 
+  /** Loads a library cover into `host` once it comes into view. */
   function loadCover(host: HTMLElement, key: string) {
     host.dataset.key = key
     observer().observe(host)
@@ -494,11 +503,11 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     row('Fingerprint', details.fingerprint)
     row('From catalog', details.catalogSource ?? 'Not from a catalog')
     if (details.annotation) $('book-details-annotation').textContent = details.annotation
-    void fillCloudState(fingerprint, details.fingerprint)
+    void fillCloudState(fingerprint)
   }
 
   /** Asks the clouds about the book; unknown on timeout or failure. */
-  async function fillCloudState(key: string, fingerprint: string) {
+  async function fillCloudState(fingerprint: string) {
     const rows = $('book-details-rows')
     const dt = el('dt', { textContent: 'Cloud' })
     const dd = el('dd', { textContent: 'Checking…' })
@@ -507,7 +516,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
       invoke<{ id: string; label: string; state: string }[]>('book_cloud', { fingerprint }).catch((): null => null),
       new Promise<null>(resolve => setTimeout(() => resolve(null), 8000)),
     ])
-    if (detailsKey !== key || $('book-details').hidden) return
+    if (detailsKey !== fingerprint || $('book-details').hidden) return
     dt.remove()
     dd.remove()
     if (!settled) {
@@ -517,6 +526,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     for (const cloud of settled) rows.append(el('dt', { textContent: cloud.label }), el('dd', { textContent: cloudStateText(cloud.state) }))
   }
 
+  /** What the details dialog says for one cloud's verdict. */
   function cloudStateText(state: string): string {
     switch (state) {
       case 'synced':
@@ -528,6 +538,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     }
   }
 
+  /** Closes the details dialog; a cloud answer still on its way is ignored. */
   function hideBookDetails() {
     detailsKey = null
     $('book-details').hidden = true
@@ -538,6 +549,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     if (!$('book-details').hidden && !(e.target as HTMLElement).closest('#book-details')) hideBookDetails()
   })
 
+  /** A file size in KB or MB, as the details dialog and the download offer show it. */
   function formatSize(bytes: number): string {
     return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
   }
@@ -547,6 +559,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
   /** Books the last offer showed (the Download button takes them). */
   let cloudMissing: MissingBook[] = []
 
+  /** Hides the offer to download cloud books. */
   function hideCloudOffer(): void {
     $('cloud-offer').hidden = true
   }
