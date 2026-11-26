@@ -25,7 +25,7 @@ pub(crate) use engine::{start as start_engine, SyncEngine};
 /// The source that syncs progress, if one is set and sync is on: with the
 /// module off the sync commands no-op (no network) instead of failing.
 fn sync_source(store: &Store) -> Option<catalog::Source> {
-    if store.read(|s| modules::is_off(s, "capability:progress-sync")) {
+    if store.read(|s| modules::is_off(s, modules::id::PROGRESS_SYNC)) {
         return None;
     }
     store.read(|s| s.sources.iter().find(|source| source.sync).cloned())
@@ -95,8 +95,8 @@ impl Transport for Kosync {
         // KOSync works through the catalog server (its own transport rule,
         // not a module edge, so clouds survive catalogs being turned off),
         // and needs a source marked for sync.
-        !modules::is_off(state, "capability:progress-sync")
-            && !modules::is_off(state, "capability:catalogs")
+        !modules::is_off(state, modules::id::PROGRESS_SYNC)
+            && !modules::is_off(state, modules::id::CATALOGS)
             && state.sources.iter().any(|s| s.sync)
     }
 
@@ -125,7 +125,7 @@ impl Transport for CloudTransport<'_> {
     }
 
     fn enabled(&self, state: &store::State) -> bool {
-        !modules::is_off(state, "capability:progress-sync") && !modules::is_off(state, self.0.module())
+        !modules::is_off(state, modules::id::PROGRESS_SYNC) && !modules::is_off(state, self.0.module())
     }
 
     fn pull(&self, _store: &Store, book: &BookKey) -> Result<Option<kosync::Progress>, SyncError> {
@@ -717,7 +717,7 @@ mod tests {
     fn no_sync_source_while_progress_sync_is_off() {
         let (_dir, store) = synced_store(&[]);
         assert!(sync_source(&store).is_some());
-        let (_dir, store) = synced_store(&["capability:progress-sync"]);
+        let (_dir, store) = synced_store(&[crate::modules::id::PROGRESS_SYNC]);
         assert!(sync_source(&store).is_none(), "the sync commands no-op");
     }
 
@@ -733,19 +733,19 @@ mod tests {
     fn dropbox_needs_its_module_and_the_intent() {
         let (_dir, store) = synced_store(&[]);
         assert!(store.read(|s| DROPBOX.enabled(s)));
-        let (_dir, store) = synced_store(&["capability:dropbox"]);
+        let (_dir, store) = synced_store(&[crate::modules::id::DROPBOX]);
         assert!(!store.read(|s| DROPBOX.enabled(s)));
-        let (_dir, store) = synced_store(&["capability:progress-sync"]);
+        let (_dir, store) = synced_store(&[crate::modules::id::PROGRESS_SYNC]);
         assert!(!store.read(|s| DROPBOX.enabled(s)), "the intent switch gates every transport");
         // KOSync additionally needs catalogs (its own transport rule).
-        let (_dir, store) = synced_store(&["capability:catalogs"]);
+        let (_dir, store) = synced_store(&[crate::modules::id::CATALOGS]);
         assert!(!store.read(|s| Kosync.enabled(s)));
     }
 
     #[test]
     fn clouds_work_with_catalogs_off() {
         // The spec promises it twice; KOSync alone goes quiet.
-        let (_dir, store) = synced_store(&["capability:catalogs"]);
+        let (_dir, store) = synced_store(&[crate::modules::id::CATALOGS]);
         // Turning catalogs off takes its sources with it (the write guard
         // refuses it while any exist); the intent stays on.
         store.update(|s| s.sources.clear()).unwrap();
@@ -868,7 +868,7 @@ mod tests {
 
     #[test]
     fn cloud_books_need_a_book_name_in_a_format_that_is_on() {
-        let (_dir, store) = synced_store(&["format:fb2"]);
+        let (_dir, store) = synced_store(&[crate::modules::id::FB2]);
         assert!(book_format_allowed(&store, "A/B.epub").is_ok());
         assert!(book_format_allowed(&store, "A/B.fb2").is_err(), "its module is off");
         assert!(book_format_allowed(&store, "A/run.exe").is_err());
@@ -1028,7 +1028,7 @@ mod tests {
                 // switch the clouds off here — no keyring, no network, ever.
                 s.settings.insert(
                     "disabledModules".into(),
-                    serde_json::json!(["capability:dropbox", "capability:googledrive"]),
+                    serde_json::json!([crate::modules::id::DROPBOX, crate::modules::id::GOOGLE_DRIVE]),
                 );
             })
             .unwrap();
@@ -1170,9 +1170,9 @@ mod tests {
     fn google_needs_its_module_and_the_intent() {
         let (_dir, store) = synced_store(&[]);
         assert!(store.read(|s| GOOGLE.enabled(s)));
-        let (_dir, store) = synced_store(&["capability:googledrive"]);
+        let (_dir, store) = synced_store(&[crate::modules::id::GOOGLE_DRIVE]);
         assert!(!store.read(|s| GOOGLE.enabled(s)));
-        let (_dir, store) = synced_store(&["capability:progress-sync"]);
+        let (_dir, store) = synced_store(&[crate::modules::id::PROGRESS_SYNC]);
         assert!(!store.read(|s| GOOGLE.enabled(s)), "the intent switch gates every transport");
     }
 

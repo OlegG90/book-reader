@@ -282,7 +282,7 @@ impl CloudStore for Google {
     }
 
     fn module(&self) -> &'static str {
-        "capability:googledrive"
+        crate::modules::id::GOOGLE_DRIVE
     }
 
     fn token_id(&self) -> &'static str {

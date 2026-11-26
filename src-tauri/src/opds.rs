@@ -69,8 +69,8 @@ impl FileFormat {
     /// The module the format belongs to (`format:epub`, `format:fb2`).
     pub fn module(self) -> &'static str {
         match self {
-            FileFormat::Epub => "format:epub",
-            FileFormat::Fb2 | FileFormat::Fb2Zip => "format:fb2",
+            FileFormat::Epub => crate::modules::id::EPUB,
+            FileFormat::Fb2 | FileFormat::Fb2Zip => crate::modules::id::FB2,
         }
     }
 
@@ -88,7 +88,7 @@ impl FileFormat {
         let path = href.split(['?', '#']).next().unwrap_or("").trim_end_matches('/').to_ascii_lowercase();
         if let Some((_, reader)) = formats::split(&path) {
             return Some(match reader.module() {
-                "format:epub" => FileFormat::Epub,
+                crate::modules::id::EPUB => FileFormat::Epub,
                 _ if reader.extension_for(&path) == Some("fb2") => FileFormat::Fb2,
                 _ => FileFormat::Fb2Zip,
             });
@@ -303,9 +303,9 @@ mod tests {
 
     #[test]
     fn file_formats_belong_to_modules() {
-        assert_eq!(FileFormat::Epub.module(), "format:epub");
-        assert_eq!(FileFormat::Fb2.module(), "format:fb2");
-        assert_eq!(FileFormat::Fb2Zip.module(), "format:fb2");
+        assert_eq!(FileFormat::Epub.module(), crate::modules::id::EPUB);
+        assert_eq!(FileFormat::Fb2.module(), crate::modules::id::FB2);
+        assert_eq!(FileFormat::Fb2Zip.module(), crate::modules::id::FB2);
     }
 
     #[test]

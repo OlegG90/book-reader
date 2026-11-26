@@ -368,7 +368,7 @@ fn book_cloud_for(store: &Store, fingerprint: &str) -> CmdResult<Vec<CloudStatus
     let mut out = Vec::new();
     for cloud in crate::cloud::stores() {
         let module = cloud.module();
-        let off = store.read(|s| modules::is_off(s, module) || modules::is_off(s, "capability:progress-sync"));
+        let off = store.read(|s| modules::is_off(s, module) || modules::is_off(s, modules::id::PROGRESS_SYNC));
         if off || !cloud.connected() {
             continue;
         }
@@ -410,7 +410,7 @@ mod tests {
         let store = Store::load(dir.path().join("breader.json"));
         store
             .update(|s| {
-                s.settings.insert("disabledModules".into(), serde_json::json!(["capability:dropbox", "capability:googledrive"]));
+                s.settings.insert("disabledModules".into(), serde_json::json!([crate::modules::id::DROPBOX, crate::modules::id::GOOGLE_DRIVE]));
             })
             .unwrap();
         let books = LibraryBooks::default();
@@ -636,7 +636,7 @@ pub(crate) struct Rename {
 /// The renames that would make the last scan's books follow the naming template.
 #[tauri::command(async)]
 pub(crate) fn organize_preview(store: State<Store>, books: State<LibraryBooks>) -> CmdResult<Vec<Rename>> {
-    store.read(|s| modules::require(s, "capability:organize"))?;
+    store.read(|s| modules::require(s, crate::modules::id::ORGANIZE))?;
     let root = library_root(&store)?;
     let plan = library::organize_plan(&root, &books.snapshot(&store, &root)).map_err(|e| e.to_string())?;
     Ok(plan.into_iter().map(|(entry, to)| Rename { from: entry.path, to }).collect())
@@ -646,7 +646,7 @@ pub(crate) fn organize_preview(store: State<Store>, books: State<LibraryBooks>) 
 /// files). Returns how many books were renamed.
 #[tauri::command(async)]
 pub(crate) fn organize_apply(app: AppHandle, store: State<Store>, books: State<LibraryBooks>, windows: State<ReaderWindows>) -> CmdResult<usize> {
-    store.read(|s| modules::require(s, "capability:organize"))?;
+    store.read(|s| modules::require(s, crate::modules::id::ORGANIZE))?;
     let root = library_root(&store)?;
     let plan = library::organize_plan(&root, &books.snapshot(&store, &root)).map_err(|e| e.to_string())?;
     let mut moved = Vec::new();

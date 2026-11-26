@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { ModuleInfo } from './settings-panel'
+import { MODULE } from './modules'
 /** What the backend reports about OPDS catalogs (see catalog.rs / opds.rs). */
 
 export interface Source {
@@ -47,7 +48,7 @@ export interface Feed {
 const EXTENSION_FORMAT: Record<string, FileFormat> = { epub: 'epub', fb2: 'fb2', 'fb2.zip': 'fb2Zip', fbz: 'fb2Zip' }
 let formatOrder: FileFormat[] = ['epub', 'fb2Zip', 'fb2']
 let formatLabels: Record<FileFormat, string> = { epub: 'EPUB', fb2: 'FB2', fb2Zip: 'FB2' }
-let formatModule: Record<FileFormat, string> = { epub: 'format:epub', fb2: 'format:fb2', fb2Zip: 'format:fb2' }
+let formatModule: Record<FileFormat, string> = { epub: MODULE.epub, fb2: MODULE.fb2, fb2Zip: MODULE.fb2 }
 let formatsOff = new Set<string>()
 
 /** Learns the formats from the backend's module list: order, labels and switches. */
