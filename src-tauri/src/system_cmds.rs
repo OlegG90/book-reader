@@ -49,15 +49,22 @@ pub(crate) struct CloudConnection {
     id: &'static str,
     connected: bool,
     last_error: Option<String>,
+    /// Used and total space in bytes, as the sync engine last learned it.
+    space: Option<(u64, u64)>,
 }
 
 /// Every cloud's connection, for the settings' rows; every connected cloud
 /// syncs at once.
 #[tauri::command(async)]
-pub(crate) fn cloud_connections() -> Vec<CloudConnection> {
+pub(crate) fn cloud_connections(engine: State<crate::sync_cmds::SyncEngine>) -> Vec<CloudConnection> {
     crate::cloud::stores()
         .iter()
-        .map(|cloud| CloudConnection { id: cloud.id(), connected: cloud.connected(), last_error: cloud.errors().last() })
+        .map(|cloud| CloudConnection {
+            id: cloud.id(),
+            connected: cloud.connected(),
+            last_error: cloud.errors().last(),
+            space: engine.space(cloud.id()),
+        })
         .collect()
 }
 

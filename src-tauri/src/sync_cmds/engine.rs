@@ -47,14 +47,14 @@ const MAX_ATTEMPTS: u32 = 12;
 /// due at once.
 pub(crate) fn queue(outbox: &mut Vec<Pending>, job: Job) {
     outbox.retain(|p| !p.job.same_work(&job));
-    outbox.push(Pending { job, attempts: 0, not_before: 0 });
+    outbox.push(Pending { job, attempts: 0, not_before: 0, no_room: false });
 }
 
 /// Adds a job unless the same work is already waiting: the reconcile finds
 /// the same work every round, and must not wipe its wait after failures.
 fn queue_once(outbox: &mut Vec<Pending>, job: Job) {
     if !outbox.iter().any(|p| p.job.same_work(&job)) {
-        outbox.push(Pending { job, attempts: 0, not_before: 0 });
+        outbox.push(Pending { job, attempts: 0, not_before: 0, no_room: false });
     }
 }
 
@@ -119,8 +119,16 @@ fn files_allowed(store: &Store, pick: impl Fn(&Job) -> bool) -> bool {
     store.read(|s| s.outbox.iter().any(|p| moves_a_file(&p.job) && pick(&p.job))) && book_transfer_allowed(store)
 }
 
-/// Tries one job; a book that arrives from a cloud is added to `arrived`.
-fn work(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], job: &Job, arrived: &mut Vec<String>) -> Verdict {
+/// What a run of the outbox brought: books that arrived from a cloud, and
+/// books now uploaded.
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct Outcome {
+    pub(super) arrived: Vec<String>,
+    pub(super) uploaded: Vec<String>,
+}
+
+/// Tries one job, noting in `outcome` what it brought.
+fn work(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], job: &Job, outcome: &mut Outcome) -> Verdict {
     match job {
         Job::Position { transport, fingerprint, document, cfi, fraction } => {
             let Some(t) = transports.iter().find(|t| t.id() == transport) else { return Verdict::Done };
@@ -134,13 +142,16 @@ fn work(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], job:
             }
         }
         Job::Upload { fingerprint } => match push_book_to_cloud(store, books, transports, fingerprint) {
-            Ok(_) => Verdict::Done,
-            Err(_) => Verdict::Retry(Kind::Other),
+            Ok(_) => {
+                outcome.uploaded.push(fingerprint.clone());
+                Verdict::Done
+            }
+            Err(e) => Verdict::Retry(e.kind),
         },
         Job::Download { fingerprint } => match pull_book_from_cloud(store, transports, fingerprint) {
             Ok(landed) => {
                 if landed {
-                    arrived.push(fingerprint.clone());
+                    outcome.arrived.push(fingerprint.clone());
                 }
                 Verdict::Done
             }
@@ -150,11 +161,15 @@ fn work(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], job:
     }
 }
 
-/// What a reconcile changed in the library.
+/// What a reconcile changed in the library, and learned of the clouds.
 #[derive(Debug, Default, PartialEq)]
 pub(super) struct Reconciled {
     /// Library books removed from the clouds on another device, moved out here.
     pub(super) moved_out: usize,
+    /// Library books every readable cloud holds.
+    pub(super) in_clouds: BTreeSet<String>,
+    /// Each cloud's used and total space, by transport id.
+    pub(super) space: HashMap<String, (u64, u64)>,
 }
 
 /// What each library book needs: an upload (a cloud lacks it, or it came
@@ -201,8 +216,19 @@ pub(super) fn reconcile(store: &Store, books: &LibraryBooks, transports: &[&dyn 
     let library = books.snapshot(store, &root);
     let removed_here = store.read(|s| s.removed_here.clone());
     let since = store.read(|s| s.library_since.as_ref().filter(|(at, _)| *at == root).map_or(0, |(_, t)| *t));
-    let (uploads, moved_out) = sort_library(&library, &per_cloud, &latest, since);
+    let (mut uploads, moved_out) = sort_library(&library, &per_cloud, &latest, since);
+    // Books being read go up first, then the newest added.
+    let positions = store.read(|s| s.positions.clone());
+    let added: HashMap<&str, u64> = library.iter().map(|e| (e.fingerprint.as_str(), e.added)).collect();
+    let reading = |f: &String| positions.get(f).is_some_and(|p| p.fraction > 0.0 && p.fraction < 0.98);
+    uploads.sort_by_key(|f| (!reading(f), std::cmp::Reverse(added.get(f.as_str()).copied().unwrap_or(0))));
     let mut jobs: Vec<Job> = uploads.into_iter().map(|fingerprint| Job::Upload { fingerprint }).collect();
+    let in_clouds: BTreeSet<String> = library
+        .iter()
+        .filter(|e| per_cloud.iter().all(|books| books.get(&e.fingerprint).is_some_and(|r| r.removed.is_none())))
+        .map(|e| e.fingerprint.clone())
+        .collect();
+    let space: HashMap<String, (u64, u64)> = book_stores(store, transports).iter().filter_map(|t| Some((t.id().to_string(), t.space()?))).collect();
     let local: BTreeSet<String> = library.iter().map(|b| b.fingerprint.clone()).collect();
     let missing = super::collect_missing(store, &latest, &local, &removed_here);
     if missing.len() <= AUTO_BOOKS && missing.iter().map(|m| m.size).sum::<u64>() <= AUTO_BYTES {
@@ -223,7 +249,7 @@ pub(super) fn reconcile(store: &Store, books: &LibraryBooks, transports: &[&dyn 
             moved += 1;
         }
     }
-    Reconciled { moved_out: moved }
+    Reconciled { moved_out: moved, in_clouds, space }
 }
 
 /// Records how a try went. Only the job as it was tried is touched: a newer
@@ -234,7 +260,14 @@ fn settle(outbox: &mut Vec<Pending>, tried: &Pending, verdict: Verdict, now: u64
         Verdict::Done => {
             outbox.remove(i);
         }
+        // A full cloud is no fault of the book: it waits the longest wait,
+        // without counting towards giving up, until space frees.
+        Verdict::Retry(Kind::NoSpace) => {
+            outbox[i].no_room = true;
+            outbox[i].not_before = now + BACKOFF_MAX_MS;
+        }
         Verdict::Retry(kind) => {
+            outbox[i].no_room = false;
             outbox[i].attempts += 1;
             if outbox[i].attempts >= MAX_ATTEMPTS {
                 outbox.remove(i);
@@ -246,20 +279,19 @@ fn settle(outbox: &mut Vec<Pending>, tried: &Pending, verdict: Verdict, now: u64
 }
 
 /// Runs every job that may run at `now` and that `pick` chooses, once, and
-/// records the outcomes in one write; returns the fingerprints of books
-/// that arrived from a cloud. A job that panics counts as failed, so one bad
+/// records the outcomes in one write; says what the run brought. A job that panics counts as failed, so one bad
 /// job never stops the engine.
-fn run(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], now: u64, pick: impl Fn(&Job) -> bool) -> Vec<String> {
+fn run(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], now: u64, pick: impl Fn(&Job) -> bool) -> Outcome {
     let files_allowed = files_allowed(store, &pick);
     let due: Vec<Pending> =
         store.read(|s| s.outbox.iter().filter(|p| runnable(p, now, files_allowed) && pick(&p.job)).cloned().collect());
     if due.is_empty() {
-        return Vec::new();
+        return Outcome::default();
     }
-    let mut arrived = Vec::new();
+    let mut outcome = Outcome::default();
     let mut verdicts = Vec::new();
     for tried in due {
-        let verdict = catch_unwind(AssertUnwindSafe(|| work(store, books, transports, &tried.job, &mut arrived)))
+        let verdict = catch_unwind(AssertUnwindSafe(|| work(store, books, transports, &tried.job, &mut outcome)))
             .unwrap_or(Verdict::Retry(Kind::Other));
         verdicts.push((tried, verdict));
     }
@@ -268,11 +300,11 @@ fn run(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], now: 
             settle(&mut s.outbox, &tried, verdict, now);
         }
     });
-    arrived
+    outcome
 }
 
-/// Runs every job that may run at `now`; returns the books that arrived.
-pub(super) fn run_due(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], now: u64) -> Vec<String> {
+/// Runs every job that may run at `now`; says what it brought.
+pub(super) fn run_due(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], now: u64) -> Outcome {
     run(store, books, transports, now, |_| true)
 }
 
@@ -290,6 +322,10 @@ fn sleep_for(store: &Store, now: u64) -> u64 {
     next.map_or(IDLE_MS, |due| due.saturating_sub(now)).clamp(1_000, IDLE_MS)
 }
 
+/// What the last reconcile learned of the clouds: the library books every
+/// cloud holds, and each cloud's used and total space by transport id.
+type Known = (BTreeSet<String>, HashMap<String, (u64, u64)>);
+
 /// The worker's doorbell, and what the windows ask it.
 #[derive(Default)]
 pub(crate) struct SyncEngine {
@@ -298,6 +334,8 @@ pub(crate) struct SyncEngine {
     /// The library changed (a scan, a delete): compare it with the clouds
     /// on the next round.
     reconcile: AtomicBool,
+    /// What the last reconcile learned.
+    known: Mutex<Known>,
     /// The startup pull changed positions (for a window that started
     /// listening after it said so).
     pulled: AtomicBool,
@@ -314,6 +352,16 @@ impl SyncEngine {
     pub(crate) fn request_reconcile(&self) {
         self.reconcile.store(true, Ordering::SeqCst);
         self.wake();
+    }
+
+    /// The library books every readable cloud holds, as last learned.
+    pub(crate) fn in_clouds(&self) -> BTreeSet<String> {
+        self.known.lock().unwrap().0.clone()
+    }
+
+    /// A cloud's used and total space, as last learned.
+    pub(crate) fn space(&self, cloud: &str) -> Option<(u64, u64)> {
+        self.known.lock().unwrap().1.get(cloud).copied()
     }
 
     /// Whether the startup pull changed positions.
@@ -349,12 +397,20 @@ pub(crate) fn start(app: &AppHandle) {
             let now = now_ms();
             if engine.reconcile.swap(false, Ordering::SeqCst) || now.saturating_sub(reconciled_at) >= RECONCILE_MS {
                 reconciled_at = now;
-                if reconcile(&store, &books, &transports()).moved_out > 0 {
+                let found = reconcile(&store, &books, &transports());
+                if found.moved_out > 0 {
                     let _ = app.emit("library-updated", ());
                 }
+                *engine.known.lock().unwrap() = (found.in_clouds, found.space);
+                let _ = app.emit("sync-states-changed", ());
             }
-            if !run_due(&store, &books, &transports(), now_ms()).is_empty() {
+            let ran = run_due(&store, &books, &transports(), now_ms());
+            if !ran.arrived.is_empty() {
                 let _ = app.emit("sync-books-arrived", ());
+            }
+            if !ran.uploaded.is_empty() {
+                engine.known.lock().unwrap().0.extend(ran.uploaded);
+                let _ = app.emit("sync-states-changed", ());
             }
             engine.sleep(sleep_for(&store, now_ms()));
         }
@@ -408,6 +464,20 @@ mod tests {
     }
 
     #[test]
+    fn a_full_cloud_keeps_the_book_waiting_without_giving_up() {
+        let mut outbox = Vec::new();
+        queue(&mut outbox, Job::Upload { fingerprint: "fp".into() });
+        for _ in 0..MAX_ATTEMPTS + 2 {
+            let tried = outbox[0].clone();
+            settle(&mut outbox, &tried, Verdict::Retry(Kind::NoSpace), 0);
+        }
+        assert_eq!((outbox.len(), outbox[0].no_room, outbox[0].not_before), (1, true, BACKOFF_MAX_MS));
+        let tried = outbox[0].clone();
+        settle(&mut outbox, &tried, Verdict::Retry(Kind::Offline), 0);
+        assert!(!outbox[0].no_room, "another failure isn't a full cloud");
+    }
+
+    #[test]
     fn a_job_that_keeps_failing_is_dropped() {
         let mut outbox = Vec::new();
         queue(&mut outbox, Job::Download { fingerprint: "fp".into() });
@@ -420,8 +490,8 @@ mod tests {
 
     #[test]
     fn book_files_wait_for_an_allowed_network_without_counting_a_failure() {
-        let upload = Pending { job: Job::Upload { fingerprint: "fp".into() }, attempts: 0, not_before: 0 };
-        let push = Pending { job: position("kosync", "a"), attempts: 0, not_before: 0 };
+        let upload = Pending { job: Job::Upload { fingerprint: "fp".into() }, attempts: 0, not_before: 0, no_room: false };
+        let push = Pending { job: position("kosync", "a"), attempts: 0, not_before: 0, no_room: false };
         assert!(!runnable(&upload, 10, false));
         assert!(runnable(&push, 10, false), "positions always go");
         assert!(runnable(&upload, 10, true));

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { createLibraryView, type LibraryDeps, type View } from './library-view'
+import { cloudMark, createLibraryView, type LibraryDeps, type View } from './library-view'
 import type { Settings } from './settings'
 
 function setup(view: View | null, catalogsBack = false, seriesBack = false, hasBook = false) {
@@ -55,5 +55,15 @@ describe('stepBack', () => {
     const { library, shown } = setup('settings:reading')
     expect(library.stepBack()).toBe(true)
     expect(shown).toEqual(['library'])
+  })
+})
+
+describe('cloudMark', () => {
+  it('names where a book is in the clouds', () => {
+    expect(cloudMark(undefined)).toBe('')
+    const mark = cloudMark('nofit') as HTMLElement
+    expect(mark.title).toBe("Doesn't fit in the cloud")
+    expect(mark.classList.contains('nofit')).toBe(true)
+    expect((cloudMark('cloud') as HTMLElement).innerHTML).toContain('#i-cloud-check')
   })
 })

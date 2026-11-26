@@ -463,6 +463,22 @@ body.library-mode .reader-only {
   font-size: 12px;
 }
 
+/* Where the book is in the clouds, before its format and progress. */
+.book-grid .meta .cloud-mark {
+  display: inline-flex;
+  margin-inline-end: 4px;
+  vertical-align: -2px;
+}
+
+.book-grid .meta .cloud-mark .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.book-grid .meta .cloud-mark.nofit {
+  color: var(--danger);
+}
+
 /* The series name gives way to its number */
 .book-grid .series {
   display: flex;

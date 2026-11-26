@@ -69,6 +69,10 @@ trait Transport {
     fn books(&self) -> Option<HashMap<String, crate::cloud::BookRecord>> {
         None
     }
+    /// How much of the cloud is used and how much there is (bytes), if it says.
+    fn space(&self) -> Option<(u64, u64)> {
+        None
+    }
     /// Removes a book from the cloud for every device (a removal record in
     /// this device's manifest, then the file goes).
     fn remove_book(&self, store: &Store, fingerprint: &str, record: &crate::cloud::BookRecord) -> Result<(), SyncError> {
@@ -170,6 +174,10 @@ impl Transport for CloudTransport<'_> {
 
     fn remove_book(&self, store: &Store, fingerprint: &str, record: &cloud::BookRecord) -> Result<(), SyncError> {
         cloud::remove_book(self.0, &device_id(store)?, fingerprint, record)
+    }
+
+    fn space(&self) -> Option<(u64, u64)> {
+        cloud::space(self.0)
     }
 }
 
@@ -280,7 +288,7 @@ fn merge_cloud_positions(store: &Store, clouds: &[&dyn Transport], library: &BTr
 /// Uploads a library book's file to every cloud that keeps books and lacks it;
 /// true when one gained it. A cloud's failure is reported only when no cloud
 /// gained the book.
-fn push_book_to_cloud(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], fingerprint: &str) -> CmdResult<bool> {
+fn push_book_to_cloud(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], fingerprint: &str) -> Result<bool, SyncError> {
     let clouds = book_stores(store, transports);
     if clouds.is_empty() {
         return Ok(false);
@@ -307,7 +315,7 @@ fn push_book_to_cloud(store: &Store, books: &LibraryBooks, transports: &[&dyn Tr
     for t in clouds {
         match t.push_book(store, fingerprint, &record, &bytes) {
             Ok(gained) => pushed |= gained,
-            Err(e) => failed = Some(e.message),
+            Err(e) => failed = Some(e),
         }
     }
     match failed {
@@ -641,6 +649,23 @@ pub(crate) fn sync_removed_books(store: State<Store>) -> Vec<MissingBook> {
 #[tauri::command(async)]
 pub(crate) fn sync_queue_downloads(store: State<Store>, engine: State<SyncEngine>, fingerprints: Vec<String>) -> CmdResult<()> {
     queue_jobs(&store, &engine, fingerprints.into_iter().map(|fingerprint| Job::Download { fingerprint }))
+}
+
+/// Each library book's place in the clouds, for its card: `cloud` (every
+/// connected cloud holds it), `waiting` (its upload is queued) or `nofit`
+/// (a cloud is full). Books with no state yet are left out. No network: it
+/// reads what the engine last learned.
+#[tauri::command]
+pub(crate) fn sync_book_states(store: State<Store>, engine: State<SyncEngine>) -> HashMap<String, &'static str> {
+    let mut states: HashMap<String, &'static str> = engine.in_clouds().into_iter().map(|fingerprint| (fingerprint, "cloud")).collect();
+    store.read(|s| {
+        for pending in &s.outbox {
+            if let Job::Upload { fingerprint } = &pending.job {
+                states.insert(fingerprint.clone(), if pending.no_room { "nofit" } else { "waiting" });
+            }
+        }
+    });
+    states
 }
 
 /// Has the engine look at its outbox now (the app came back to the front).
@@ -1498,7 +1523,7 @@ mod tests {
         // Another device asks for it: it lands and is reported as arrived.
         let (_dir2, other, other_books, other_root) = library_with(&[]);
         other.update(|s| super::engine::queue(&mut s.outbox, Job::Download { fingerprint: fp.clone() })).unwrap();
-        assert_eq!(super::engine::run_due(&other, &other_books, &[&via], 0), [fp]);
+        assert_eq!(super::engine::run_due(&other, &other_books, &[&via], 0).arrived, [fp]);
         assert!(other_root.join("Book.epub").is_file());
     }
 

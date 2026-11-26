@@ -163,6 +163,20 @@ impl CloudStore for Dropbox {
         }
     }
 
+    fn space(&self, access: &str) -> Result<Option<(u64, u64)>, SyncError> {
+        let reply = net::post(
+            "https://api.dropboxapi.com/2/users/get_space_usage",
+            &[("Authorization", &format!("Bearer {access}")), ("Content-Type", "application/json")],
+            b"null",
+        )
+        .map_err(SyncError::offline)?;
+        if reply.status != 200 {
+            return Err(SyncError::from_reply("Dropbox space", &reply));
+        }
+        let usage: serde_json::Value = serde_json::from_slice(&reply.body).map_err(|e| SyncError::data(format!("Dropbox space is not ours: {e}")))?;
+        Ok(usage["used"].as_u64().zip(usage["allocation"]["allocated"].as_u64()))
+    }
+
     fn list(&self, access: &str, prefix: &str) -> Result<Vec<String>, SyncError> {
         let mut names = Vec::new();
         let mut url = "https://api.dropboxapi.com/2/files/list_folder";
