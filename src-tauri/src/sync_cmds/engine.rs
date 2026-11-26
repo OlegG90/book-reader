@@ -6,9 +6,10 @@
 //! store so nothing is lost on a restart. It also runs the startup pull, once
 //! per start of the app.
 
-use super::{book_transfer_allowed, enabled, pull_all_clouds, pull_book_from_cloud, push_book_to_cloud, transports, BookKey, Transport};
+use super::{book_stores, book_transfer_allowed, cloud_books, enabled, latest_of, pull_all_clouds, pull_book_from_cloud, push_book_to_cloud, transports, BookKey, Transport};
 use crate::clock::now_ms;
-use crate::library_cmds::LibraryBooks;
+use crate::library_cmds::{library_root, LibraryBooks};
+use crate::platform::{Active, Platform};
 use crate::store::{Job, Pending, Store};
 use crate::sync_error::Kind;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -25,6 +26,14 @@ const BACKOFF_FIRST_MS: u64 = 30_000;
 const BACKOFF_MAX_MS: u64 = 30 * 60_000;
 /// A server that asks to slow down waits at least this long.
 const RATE_LIMIT_MS: u64 = 5 * 60_000;
+/// How often the library is compared with the clouds with nothing asking:
+/// another device may have added or removed books meanwhile.
+const RECONCILE_MS: u64 = 10 * 60_000;
+/// Up to this much the engine downloads new cloud books by itself; more
+/// waits for the reader's yes (the library's download offer).
+const AUTO_BOOKS: usize = 10;
+const AUTO_BYTES: u64 = 100 * 1024 * 1024;
+
 /// A job that failed this often is dropped: what still fails after hours of
 /// tries (a broken file, a library gone, a wrong password) won't heal by
 /// itself. Queueing the same work again starts over.
@@ -60,6 +69,21 @@ fn backoff(attempts: u32, kind: Kind) -> u64 {
 /// Whether a job moves a book file (held on metered networks).
 fn moves_a_file(job: &Job) -> bool {
     matches!(job, Job::Upload { .. } | Job::Download { .. })
+}
+
+/// Removes a book from every cloud that holds it; done when none does.
+fn remove_everywhere(store: &Store, transports: &[&dyn Transport], fingerprint: &str) -> Verdict {
+    let mut failed = None;
+    for t in book_stores(store, transports) {
+        let Some(record) = t.books().and_then(|books| books.get(fingerprint).cloned()) else { continue };
+        if record.removed.is_some() {
+            continue;
+        }
+        if let Err(e) = t.remove_book(store, fingerprint, &record) {
+            failed = Some(e.kind);
+        }
+    }
+    failed.map_or(Verdict::Done, Verdict::Retry)
 }
 
 /// Whether a job may run at `now`: it is due, and a book file only when the
@@ -102,7 +126,75 @@ fn work(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], job:
             }
             Err(_) => Verdict::Retry(Kind::Other),
         },
+        Job::Remove { fingerprint } => remove_everywhere(store, transports, fingerprint),
     }
+}
+
+/// What a reconcile changed in the library.
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct Reconciled {
+    /// Library books removed from the clouds on another device, moved out here.
+    pub(super) moved_out: usize,
+}
+
+/// What each library book needs: an upload (a cloud lacks it, or it came
+/// back after its removal), or to leave this library (another device removed
+/// it from the clouds after it came here). Returns the uploads' fingerprints
+/// and the books to move out.
+pub(super) fn sort_library(
+    library: &[crate::library::Entry],
+    per_cloud: &[std::collections::HashMap<String, crate::cloud::BookRecord>],
+    latest: &std::collections::HashMap<String, crate::cloud::BookRecord>,
+) -> (Vec<String>, Vec<crate::library::Entry>) {
+    let mut uploads = Vec::new();
+    let mut moved_out = Vec::new();
+    for entry in library {
+        match latest.get(&entry.fingerprint) {
+            Some(record) if record.removed.is_some_and(|at| at >= entry.added) => moved_out.push(entry.clone()),
+            _ if per_cloud.iter().any(|books| books.get(&entry.fingerprint).is_none_or(|r| r.removed.is_some())) => {
+                uploads.push(entry.fingerprint.clone());
+            }
+            _ => {}
+        }
+    }
+    (uploads, moved_out)
+}
+
+/// Compares the library with the clouds (see Library sync in the spec):
+/// - books the clouds lack (or a book added again after its removal) are
+///   queued for upload;
+/// - new cloud books are queued for download when there are few of them (more
+///   wait for the reader's yes); books removed here on purpose never are;
+/// - books another device removed from the clouds after they came here go
+///   the way Delete from library does (the Recycle Bin on Windows);
+/// - Removed books forgets books the clouds no longer hold.
+pub(super) fn reconcile(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport]) -> Reconciled {
+    let Ok(root) = library_root(store) else { return Reconciled::default() };
+    let per_cloud = cloud_books(store, transports);
+    let Some(latest) = latest_of(&per_cloud) else { return Reconciled::default() };
+    let library = books.snapshot(store, &root);
+    let removed_here = store.read(|s| s.removed_here.clone());
+    let (uploads, moved_out) = sort_library(&library, &per_cloud, &latest);
+    let mut jobs: Vec<Job> = uploads.into_iter().map(|fingerprint| Job::Upload { fingerprint }).collect();
+    let local: std::collections::BTreeSet<String> = library.iter().map(|b| b.fingerprint.clone()).collect();
+    let missing = super::collect_missing(store, &latest, &local, &removed_here);
+    if missing.len() <= AUTO_BOOKS && missing.iter().map(|m| m.size).sum::<u64>() <= AUTO_BYTES {
+        jobs.extend(missing.into_iter().map(|m| Job::Download { fingerprint: m.fingerprint }));
+    }
+    let _ = store.update(|s| {
+        for job in jobs {
+            queue(&mut s.outbox, job);
+        }
+        s.removed_here.retain(|fingerprint| latest.get(fingerprint).is_some_and(|r| r.removed.is_none()));
+    });
+    let mut moved = 0;
+    for entry in moved_out {
+        if Active::delete_book(&entry.absolute(&root)).is_ok() {
+            books.forget(&entry.path);
+            moved += 1;
+        }
+    }
+    Reconciled { moved_out: moved }
 }
 
 /// Records how a try went. Only the job as it was tried is touched: a newer
@@ -174,6 +266,9 @@ fn sleep_for(store: &Store, now: u64) -> u64 {
 pub(crate) struct SyncEngine {
     woken: Mutex<bool>,
     bell: Condvar,
+    /// The library changed (a scan, a delete): compare it with the clouds
+    /// on the next round.
+    reconcile: AtomicBool,
     /// The startup pull changed positions (for a window that started
     /// listening after it said so).
     pulled: AtomicBool,
@@ -184,6 +279,12 @@ impl SyncEngine {
     pub(crate) fn wake(&self) {
         *self.woken.lock().unwrap() = true;
         self.bell.notify_one();
+    }
+
+    /// Asks for the library to be compared with the clouds, and wakes the worker.
+    pub(crate) fn request_reconcile(&self) {
+        self.reconcile.store(true, Ordering::SeqCst);
+        self.wake();
     }
 
     /// Whether the startup pull changed positions.
@@ -214,7 +315,15 @@ pub(crate) fn start(app: &AppHandle) {
             engine.pulled.store(true, Ordering::SeqCst);
             let _ = app.emit("sync-positions-updated", ());
         }
+        let mut reconciled_at = 0;
         loop {
+            let now = now_ms();
+            if engine.reconcile.swap(false, Ordering::SeqCst) || now.saturating_sub(reconciled_at) >= RECONCILE_MS {
+                reconciled_at = now;
+                if reconcile(&store, &books, &transports()).moved_out > 0 {
+                    let _ = app.emit("library-updated", ());
+                }
+            }
             if !run_due(&store, &books, &transports(), now_ms()).is_empty() {
                 let _ = app.emit("sync-books-arrived", ());
             }

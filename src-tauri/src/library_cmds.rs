@@ -222,9 +222,15 @@ pub(crate) struct LibraryBook {
 
 /// Scans the library folder (cheap after the first time: see library::scan).
 #[tauri::command(async)]
-pub(crate) fn scan_library(app: AppHandle, store: State<Store>, books: State<LibraryBooks>) -> CmdResult<Vec<LibraryBook>> {
+pub(crate) fn scan_library(
+    app: AppHandle,
+    store: State<Store>,
+    books: State<LibraryBooks>,
+    engine: State<crate::sync_cmds::SyncEngine>,
+) -> CmdResult<Vec<LibraryBook>> {
     let root = library_root(&store)?;
     Active::check_library_access(&app)?;
+    let before: HashSet<String> = books.snapshot(&store, &root).into_iter().map(|b| b.fingerprint).collect();
     // Books whose format module is off stay listed, marked, and refuse to open.
     let disabled = store.read(modules::disabled_ids);
     // A file count while it runs, so the library screen shows the scan is moving.
@@ -260,8 +266,27 @@ pub(crate) fn scan_library(app: AppHandle, store: State<Store>, books: State<Lib
             })
             .collect()
     });
+    note_removals(&store, &before, &entries);
     books.replace(entries, &root);
+    // Books came or went: the engine compares the library with the clouds.
+    engine.request_reconcile();
     Ok(views)
+}
+
+/// Keeps Removed books in step with the folder: a book whose file is gone
+/// since the last scan (deleted outside the app) counts as removed here; a
+/// book back in the library no longer does.
+fn note_removals(store: &Store, before: &HashSet<String>, entries: &[library::Entry]) {
+    let now: HashSet<&str> = entries.iter().map(|e| e.fingerprint.as_str()).collect();
+    let gone: Vec<&String> = before.iter().filter(|f| !now.contains(f.as_str())).collect();
+    let back = store.read(|s| s.removed_here.iter().any(|f| now.contains(f.as_str())));
+    if gone.is_empty() && !back {
+        return;
+    }
+    let _ = store.update(|s| {
+        s.removed_here.retain(|f| !now.contains(f.as_str()));
+        s.removed_here.extend(gone.into_iter().cloned());
+    });
 }
 
 #[tauri::command(async)]
@@ -439,7 +464,7 @@ mod tests {
     #[test]
     fn cloud_state_names_every_case() {
         let books: HashMap<String, crate::cloud::BookRecord> =
-            [("fp".into(), crate::cloud::BookRecord { name: "a".into(), size: 1, sha256: "s".into() })]
+            [("fp".into(), crate::cloud::BookRecord { name: "a".into(), size: 1, sha256: "s".into(), added: 0, removed: None })]
                 .into_iter()
                 .collect();
         assert_eq!(cloud_state(Err("down".into()), "fp"), CloudState::Unknown);
@@ -524,9 +549,13 @@ pub(crate) fn delete_library_book(app: AppHandle, store: State<Store>, books: St
     let path = entry.absolute(&library_root(&store)?);
     Active::delete_book(&path).map_err(|e| format!("{}: {e}", paths::file_name(&path)))?;
     books.forget(&key);
-    if store.read(|s| s.recent.iter().any(|r| r.fingerprint == entry.fingerprint)) {
-        store.update(|s| s.recent.retain(|r| r.fingerprint != entry.fingerprint)).map_err(|e| e.to_string())?;
-    }
+    // The clouds keep it until it is removed from them too (Removed books).
+    store
+        .update(|s| {
+            s.recent.retain(|r| r.fingerprint != entry.fingerprint);
+            s.removed_here.insert(entry.fingerprint.clone());
+        })
+        .map_err(|e| e.to_string())?;
     let _ = app.emit("library-updated", ());
     Ok(())
 }

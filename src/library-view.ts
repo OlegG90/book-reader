@@ -579,7 +579,8 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
       return
     }
     const n = cloudMissing.length
-    $('cloud-offer-text').textContent = `The cloud has ${n === 1 ? 'a book' : `${n} books`} not in this library.`
+    const size = formatSize(cloudMissing.reduce((sum, m) => sum + m.size, 0))
+    $('cloud-offer-text').textContent = `Download ${n === 1 ? 'a book' : `${n} books`} (${size}) from the clouds?`
     $('cloud-offer').hidden = false
   }
 

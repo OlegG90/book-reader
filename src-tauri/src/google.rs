@@ -316,6 +316,17 @@ impl CloudStore for Google {
         upload_bytes(access, file_id.as_deref(), name, bytes)
     }
 
+    fn delete(&self, access: &str, name: &str) -> Result<(), SyncError> {
+        // Two files may share a name (see find_file): every one goes.
+        while let Some(id) = find_file(access, name)? {
+            let reply = net::bearer_delete(&format!("https://www.googleapis.com/drive/v3/files/{id}"), access).map_err(SyncError::offline)?;
+            if reply.status != 204 && reply.status != 200 && reply.status != 404 {
+                return Err(SyncError::from_reply("Google Drive delete", &reply));
+            }
+        }
+        Ok(())
+    }
+
     fn list(&self, access: &str, prefix: &str) -> Result<Vec<String>, SyncError> {
         let mut names = Vec::new();
         let mut page_token: Option<String> = None;

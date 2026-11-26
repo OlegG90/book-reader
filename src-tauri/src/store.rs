@@ -38,6 +38,10 @@ pub struct State {
     /// here so it survives a restart.
     #[serde(deserialize_with = "lenient_outbox")]
     pub outbox: Vec<Pending>,
+    /// Books deleted from this device's library that the clouds still hold:
+    /// not downloaded again here, and listed under Removed books until they
+    /// are removed from the clouds too (or come back).
+    pub removed_here: BTreeSet<String>,
 }
 
 /// Reads the outbox, skipping entries this build doesn't know (a job kind
@@ -58,6 +62,8 @@ pub enum Job {
     Upload { fingerprint: String },
     /// Download a cloud book the library lacks.
     Download { fingerprint: String },
+    /// Remove a book from every cloud, for every device.
+    Remove { fingerprint: String },
 }
 
 impl Job {
@@ -69,6 +75,7 @@ impl Job {
             (Job::Position { transport: a, fingerprint: f, .. }, Job::Position { transport: b, fingerprint: g, .. }) => a == b && f == g,
             (Job::Upload { fingerprint: f }, Job::Upload { fingerprint: g }) => f == g,
             (Job::Download { fingerprint: f }, Job::Download { fingerprint: g }) => f == g,
+            (Job::Remove { fingerprint: f }, Job::Remove { fingerprint: g }) => f == g,
             _ => false,
         }
     }

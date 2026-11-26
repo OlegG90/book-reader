@@ -69,6 +69,12 @@ trait Transport {
     fn books(&self) -> Option<HashMap<String, crate::cloud::BookRecord>> {
         None
     }
+    /// Removes a book from the cloud for every device (a removal record in
+    /// this device's manifest, then the file goes).
+    fn remove_book(&self, store: &Store, fingerprint: &str, record: &crate::cloud::BookRecord) -> Result<(), SyncError> {
+        let _ = (store, fingerprint, record);
+        Ok(())
+    }
     /// Downloads a book file by its cloud name; `None` when the cloud never
     /// saw it.
     fn pull_book(&self, remote_name: &str) -> Result<Option<Vec<u8>>, SyncError> {
@@ -160,6 +166,10 @@ impl Transport for CloudTransport<'_> {
 
     fn push_book(&self, store: &Store, fingerprint: &str, record: &cloud::BookRecord, bytes: &[u8]) -> Result<bool, SyncError> {
         cloud::push_book(self.0, &device_id(store)?, fingerprint, record, bytes)
+    }
+
+    fn remove_book(&self, store: &Store, fingerprint: &str, record: &cloud::BookRecord) -> Result<(), SyncError> {
+        cloud::remove_book(self.0, &device_id(store)?, fingerprint, record)
     }
 }
 
@@ -288,6 +298,8 @@ fn push_book_to_cloud(store: &Store, books: &LibraryBooks, transports: &[&dyn Tr
         name: entry.path.clone(),
         size: bytes.len() as u64,
         sha256: fingerprint::full_sha256(&path).map_err(|e| e.to_string())?,
+        added: now_ms(),
+        removed: None,
     };
     let mut pushed = false;
     let mut failed = None;
@@ -329,20 +341,50 @@ pub(crate) struct MissingBook {
     size: u64,
 }
 
-/// The cloud books the library lacks, first cloud wins on duplicates: same
-/// fingerprint means same bytes, so one entry is enough.
-fn collect_missing(manifests: &[&HashMap<String, crate::cloud::BookRecord>], local: &BTreeSet<String>) -> Vec<MissingBook> {
-    let mut seen = BTreeSet::new();
-    let mut missing = Vec::new();
-    for books in manifests {
-        for (fingerprint, record) in books.iter() {
-            if local.contains(fingerprint.as_str()) || !seen.insert(fingerprint.clone()) {
-                continue;
+/// What the clouds say about each book, the latest event across them
+/// winning (an upload, or a removal from the clouds); `None` when no cloud
+/// that keeps books could be read.
+fn latest_books(store: &Store, transports: &[&dyn Transport]) -> Option<HashMap<String, crate::cloud::BookRecord>> {
+    latest_of(&cloud_books(store, transports))
+}
+
+/// Each cloud's books (removed ones included), for the clouds that keep
+/// books and could be read.
+fn cloud_books(store: &Store, transports: &[&dyn Transport]) -> Vec<HashMap<String, crate::cloud::BookRecord>> {
+    book_stores(store, transports).iter().filter_map(|t| t.books()).collect()
+}
+
+/// The latest event per book across clouds; `None` without any cloud.
+fn latest_of(per_cloud: &[HashMap<String, crate::cloud::BookRecord>]) -> Option<HashMap<String, crate::cloud::BookRecord>> {
+    if per_cloud.is_empty() {
+        return None;
+    }
+    let mut all: HashMap<String, crate::cloud::BookRecord> = HashMap::new();
+    for books in per_cloud {
+        for (fingerprint, record) in books {
+            if all.get(fingerprint).is_none_or(|have| record.event_time() > have.event_time()) {
+                all.insert(fingerprint.clone(), record.clone());
             }
-            missing.push(MissingBook { fingerprint: fingerprint.clone(), name: record.name.clone(), size: record.size });
         }
     }
-    missing
+    Some(all)
+}
+
+/// The cloud books the library lacks: present in the clouds, not removed
+/// here on purpose, and a book file this device opens.
+fn collect_missing(
+    store: &Store,
+    latest: &HashMap<String, crate::cloud::BookRecord>,
+    local: &BTreeSet<String>,
+    removed_here: &BTreeSet<String>,
+) -> Vec<MissingBook> {
+    latest
+        .iter()
+        .filter(|(fingerprint, record)| {
+            record.removed.is_none() && !local.contains(*fingerprint) && !removed_here.contains(*fingerprint) && book_format_allowed(store, &record.name).is_ok()
+        })
+        .map(|(fingerprint, record)| MissingBook { fingerprint: fingerprint.clone(), name: record.name.clone(), size: record.size })
+        .collect()
 }
 
 /// The cloud books the library lacks, for the download offer. Silent like a
@@ -357,16 +399,9 @@ pub(crate) fn sync_missing_books(store: State<Store>, books: State<LibraryBooks>
 fn missing_cloud_books(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport]) -> CmdResult<Vec<MissingBook>> {
     let root = library_root(store)?;
     let local: BTreeSet<String> = books.snapshot(store, &root).into_iter().map(|b| b.fingerprint).collect();
-    let mut manifests = Vec::new();
-    for t in book_stores(store, transports) {
-        if let Some(mut books) = t.books() {
-            // Only books this device would open: a book file, its format on.
-            books.retain(|_, record| book_format_allowed(store, &record.name).is_ok());
-            manifests.push(books);
-        }
-    }
-    let refs: Vec<&HashMap<String, crate::cloud::BookRecord>> = manifests.iter().collect();
-    Ok(collect_missing(&refs, &local))
+    let Some(latest) = latest_books(store, transports) else { return Ok(Vec::new()) };
+    let removed_here = store.read(|s| s.removed_here.clone());
+    Ok(collect_missing(store, &latest, &local, &removed_here))
 }
 
 /// A manifest name is a library-relative path: absolute paths and parent
@@ -422,7 +457,7 @@ fn pull_book_from_cloud(store: &Store, transports: &[&dyn Transport], fingerprin
     // A cloud that fails, or sends a copy that fails its hash, hands over to the next.
     for t in book_stores(store, transports) {
         let Some(manifest) = t.books() else { continue };
-        let Some(record) = manifest.get(fingerprint) else { continue };
+        let Some(record) = manifest.get(fingerprint).filter(|r| r.removed.is_none()) else { continue };
         if let Err(e) = book_format_allowed(store, &record.name) {
             failed = Some(e);
             continue;
@@ -567,12 +602,30 @@ pub(crate) fn sync_queue_position(
     )
 }
 
-/// Queues a library book's file for the clouds that lack it (when a book
-/// being read closes); held on metered networks until Wi-Fi is back, and
-/// dropped when no cloud has a login.
+/// Removes books from every cloud, for every device: they leave the other
+/// devices' libraries too, and Removed books forgets them.
 #[tauri::command(async)]
-pub(crate) fn sync_queue_upload(store: State<Store>, engine: State<SyncEngine>, fingerprint: String) -> CmdResult<()> {
-    queue_jobs(&store, &engine, [Job::Upload { fingerprint }])
+pub(crate) fn sync_remove_from_clouds(store: State<Store>, engine: State<SyncEngine>, fingerprints: Vec<String>) -> CmdResult<()> {
+    store.update(|s| s.removed_here.retain(|f| !fingerprints.contains(f))).map_err(|e| e.to_string())?;
+    queue_jobs(&store, &engine, fingerprints.into_iter().map(|fingerprint| Job::Remove { fingerprint }))
+}
+
+/// The books deleted from this library that the clouds still hold: the
+/// Removed books list, from which they can be removed from the clouds too.
+#[tauri::command(async)]
+pub(crate) fn sync_removed_books(store: State<Store>) -> Vec<MissingBook> {
+    let removed_here = store.read(|s| s.removed_here.clone());
+    if removed_here.is_empty() {
+        return Vec::new();
+    }
+    let latest = latest_books(&store, &transports()).unwrap_or_default();
+    removed_here
+        .iter()
+        .filter_map(|fingerprint| {
+            let record = latest.get(fingerprint).filter(|r| r.removed.is_none())?;
+            Some(MissingBook { fingerprint: fingerprint.clone(), name: record.name.clone(), size: record.size })
+        })
+        .collect()
 }
 
 /// Queues downloads of cloud books the library lacks; the windows hear
@@ -804,7 +857,7 @@ mod tests {
     }
 
     fn book_record(name: &str, size: u64) -> crate::cloud::BookRecord {
-        crate::cloud::BookRecord { name: name.into(), size, sha256: "abc".into() }
+        crate::cloud::BookRecord { name: name.into(), size, sha256: "abc".into(), added: 0, removed: None }
     }
 
     #[test]
@@ -833,9 +886,17 @@ mod tests {
         let mut b = HashMap::new();
         b.insert("gone".into(), book_record("A.epub", 1));
         b.insert("other".into(), book_record("O.epub", 2));
+        let (_dir, store) = synced_store(&[]);
+        let mut latest = a;
+        latest.extend(b);
+        let mut removed = book_record("R.epub", 3);
+        removed.removed = Some(5);
+        latest.insert("removed".into(), removed);
+        latest.insert("dropped-here".into(), book_record("D.epub", 4));
         let local: std::collections::BTreeSet<String> = ["here".into()].into_iter().collect();
-        let missing = collect_missing(&[&a, &b], &local);
-        assert_eq!(missing.len(), 2);
+        let removed_here: std::collections::BTreeSet<String> = ["dropped-here".into()].into_iter().collect();
+        let missing = collect_missing(&store, &latest, &local, &removed_here);
+        assert_eq!(missing.len(), 2, "neither removed from the clouds nor removed here");
         assert!(missing.iter().any(|m| m.fingerprint == "gone" && m.name == "A.epub"));
         assert!(missing.iter().any(|m| m.fingerprint == "other"));
     }
@@ -1138,6 +1199,10 @@ mod tests {
         fn list(&self, _access: &str, prefix: &str) -> Result<Vec<String>, SyncError> {
             Ok(self.names().into_iter().filter(|n| n.starts_with(prefix)).collect())
         }
+        fn delete(&self, _access: &str, name: &str) -> Result<(), SyncError> {
+            self.files.lock().unwrap().remove(name);
+            Ok(())
+        }
         fn errors(&self) -> &crate::cloud::ErrorSlot {
             &self.errors
         }
@@ -1191,6 +1256,55 @@ mod tests {
         crate::cloud::push(&cloud, &local, &fp, "epubcfi(/6/8)", 0.7, "Phone", "phone-id").unwrap();
         assert_eq!(pull_all_clouds(&store, &books, &[&CloudTransport(&cloud)]).unwrap(), 1);
         assert_eq!(store.read(|s| s.positions[&fp].cfi.clone()), "epubcfi(/6/8)");
+    }
+
+    /// A library book as the scan lists it, for the reconcile rules.
+    fn entry(fingerprint: &str, added: u64) -> crate::library::Entry {
+        crate::library::Entry {
+            path: format!("{fingerprint}.epub"),
+            size: 1,
+            modified: 0,
+            fingerprint: fingerprint.into(),
+            book: crate::metadata::Book { title: fingerprint.into(), authors: Vec::new(), series: None, series_index: None, language: None, annotation: None },
+            cover: None,
+            added,
+        }
+    }
+
+    #[test]
+    fn the_library_and_the_clouds_are_brought_together() {
+        let record = |added: u64, removed: Option<u64>| crate::cloud::BookRecord { added, removed, ..book_record("x.epub", 1) };
+        let mut a = HashMap::new();
+        a.insert("both".to_string(), record(1, None));
+        a.insert("gone-elsewhere".to_string(), record(1, Some(50)));
+        a.insert("came-back".to_string(), record(1, Some(50)));
+        let mut b = a.clone();
+        b.remove("both");
+        let per_cloud = vec![a.clone(), b];
+        let latest = super::latest_of(&per_cloud).unwrap();
+        let library = [entry("both", 10), entry("new", 10), entry("gone-elsewhere", 10), entry("came-back", 90)];
+        let (uploads, moved_out) = super::engine::sort_library(&library, &per_cloud, &latest);
+        // "both" is missing from the second cloud; "came-back" was added again after its removal.
+        assert_eq!(uploads, ["both", "new", "came-back"]);
+        assert_eq!(moved_out.iter().map(|e| e.fingerprint.as_str()).collect::<Vec<_>>(), ["gone-elsewhere"]);
+    }
+
+    #[test]
+    fn a_book_removed_from_the_clouds_is_gone_for_every_device() {
+        let cloud = MemCloud::new(false);
+        let via = CloudTransport(&cloud);
+        let (_dir, store, books, _root) = library_with(&[("Book.epub", "bytes")]);
+        let fp = books.snapshot(&store, &library_root(&store).unwrap()).into_iter().next().unwrap().fingerprint;
+        assert!(push_book_to_cloud(&store, &books, &[&via], &fp).unwrap());
+        store.update(|s| super::engine::queue(&mut s.outbox, Job::Remove { fingerprint: fp.clone() })).unwrap();
+        super::engine::run_due(&store, &books, &[&via], 0);
+        assert!(store.read(|s| s.outbox.is_empty()));
+        assert!(!cloud.names().iter().any(|n| n.starts_with("book-")), "the file went");
+        let latest = super::latest_books(&store, &[&via]).unwrap();
+        assert!(latest[&fp].removed.is_some(), "and every device learns of it");
+        // Another device lists it neither as missing nor as Removed books.
+        let (_dir2, other, other_books, _r) = library_with(&[]);
+        assert!(missing_cloud_books(&other, &other_books, &[&via]).unwrap().is_empty());
     }
 
     #[test]
