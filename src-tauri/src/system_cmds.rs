@@ -39,66 +39,59 @@ pub(crate) fn file_types_registered() -> bool {
     register::registered()
 }
 
-/// A cloud's connection for the settings: whether a refresh token is kept,
-/// and the last sync failure, if any (sync stays quiet, but the settings
-/// show what went wrong).
+/// One cloud's connection for the settings: whether a refresh token is
+/// kept, and the last sync failure, if any (sync stays quiet, but the
+/// settings show what went wrong).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CloudConnection {
+    id: &'static str,
     connected: bool,
     last_error: Option<String>,
 }
 
-/// A cloud's connection as the settings show it.
-fn cloud_connection(store: &dyn CloudStore) -> CloudConnection {
-    CloudConnection { connected: store.connected(), last_error: store.errors().last() }
+/// Every cloud's connection, for the settings' rows; every connected cloud
+/// syncs at once.
+#[tauri::command(async)]
+pub(crate) fn cloud_connections() -> Vec<CloudConnection> {
+    crate::cloud::stores()
+        .iter()
+        .map(|cloud| CloudConnection { id: cloud.id(), connected: cloud.connected(), last_error: cloud.errors().last() })
+        .collect()
 }
 
-/// Dropbox's connection for the settings.
-#[tauri::command(async)]
-pub(crate) fn dropbox_status() -> CloudConnection {
-    cloud_connection(&dropbox::STORE)
+/// The cloud the settings name by its id.
+fn cloud_by_id(id: &str) -> CmdResult<&'static dyn CloudStore> {
+    crate::cloud::stores().into_iter().find(|cloud| cloud.id() == id).ok_or_else(|| format!("Unknown cloud: {id}."))
 }
 
-/// Connects Dropbox: opens its login in the browser, waits for the answer
-/// and keeps the refresh token like a catalog password.
+/// Connects a cloud on the desktop: opens its login in the browser, waits
+/// for the answer and keeps the refresh token like a catalog password. (A
+/// phone's Google login comes back on the app's scheme instead, see
+/// `google_connect_android`.)
 #[tauri::command(async)]
-pub(crate) fn dropbox_connect(app: AppHandle, store: State<Store>) -> CmdResult<()> {
-    store.read(|s| modules::require(s, modules::id::DROPBOX))?;
-    let pending = dropbox::begin()?;
+pub(crate) fn cloud_connect(app: AppHandle, store: State<Store>, id: String) -> CmdResult<()> {
+    let cloud = cloud_by_id(&id)?;
+    store.read(|s| modules::require(s, cloud.module()))?;
+    let pending = if cloud.id() == google::STORE.id() { google::begin()? } else { dropbox::begin()? };
     app.opener().open_url(&pending.url, None::<&str>).map_err(|e| e.to_string())?;
-    dropbox::finish(pending)
+    if cloud.id() == google::STORE.id() {
+        google::finish(pending)
+    } else {
+        dropbox::finish(pending)
+    }
 }
 
-/// Forgets the Dropbox token; connecting again starts over. Works with the
+/// Forgets a cloud's login; connecting again starts over. Works with the
 /// module off too, so a switched-off cloud never keeps its token.
 #[tauri::command(async)]
-pub(crate) fn dropbox_disconnect() -> CmdResult<()> {
-    crate::cloud::disconnect(&dropbox::STORE);
-    Ok(())
-}
-
-/// Google Drive's connection for the settings.
-#[tauri::command(async)]
-pub(crate) fn google_status() -> CloudConnection {
-    cloud_connection(&google::STORE)
-}
-
-/// Connects Google Drive: opens its login in the browser, waits for the answer
-/// and keeps the refresh token like a catalog password.
-#[tauri::command(async)]
-pub(crate) fn google_connect(app: AppHandle, store: State<Store>) -> CmdResult<()> {
-    store.read(|s| modules::require(s, modules::id::GOOGLE_DRIVE))?;
-    let pending = google::begin()?;
-    app.opener().open_url(&pending.url, None::<&str>).map_err(|e| e.to_string())?;
-    google::finish(pending)
-}
-
-/// Forgets the Google token; connecting again starts over. Works with the
-/// module off too, so a switched-off cloud never keeps its token.
-#[tauri::command(async)]
-pub(crate) fn google_disconnect() -> CmdResult<()> {
-    google::disconnect();
+pub(crate) fn cloud_disconnect(id: String) -> CmdResult<()> {
+    let cloud = cloud_by_id(&id)?;
+    if cloud.id() == google::STORE.id() {
+        google::disconnect();
+    } else {
+        crate::cloud::disconnect(cloud);
+    }
     Ok(())
 }
 

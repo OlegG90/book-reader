@@ -28,7 +28,7 @@ import { closePopup } from './book-menu'
 import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
-import { cloudModuleId, createAppearancePanel, createSettingsPage, type ModuleInfo, type SettingsSection } from './settings-panel'
+import { cloudModuleId, createAppearancePanel, createSettingsPage, type CloudConnection, type ModuleInfo, type SettingsSection } from './settings-panel'
 import { initBackButton, initIncoming, initOauthAnswer, initVolumeKeys, isAndroid, pollOauthAnswer, setReading } from './platform'
 import { createReadingView, type AddMode, type Offer } from './reading-view'
 import { createLibraryView, type View } from './library-view'
@@ -352,8 +352,8 @@ function closePanels() {
 
 const systemDark = matchMedia('(prefers-color-scheme: dark)')
 let fileTypesRegistered = false
-/** Which cloud is connected, if any: one at a time, like the picker. */
-let connectedCloud: 'dropbox' | 'google' | null = null
+/** The clouds with a login: every one of them syncs. */
+let connectedClouds: string[] = []
 const settingsPage = createSettingsPage($('settings'), settings, changes => void changeSettings(changes), {
   clearHistory: () => {
     void invoke('clear_recent')
@@ -371,12 +371,12 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
     // A phone's answer comes back on the app's scheme: the push event is
     // unreliable there, so a Google connect polls the stash instead; the
     // desktop waits on a loopback address instead.
-    const command = provider === 'google' && isAndroid ? 'google_connect_android' : provider === 'google' ? 'google_connect' : 'dropbox_connect'
-    if (provider === 'google' && isAndroid) {
+    const phoneGoogle = provider === 'google' && isAndroid
+    if (phoneGoogle) {
       stopOauthPoll?.()
       stopOauthPoll = pollOauthAnswer(takeOauthAnswer, finishOauthAnswer)
     }
-    void invoke(command).then(
+    void (phoneGoogle ? invoke('google_connect_android') : invoke('cloud_connect', { id: provider })).then(
       () => {
         void refreshCloudStatus()
         void sourcesPanel.refresh()
@@ -389,11 +389,10 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
       },
     )
   },
-  disconnectCloud: () => {
+  disconnectCloud: provider => {
     stopOauthPoll?.()
     stopOauthPoll = null
-    const command = connectedCloud === 'google' ? 'google_disconnect' : 'dropbox_disconnect'
-    void invoke(command).then(
+    void invoke('cloud_disconnect', { id: provider }).then(
       () => {
         void refreshCloudStatus()
         void sourcesPanel.refresh()
@@ -416,7 +415,7 @@ const appearancePanel = createAppearancePanel($('appearance'), settings, changes
 // The catalogs (OPDS servers), the key list and the version have their own sections in the settings.
 const sourcesPanel = createSourcesPanel(settingsPage.catalogs, {
   syncOff: () => settings.disabledModules.includes(MODULE.progressSync),
-  cloudReady: () => connectedCloud !== null && !settings.disabledModules.includes(cloudModuleId(connectedCloud)),
+  cloudReady: () => connectedClouds.some(id => !settings.disabledModules.includes(cloudModuleId(id))),
 })
 settingsPage.shortcuts.append($('shortcuts').querySelector('dl')!.cloneNode(true))
 const settingsVersion = el('span')
@@ -623,28 +622,14 @@ async function refreshFileTypesStatus() {
   settingsPage.setFileTypesRegistered(registered)
 }
 
-/** Shows which cloud is connected, and its last sync failure, if any. */
+/** Shows every cloud's connection, and its last sync failure, if any. */
 async function refreshCloudStatus() {
-  interface CloudStatus {
-    connected: boolean
-    lastError: string | null
-  }
-  const quiet = (e: unknown) => {
+  const clouds = await invoke<CloudConnection[]>('cloud_connections').catch((e): CloudConnection[] => {
     console.error(e)
-    return { connected: false, lastError: String(e) }
-  }
-  const [dropbox, google] = await Promise.all([
-    invoke<CloudStatus>('dropbox_status').catch(quiet),
-    invoke<CloudStatus>('google_status').catch(quiet),
-  ])
-  // One cloud at a time; the picker lists Dropbox first.
-  const active = dropbox.connected
-    ? { id: 'dropbox' as const, status: dropbox }
-    : google.connected
-      ? { id: 'google' as const, status: google }
-      : null
-  connectedCloud = active?.id ?? null
-  settingsPage.setCloudConnected(connectedCloud, active !== null, active?.status.lastError ?? null)
+    return []
+  })
+  connectedClouds = clouds.filter(c => c.connected).map(c => c.id)
+  settingsPage.setClouds(clouds)
 }
 
 // ---- Edge controls ----------------------------------------------------------
