@@ -273,15 +273,14 @@ pub(crate) fn library_cover(store: State<Store>, books: State<LibraryBooks>, key
     std::fs::read(library_cache(&store).covers().join(cover)).map(Response::new).map_err(|e| e.to_string())
 }
 
-/// Whether the cloud holds the book: recorded, missing, never checked
-/// (no login or a failed fetch), or switched off with its module.
+/// Whether a connected cloud holds the book: recorded, missing, or unknown
+/// (the manifest could not be fetched).
 #[derive(Serialize, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum CloudState {
     Synced,
     Absent,
     Unknown,
-    Off,
 }
 
 /// One cloud's verdict for the details dialog.
@@ -311,31 +310,13 @@ pub(crate) struct BookDetails {
     catalog_source: Option<String>,
 }
 
-/// One cloud's verdict for the book: off when its module is off, unknown
-/// without a login or when the manifest cannot be fetched, otherwise
-/// recorded or not.
-fn cloud_state(
-    off: bool,
-    connected: bool,
-    manifest: Result<Option<HashMap<String, crate::cloud::BookRecord>>, String>,
-    fingerprint: &str,
-) -> CloudState {
-    if off {
-        CloudState::Off
-    } else if !connected {
-        CloudState::Unknown
-    } else {
-        match manifest {
-            Err(_) => CloudState::Unknown,
-            Ok(None) => CloudState::Absent,
-            Ok(Some(books)) => {
-                if books.contains_key(fingerprint) {
-                    CloudState::Synced
-                } else {
-                    CloudState::Absent
-                }
-            }
-        }
+/// One connected cloud's verdict for the book: unknown when the manifest
+/// cannot be fetched, otherwise recorded or not.
+fn cloud_state(manifest: Result<Option<HashMap<String, crate::cloud::BookRecord>>, String>, fingerprint: &str) -> CloudState {
+    match manifest {
+        Err(_) => CloudState::Unknown,
+        Ok(Some(books)) if books.contains_key(fingerprint) => CloudState::Synced,
+        Ok(_) => CloudState::Absent,
     }
 }
 
@@ -374,7 +355,8 @@ type ManifestFetch = fn() -> Result<Option<HashMap<String, crate::cloud::BookRec
 /// and manifest fetch.
 type CloudTransport = (&'static str, fn() -> bool, ManifestFetch);
 
-/// The cloud verdicts for one fingerprint, for the details dialog. Slow when
+/// The cloud verdicts for one fingerprint, for the details dialog: one per
+/// cloud that syncs (its module and progress sync on, a login kept). Slow when
 /// the login is stale (the manifest fetch has the network timeout); the
 /// dialog shows local details first and fills these in on arrival.
 #[tauri::command(async)]
@@ -390,11 +372,14 @@ fn book_cloud_for(store: &Store, fingerprint: &str) -> CmdResult<Vec<CloudStatus
     ];
     let mut out = Vec::new();
     for (module, connected, manifest) in clouds {
-        let off = store.read(|s| modules::is_off(s, module));
+        let off = store.read(|s| modules::is_off(s, module) || modules::is_off(s, "capability:progress-sync"));
+        if off || !connected() {
+            continue;
+        }
         out.push(CloudStatus {
             id: module,
             label: labels.get(module).copied().unwrap_or(module).into(),
-            state: cloud_state(off, connected(), manifest(), fingerprint),
+            state: cloud_state(manifest(), fingerprint),
         });
     }
     Ok(out)
@@ -461,12 +446,10 @@ mod tests {
             [("fp".into(), crate::cloud::BookRecord { name: "a".into(), size: 1, sha256: "s".into() })]
                 .into_iter()
                 .collect();
-        assert_eq!(cloud_state(true, true, Ok(Some(books.clone())), "fp"), CloudState::Off);
-        assert_eq!(cloud_state(false, false, Ok(Some(books.clone())), "fp"), CloudState::Unknown);
-        assert_eq!(cloud_state(false, true, Err("down".into()), "fp"), CloudState::Unknown);
-        assert_eq!(cloud_state(false, true, Ok(None), "fp"), CloudState::Absent);
-        assert_eq!(cloud_state(false, true, Ok(Some(books.clone())), "fp"), CloudState::Synced);
-        assert_eq!(cloud_state(false, true, Ok(Some(books)), "other"), CloudState::Absent);
+        assert_eq!(cloud_state(Err("down".into()), "fp"), CloudState::Unknown);
+        assert_eq!(cloud_state(Ok(None), "fp"), CloudState::Absent);
+        assert_eq!(cloud_state(Ok(Some(books.clone())), "fp"), CloudState::Synced);
+        assert_eq!(cloud_state(Ok(Some(books)), "other"), CloudState::Absent);
     }
 
     #[test]
@@ -512,12 +495,10 @@ mod tests {
     }
 
     #[test]
-    fn book_cloud_is_off_with_the_modules() {
+    fn book_cloud_lists_only_clouds_that_sync() {
+        // The test state switches the clouds off: no rows, no network.
         let (_dir, store, _books) = bookish_state();
-        let cloud = book_cloud_for(&store, "fp1").unwrap();
-        assert_eq!(cloud.len(), 2);
-        assert!(cloud.iter().all(|c| c.state == CloudState::Off));
-        assert_eq!(cloud[0].id, "capability:dropbox");
+        assert!(book_cloud_for(&store, "fp1").unwrap().is_empty());
     }
 }
 

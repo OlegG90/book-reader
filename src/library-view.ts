@@ -522,8 +522,6 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
         return 'Synced'
       case 'absent':
         return 'Not in the cloud'
-      case 'off':
-        return 'Turned off in Settings › Modules'
       default:
         return 'Unknown'
     }
