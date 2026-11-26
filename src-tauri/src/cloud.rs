@@ -86,6 +86,8 @@ const POSITIONS_FILE: &str = "sync-state.json";
 const POSITIONS_VERSION: u32 = 1;
 /// The book manifest in every cloud's app folder.
 const MANIFEST_FILE: &str = "sync-books.json";
+/// The book manifest's envelope version.
+const BOOKS_VERSION: u32 = 1;
 
 /// Every cloud, in merge order.
 pub fn stores() -> [&'static dyn CloudStore; 2] {
@@ -160,7 +162,8 @@ pub fn push(
         let mut local = local.clone();
         local.insert(fingerprint.into(), Position { cfi: cfi.into(), fraction, time: crate::clock::now_ms() });
         let merged = merge_for_upload(&local, &remote, device, device_id);
-        if !should_upload(&merged, &remote) {
+        // Nothing new: leave the cloud file alone.
+        if merged == remote {
             return Ok(());
         }
         let body = serde_json::to_vec(&SyncFile { version: POSITIONS_VERSION, positions: merged }).map_err(|e| e.to_string())?;
@@ -172,8 +175,12 @@ pub fn push(
 /// The cloud's book manifest: `None` when no book was ever uploaded, an
 /// error when it could not be read (never mistaken for an empty one).
 pub fn manifest(store: &dyn CloudStore) -> Result<Option<HashMap<String, BookRecord>>, String> {
-    let access = store.access_token()?;
-    let Some(body) = store.get(&access, MANIFEST_FILE)? else { return Ok(None) };
+    manifest_file(store, &store.access_token()?)
+}
+
+/// The manifest read with a token in hand (see `manifest`).
+fn manifest_file(store: &dyn CloudStore, access: &str) -> Result<Option<HashMap<String, BookRecord>>, String> {
+    let Some(body) = store.get(access, MANIFEST_FILE)? else { return Ok(None) };
     parse_manifest(&body).map(Some)
 }
 
@@ -196,7 +203,7 @@ pub fn push_book(store: &dyn CloudStore, fingerprint: &str, record: &BookRecord,
             fingerprint,
             record,
             bytes,
-            || manifest(store),
+            || manifest_file(store, &access),
             |name, bytes| store.put(&access, name, bytes),
             |books| store.put(&access, MANIFEST_FILE, &render_manifest(books)?),
         )
@@ -220,7 +227,7 @@ pub struct RemoteRecord {
 /// The positions file envelope: the version plus the books.
 /// Unknown fields are tolerated on load, for forward compatibility.
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct SyncFile {
+struct SyncFile {
     pub version: u32,
     #[serde(default)]
     pub positions: HashMap<String, RemoteRecord>,
@@ -229,7 +236,7 @@ pub struct SyncFile {
 /// Merges remote records into the local positions for the upload: newest per
 /// book wins; ties and local-only books keep the local position, stamped
 /// with this install (the echo check needs a writer).
-pub fn merge_for_upload(
+fn merge_for_upload(
     local: &HashMap<String, crate::store::Position>,
     remote: &HashMap<String, RemoteRecord>,
     device: &str,
@@ -254,11 +261,6 @@ pub fn merge_for_upload(
     merged
 }
 
-/// Whether the merged file differs from what the cloud has.
-pub fn should_upload(merged: &HashMap<String, RemoteRecord>, remote: &HashMap<String, RemoteRecord>) -> bool {
-    merged != remote
-}
-
 /// One book file the cloud keeps, keyed by fingerprint in `BookManifest`.
 /// Same fingerprint means same bytes, so records never conflict.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -272,27 +274,24 @@ pub struct BookRecord {
 /// The fingerprint-keyed book manifest envelope; unknown fields are
 /// tolerated on load, for forward compatibility.
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct BookManifest {
+struct BookManifest {
     pub version: u32,
     #[serde(default)]
     pub books: HashMap<String, BookRecord>,
 }
 
 /// Parses a cloud book manifest.
-pub fn parse_manifest(bytes: &[u8]) -> Result<HashMap<String, BookRecord>, String> {
+fn parse_manifest(bytes: &[u8]) -> Result<HashMap<String, BookRecord>, String> {
     let manifest: BookManifest =
         serde_json::from_slice(bytes).map_err(|e| format!("book manifest is not ours: {e}"))?;
     Ok(manifest.books)
 }
 
 /// Renders a cloud book manifest.
-pub fn render_manifest(books: &HashMap<String, BookRecord>) -> Result<Vec<u8>, String> {
+fn render_manifest(books: &HashMap<String, BookRecord>) -> Result<Vec<u8>, String> {
     let manifest = BookManifest { version: BOOKS_VERSION, books: books.clone() };
     serde_json::to_vec(&manifest).map_err(|e| e.to_string())
 }
-
-/// The manifest envelope version, shared by every cloud transport.
-pub const BOOKS_VERSION: u32 = 1;
 
 /// The cloud file name for a book: fingerprint first (unique), then the
 /// library name made path-safe (it can hold folders). The manifest maps
@@ -334,6 +333,22 @@ pub fn push_book_missing(
     fresh.entry(fingerprint.into()).or_insert_with(|| record.clone());
     store(&fresh)?;
     Ok(true)
+}
+
+/// The error for an HTTP answer that isn't a success: what failed, the
+/// status and what the server said.
+pub fn http_error(what: &str, reply: &crate::net::Reply) -> String {
+    format!("{what} failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body))
+}
+
+/// Posts a form to an OAuth token endpoint and returns the answer's body;
+/// a refusal reads "<service> login failed (status): …".
+pub fn token_post(url: &str, form: &str, service: &str) -> Result<Vec<u8>, String> {
+    let reply = crate::net::post(url, &[("Content-Type", "application/x-www-form-urlencoded")], form.as_bytes())?;
+    if reply.status != 200 {
+        return Err(http_error(&format!("{service} login"), &reply));
+    }
+    Ok(reply.body)
 }
 
 /// Parses a token endpoint answer.
@@ -432,13 +447,8 @@ mod tests {
         assert_eq!(merged["local-only"].cfi, "a");
         assert_eq!(merged["remote-only"].cfi, "c");
         assert_eq!(merged.len(), 5, "union of both sides");
-        // The local-only book is news for the cloud.
-        assert!(should_upload(&merged, &remote));
-        // Nothing new: the merged file matches the cloud one.
-        assert!(!should_upload(&merge_for_upload(&HashMap::new(), &remote, "pc", "pc"), &remote));
-        let mut changed = merged.clone();
-        changed.get_mut("tie").unwrap().cfi = "z".into();
-        assert!(should_upload(&changed, &remote));
+        // Nothing local: the merged file is the cloud one, so no upload.
+        assert_eq!(merge_for_upload(&HashMap::new(), &remote, "pc", "pc"), remote);
     }
 
     fn book_record(name: &str) -> BookRecord {

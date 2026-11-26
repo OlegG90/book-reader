@@ -5,7 +5,7 @@
 //! config: the refresh token is kept like catalog passwords (the OS
 //! credential store, the Android Keystore).
 
-use crate::cloud::{self, access_with_life, tokens, CloudStore, ErrorSlot, TokenCache};
+use crate::cloud::{self, access_with_life, http_error, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
 use crate::platform::{Active, Platform};
 use crate::{net, oauth};
 use oauth::PendingLogin;
@@ -25,6 +25,9 @@ pub const APP_KEY: &str = "hq54wf951whc1jv";
 
 /// Where the refresh token is kept, like catalog passwords.
 pub(crate) const TOKEN_ID: &str = "dropbox";
+
+/// Dropbox's OAuth token endpoint.
+const TOKEN_URL: &str = "https://api.dropboxapi.com/oauth2/token";
 
 /// The OAuth callback: register exactly this URI in the App Console
 /// (Dropbox requires an exact match; "Allow public clients" must be on,
@@ -82,15 +85,7 @@ fn exchange(app_key: &str, code: &str, verifier: &str, stored: Option<String>) -
         .append_pair("code_verifier", verifier)
         .append_pair("redirect_uri", REDIRECT_URI)
         .finish();
-    let reply = net::post(
-        "https://api.dropboxapi.com/oauth2/token",
-        &[("Content-Type", "application/x-www-form-urlencoded")],
-        body.as_bytes(),
-    )?;
-    if reply.status != 200 {
-        return Err(format!("Dropbox login failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
-    }
-    tokens(&reply.body, stored, "Dropbox")
+    tokens(&token_post(TOKEN_URL, &body, "Dropbox")?, stored, "Dropbox")
 }
 
 impl CloudStore for Dropbox {
@@ -116,16 +111,8 @@ impl CloudStore for Dropbox {
             .append_pair("refresh_token", refresh_token)
             .append_pair("client_id", app_key()?)
             .finish();
-        let reply = net::post(
-            "https://api.dropboxapi.com/oauth2/token",
-            &[("Content-Type", "application/x-www-form-urlencoded")],
-            body.as_bytes(),
-        )?;
-        if reply.status != 200 {
-            return Err(format!("Dropbox login failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
-        }
         // A refresh answer carries no refresh token (only the code exchange does).
-        access_with_life(&reply.body, "Dropbox")
+        access_with_life(&token_post(TOKEN_URL, &body, "Dropbox")?, "Dropbox")
     }
 
     fn get(&self, access: &str, name: &str) -> Result<Option<Vec<u8>>, String> {
@@ -141,7 +128,7 @@ impl CloudStore for Dropbox {
         if reply.status == 409 && String::from_utf8_lossy(&reply.body).contains("not_found") {
             return Ok(None);
         }
-        Err(format!("Dropbox download failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)))
+        Err(http_error("Dropbox download", &reply))
     }
 
     fn put(&self, access: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
@@ -154,7 +141,7 @@ impl CloudStore for Dropbox {
         if reply.status == 200 {
             Ok(())
         } else {
-            Err(format!("Dropbox upload failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)))
+            Err(http_error("Dropbox upload", &reply))
         }
     }
 

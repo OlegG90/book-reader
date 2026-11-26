@@ -6,7 +6,7 @@
 //! reach. Secrets stay out of the config: the refresh token is kept like
 //! catalog passwords (the OS credential store, the Android Keystore).
 
-use crate::cloud::{self, access_with_life, tokens, CloudStore, ErrorSlot, TokenCache};
+use crate::cloud::{self, access_with_life, http_error, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
 use crate::platform::{Active, Platform};
 use crate::{net, oauth};
 use oauth::PendingLogin;
@@ -49,6 +49,9 @@ pub const CLIENT_SECRET: &str = "";
 
 /// Where the refresh token is kept, like catalog passwords.
 pub(crate) const TOKEN_ID: &str = "google";
+
+/// Google's OAuth token endpoint.
+const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 
 /// The narrow Drive scope: the app's own hidden folder, nothing else.
 const SCOPE: &str = "https://www.googleapis.com/auth/drive.appdata";
@@ -177,16 +180,7 @@ fn exchange(code: &str, verifier: &str, stored: Option<String>) -> Result<(Strin
     if !client_secret.is_empty() {
         form.append_pair("client_secret", client_secret);
     }
-    let body = form.finish();
-    let reply = net::post(
-        "https://oauth2.googleapis.com/token",
-        &[("Content-Type", "application/x-www-form-urlencoded")],
-        body.as_bytes(),
-    )?;
-    if reply.status != 200 {
-        return Err(format!("Google login failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
-    }
-    tokens(&reply.body, stored, "Google")
+    tokens(&token_post(TOKEN_URL, &form.finish(), "Google")?, stored, "Google")
 }
 
 /// A file's id in the app folder by its name, if there is one. Drive allows
@@ -202,7 +196,7 @@ fn find_file(access: &str, name: &str) -> Result<Option<String>, String> {
         .finish();
     let reply = net::bearer_get(&format!("https://www.googleapis.com/drive/v3/files?{query}"), access)?;
     if reply.status != 200 {
-        return Err(format!("Google Drive list failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
+        return Err(http_error("Google Drive list", &reply));
     }
     let list: serde_json::Value = serde_json::from_slice(&reply.body).map_err(|e| format!("Google Drive list is not ours: {e}"))?;
     Ok(list["files"].as_array().and_then(|files| files.first()).and_then(|file| file["id"].as_str()).map(str::to_string))
@@ -219,7 +213,7 @@ fn name_query(name: &str) -> String {
 fn download_bytes(access: &str, file_id: &str) -> Result<Vec<u8>, String> {
     let reply = net::bearer_get(&format!("https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"), access)?;
     if reply.status != 200 {
-        return Err(format!("Google Drive download failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
+        return Err(http_error("Google Drive download", &reply));
     }
     Ok(reply.body)
 }
@@ -263,7 +257,7 @@ fn store_bytes(
     if reply.status == 200 {
         Ok(())
     } else {
-        Err(format!("Google Drive upload failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)))
+        Err(http_error("Google Drive upload", &reply))
     }
 }
 
@@ -305,17 +299,8 @@ impl CloudStore for Google {
         if !client_secret.is_empty() {
             form.append_pair("client_secret", client_secret);
         }
-        let body = form.finish();
-        let reply = net::post(
-            "https://oauth2.googleapis.com/token",
-            &[("Content-Type", "application/x-www-form-urlencoded")],
-            body.as_bytes(),
-        )?;
-        if reply.status != 200 {
-            return Err(format!("Google login failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
-        }
         // A refresh answer carries no refresh token (only the code exchange does).
-        access_with_life(&reply.body, "Google")
+        access_with_life(&token_post(TOKEN_URL, &form.finish(), "Google")?, "Google")
     }
 
     fn get(&self, access: &str, name: &str) -> Result<Option<Vec<u8>>, String> {
