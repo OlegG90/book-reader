@@ -414,6 +414,11 @@ body.library-mode .reader-only {
   text-align: start;
 }
 
+/* A book whose format is turned off in Modules: listed, dimmed, won't open. */
+.book-grid button.off {
+  opacity: 0.55;
+}
+
 .book-grid .cover {
   display: flex;
   align-items: center;

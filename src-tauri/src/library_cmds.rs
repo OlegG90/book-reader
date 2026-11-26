@@ -216,6 +216,8 @@ pub(crate) struct LibraryBook {
     /// When the book came into the library (ms), for "recently added".
     added: u64,
     has_cover: bool,
+    /// Its format is turned off in Modules: shown, but it won't open.
+    disabled: bool,
 }
 
 /// Scans the library folder (cheap after the first time: see library::scan).
@@ -223,7 +225,7 @@ pub(crate) struct LibraryBook {
 pub(crate) fn scan_library(app: AppHandle, store: State<Store>, books: State<LibraryBooks>) -> CmdResult<Vec<LibraryBook>> {
     let root = library_root(&store)?;
     Active::check_library_access(&app)?;
-    // Books whose format module is off stay out until it is back on.
+    // Books whose format module is off stay listed, marked, and refuse to open.
     let disabled = store.read(modules::disabled_ids);
     // A file count while it runs, so the library screen shows the scan is moving.
     let entries = library::scan(
@@ -234,7 +236,6 @@ pub(crate) fn scan_library(app: AppHandle, store: State<Store>, books: State<Lib
                 let _ = app.emit("scan-progress", done);
             }
         },
-        &library::keep_enabled(&disabled),
     )
     .map_err(|e| format!("{}: {e}", root.display()))?;
     let views = store.read(|s| {
@@ -249,6 +250,7 @@ pub(crate) fn scan_library(app: AppHandle, store: State<Store>, books: State<Lib
                 series: e.book.series.clone(),
                 series_index: e.book.series_index.clone(),
                 format: e.reader().map_or("", |r| r.label()),
+                disabled: e.reader().is_some_and(|r| disabled.contains(r.module())),
                 fraction: s.positions.get(&e.fingerprint).map(|p| p.fraction),
                 added: e.added,
                 has_cover: e.cover.is_some(),

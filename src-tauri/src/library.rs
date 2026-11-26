@@ -135,18 +135,13 @@ impl Cache {
     }
 }
 
-/// Keeps a book file when its format module is on, so a disabled format
-/// stays out of the library until it is back on.
-pub fn keep_enabled(disabled: &std::collections::BTreeSet<String>) -> impl Fn(&Path) -> bool + '_ {
-    move |path| formats::of(path).is_some_and(|r| !disabled.contains(r.module()))
-}
-
 /// Lists the books under `root`, reusing cached metadata for files whose size
 /// and modification time are unchanged, and saves the result to the cache
 /// when anything changed. Calls `progress` with the file count as it goes,
-/// so the library screen can show the scan is moving. Only `keep` files
-/// are read (see `keep_enabled`).
-pub fn scan(root: &Path, cache: &Cache, progress: &mut dyn FnMut(usize), keep: &dyn Fn(&Path) -> bool) -> io::Result<Vec<Entry>> {
+/// so the library screen can show the scan is moving. Every book file is
+/// listed, also one whose format is turned off in Modules: it stays visible
+/// (and keeps its added date) but refuses to open.
+pub fn scan(root: &Path, cache: &Cache, progress: &mut dyn FnMut(usize)) -> io::Result<Vec<Entry>> {
     let cached = cache.load(root);
     let unchanged = |books: &[Entry]| books == cached.as_slice();
     // A book seen before (even under another name, after Organize) keeps its
@@ -156,7 +151,7 @@ pub fn scan(root: &Path, cache: &Cache, progress: &mut dyn FnMut(usize), keep: &
     let previous: HashMap<&str, &Entry> = cached.iter().map(|e| (e.path.as_str(), e)).collect();
     let now = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
     let mut files = Vec::new();
-    find_books(root, &mut files, keep)?;
+    find_books(root, &mut files)?;
 
     let mut done = 0;
     let mut books: Vec<Entry> = files
@@ -192,16 +187,16 @@ pub fn scan(root: &Path, cache: &Cache, progress: &mut dyn FnMut(usize), keep: &
 }
 
 /// All kept book files under `dir`, skipping hidden folders.
-fn find_books(dir: &Path, out: &mut Vec<PathBuf>, keep: &dyn Fn(&Path) -> bool) -> io::Result<()> {
+fn find_books(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
     for item in fs::read_dir(dir)?.flatten() {
         let path = item.path();
         let Ok(kind) = item.file_type() else { continue };
         if kind.is_dir() {
             if !item.file_name().to_string_lossy().starts_with('.') {
                 // An unreadable subfolder shouldn't hide the rest of the library.
-                let _ = find_books(&path, out, keep);
+                let _ = find_books(&path, out);
             }
-        } else if kind.is_file() && formats::of(&path).is_some() && keep(&path) {
+        } else if kind.is_file() && formats::of(&path).is_some() {
             out.push(path);
         }
     }
@@ -269,7 +264,7 @@ mod tests {
         let old = serde_json::json!({ "root": root, "books": [] });
         std::fs::write(cache.index(), serde_json::to_vec(&old).unwrap()).unwrap();
         assert!(cache.load(&root).is_empty(), "unknown versions rescan");
-        let books = scan(&root, &cache, &mut |_| {}, &|_| true).unwrap();
+        let books = scan(&root, &cache, &mut |_| {}).unwrap();
         assert!(!books.is_empty());
         assert!(!cache.load(&root).is_empty(), "the rescan sticks");
     }
@@ -278,7 +273,7 @@ mod tests {
     fn finds_books_and_reads_their_metadata() {
         let (dir, root) = library_with_samples();
         let cache = Cache::new(dir.path().join("cache"));
-        let books = scan(&root, &cache, &mut |_| {}, &|_| true).unwrap();
+        let books = scan(&root, &cache, &mut |_| {}).unwrap();
         let paths: Vec<_> = books.iter().map(|b| b.path.as_str()).collect();
         assert_eq!(paths, ["Carroll Lewis/Alice.epub", "sample.fb2.zip"]);
         assert!(books[0].book.title.contains("Alice"));
@@ -287,33 +282,20 @@ mod tests {
     }
 
     #[test]
-    fn scan_skips_a_disabled_format() {
-        let (dir, root) = library_with_samples();
-        let cache = Cache::new(dir.path().join("cache"));
-        let mut settings = serde_json::Map::new();
-        settings.insert("disabledModules".into(), serde_json::json!(["format:fb2"]));
-        let state = crate::store::State { settings, ..crate::store::State::default() };
-        let disabled = crate::modules::disabled_ids(&state);
-        let books = scan(&root, &cache, &mut |_| {}, &keep_enabled(&disabled)).unwrap();
-        let paths: Vec<_> = books.iter().map(|b| b.path.as_str()).collect();
-        assert_eq!(paths, ["Carroll Lewis/Alice.epub"]);
-    }
-
-    #[test]
     fn rescans_reuse_the_cache_and_drop_removed_books() {
         let (dir, root) = library_with_samples();
         let cache = Cache::new(dir.path().join("cache"));
-        let first = scan(&root, &cache, &mut |_| {}, &|_| true).unwrap();
+        let first = scan(&root, &cache, &mut |_| {}).unwrap();
         assert_eq!(cache.load(&root), first);
 
         // A cached entry is trusted while size and time match: mark it to prove reuse.
         let mut marked = first.clone();
         marked[1].book.title = "From cache".into();
         cache.save(&root, &marked).unwrap();
-        assert_eq!(scan(&root, &cache, &mut |_| {}, &|_| true).unwrap()[1].book.title, "From cache");
+        assert_eq!(scan(&root, &cache, &mut |_| {}).unwrap()[1].book.title, "From cache");
 
         fs::remove_file(root.join("Carroll Lewis/Alice.epub")).unwrap();
-        let after = scan(&root, &cache, &mut |_| {}, &|_| true).unwrap();
+        let after = scan(&root, &cache, &mut |_| {}).unwrap();
         assert_eq!(after.len(), 1);
         assert_eq!(fs::read_dir(cache.covers()).unwrap().count(), 0, "the removed book's cover is deleted");
     }
@@ -322,7 +304,7 @@ mod tests {
     fn a_cache_for_another_folder_is_ignored() {
         let (dir, root) = library_with_samples();
         let cache = Cache::new(dir.path().join("cache"));
-        scan(&root, &cache, &mut |_| {}, &|_| true).unwrap();
+        scan(&root, &cache, &mut |_| {}).unwrap();
         assert!(cache.load(&dir.path().join("elsewhere")).is_empty());
     }
 
@@ -330,7 +312,7 @@ mod tests {
     fn unreadable_books_are_titled_after_the_file() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("Broken Book.epub"), "not a zip").unwrap();
-        let books = scan(dir.path(), &Cache::new(dir.path().join(".cache")), &mut |_| {}, &|_| true).unwrap();
+        let books = scan(dir.path(), &Cache::new(dir.path().join(".cache")), &mut |_| {}).unwrap();
         assert_eq!(books[0].book.title, "Broken Book");
         assert!(books[0].book.authors.is_empty());
     }
@@ -339,7 +321,7 @@ mod tests {
     fn organizing_moves_books_to_their_template_paths() {
         let (dir, root) = library_with_samples();
         let cache = Cache::new(dir.path().join("cache"));
-        let books = scan(&root, &cache, &mut |_| {}, &|_| true).unwrap();
+        let books = scan(&root, &cache, &mut |_| {}).unwrap();
         let plan = organize_plan(&root, &books).unwrap();
         let moves: Vec<(&str, &str)> = plan.iter().map(|(b, to)| (b.path.as_str(), to.as_str())).collect();
         assert_eq!(moves.len(), 2);
@@ -350,7 +332,7 @@ mod tests {
         for (book, to) in &plan {
             naming::move_file(&book.absolute(&root), &join(&root, to)).unwrap();
         }
-        let again = scan(&root, &cache, &mut |_| {}, &|_| true).unwrap();
+        let again = scan(&root, &cache, &mut |_| {}).unwrap();
         assert!(organize_plan(&root, &again).unwrap().is_empty(), "a second run changes nothing");
     }
 
@@ -358,12 +340,12 @@ mod tests {
     fn organizing_keeps_duplicates_where_they_are() {
         let (dir, root) = library_with_samples();
         let cache = Cache::new(dir.path().join("cache"));
-        let books = scan(&root, &cache, &mut |_| {}, &|_| true).unwrap();
+        let books = scan(&root, &cache, &mut |_| {}).unwrap();
         let plan = organize_plan(&root, &books).unwrap();
         let (alice, to) = plan.iter().find(|(b, _)| b.path.ends_with("Alice.epub")).unwrap();
         // Put an identical copy where Alice should go: Alice itself then stays.
         fs::copy(alice.absolute(&root), join(&root, to)).unwrap();
-        let books = scan(&root, &cache, &mut |_| {}, &|_| true).unwrap();
+        let books = scan(&root, &cache, &mut |_| {}).unwrap();
         let plan = organize_plan(&root, &books).unwrap();
         assert!(plan.iter().all(|(b, _)| !b.path.ends_with("Alice.epub")));
     }
@@ -372,13 +354,13 @@ mod tests {
     fn added_dates_survive_renames_and_new_books_get_today() {
         let (dir, root) = library_with_samples();
         let cache = Cache::new(dir.path().join("cache"));
-        let first = scan(&root, &cache, &mut |_| {}, &|_| true).unwrap();
+        let first = scan(&root, &cache, &mut |_| {}).unwrap();
         assert!(first.iter().all(|b| b.added == b.modified), "the first scan uses file dates");
 
         let alice = &first[0];
         fs::rename(alice.absolute(&root), root.join("renamed.epub")).unwrap();
         fs::copy(samples().join("pride-and-prejudice.epub"), root.join("new.epub")).unwrap();
-        let second = scan(&root, &cache, &mut |_| {}, &|_| true).unwrap();
+        let second = scan(&root, &cache, &mut |_| {}).unwrap();
         let find = |path: &str| second.iter().find(|b| b.path == path).unwrap();
         assert_eq!(find("renamed.epub").added, alice.added);
         assert!(find("new.epub").added > find("new.epub").modified, "a copy keeps its old file date");

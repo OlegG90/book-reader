@@ -361,6 +361,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     const button = el(
       'button',
       {
+        className: book.disabled ? 'off' : '',
         title: [book.title, book.authors.join(', '), seriesLabel(book)].filter(Boolean).join('\n'),
         onclick: (e: MouseEvent) => (status === 'new' ? open() : showMenu(menuPlace(e, button), choices)),
         oncontextmenu: (e: MouseEvent) => {
@@ -372,7 +373,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
       el('span', { className: 'title', textContent: book.title }),
       el('span', { className: 'author', textContent: book.authors.join(', ') }),
       seriesLine(book),
-      el('span', { className: 'meta', textContent: [book.format, progress].filter(Boolean).join(' · ') }),
+      el('span', { className: 'meta', textContent: [book.format, book.disabled ? 'turned off' : progress].filter(Boolean).join(' · ') }),
     )
     onLongPress(button, at => showMenu(at, withDelete))
     return el('li', {}, button)
