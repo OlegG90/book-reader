@@ -1,6 +1,7 @@
 //! One-off system commands: file types, updates, outside books, the library screen.
 
 use crate::cli::Launch;
+use crate::cloud::CloudStore;
 use crate::dropbox;
 use crate::google;
 use crate::formats;
@@ -48,10 +49,15 @@ pub(crate) struct CloudConnection {
     last_error: Option<String>,
 }
 
+/// A cloud's connection as the settings show it.
+fn cloud_connection(store: &dyn CloudStore) -> CloudConnection {
+    CloudConnection { connected: store.connected(), last_error: store.errors().last() }
+}
+
 /// Dropbox's connection for the settings.
 #[tauri::command(async)]
 pub(crate) fn dropbox_status() -> CloudConnection {
-    CloudConnection { connected: dropbox::is_connected(), last_error: dropbox::last_error() }
+    cloud_connection(&dropbox::STORE)
 }
 
 /// Connects Dropbox: opens its login in the browser, waits for the answer
@@ -68,14 +74,14 @@ pub(crate) fn dropbox_connect(app: AppHandle, store: State<Store>) -> CmdResult<
 /// module off too, so a switched-off cloud never keeps its token.
 #[tauri::command(async)]
 pub(crate) fn dropbox_disconnect() -> CmdResult<()> {
-    dropbox::disconnect();
+    crate::cloud::disconnect(&dropbox::STORE);
     Ok(())
 }
 
 /// Google Drive's connection for the settings.
 #[tauri::command(async)]
 pub(crate) fn google_status() -> CloudConnection {
-    CloudConnection { connected: google::is_connected(), last_error: google::last_error() }
+    cloud_connection(&google::STORE)
 }
 
 /// Connects Google Drive: opens its login in the browser, waits for the answer
