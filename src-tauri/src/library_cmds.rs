@@ -241,19 +241,22 @@ pub(crate) fn scan_library(app: AppHandle, store: State<Store>, books: State<Lib
     let views = store.read(|s| {
         entries
             .iter()
-            .map(|e| LibraryBook {
-                key: e.path.clone(),
-                fingerprint: e.fingerprint.clone(),
-                title: e.book.title.clone(),
-                authors: e.book.authors.iter().map(metadata::Author::display).collect(),
-                author_sort: e.book.authors.first().map(metadata::Author::sort_name).unwrap_or_default(),
-                series: e.book.series.clone(),
-                series_index: e.book.series_index.clone(),
-                format: e.reader().map_or("", |r| r.label()),
-                disabled: e.reader().is_some_and(|r| disabled.contains(r.module())),
-                fraction: s.positions.get(&e.fingerprint).map(|p| p.fraction),
-                added: e.added,
-                has_cover: e.cover.is_some(),
+            .map(|e| {
+                let reader = e.reader();
+                LibraryBook {
+                    key: e.path.clone(),
+                    fingerprint: e.fingerprint.clone(),
+                    title: e.book.title.clone(),
+                    authors: e.book.authors.iter().map(metadata::Author::display).collect(),
+                    author_sort: e.book.authors.first().map(metadata::Author::sort_name).unwrap_or_default(),
+                    series: e.book.series.clone(),
+                    series_index: e.book.series_index.clone(),
+                    format: reader.map_or("", |r| r.label()),
+                    disabled: reader.is_some_and(|r| disabled.contains(r.module())),
+                    fraction: s.positions.get(&e.fingerprint).map(|p| p.fraction),
+                    added: e.added,
+                    has_cover: e.cover.is_some(),
+                }
             })
             .collect()
     });
