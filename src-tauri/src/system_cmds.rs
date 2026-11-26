@@ -22,14 +22,14 @@ use tauri_plugin_opener::OpenerExt;
 /// Registers the app for its book file types (see register::register).
 #[tauri::command(async)]
 pub(crate) fn register_file_types(store: State<Store>) -> CmdResult<()> {
-    store.read(|s| modules::require(s, "capability:file-types"))?;
+    store.read(|s| modules::require(s, modules::id::FILE_TYPES))?;
     std::env::current_exe().and_then(|exe| register::register(&exe)).map_err(|e| e.to_string())
 }
 
 /// Removes the app's file associations again.
 #[tauri::command(async)]
 pub(crate) fn unregister_file_types(store: State<Store>) -> CmdResult<()> {
-    store.read(|s| modules::require(s, "capability:file-types"))?;
+    store.read(|s| modules::require(s, modules::id::FILE_TYPES))?;
     register::unregister().map_err(|e| e.to_string())
 }
 
@@ -64,7 +64,7 @@ pub(crate) fn dropbox_status() -> CloudConnection {
 /// and keeps the refresh token like a catalog password.
 #[tauri::command(async)]
 pub(crate) fn dropbox_connect(app: AppHandle, store: State<Store>) -> CmdResult<()> {
-    store.read(|s| modules::require(s, "capability:dropbox"))?;
+    store.read(|s| modules::require(s, modules::id::DROPBOX))?;
     let pending = dropbox::begin()?;
     app.opener().open_url(&pending.url, None::<&str>).map_err(|e| e.to_string())?;
     dropbox::finish(pending)
@@ -88,7 +88,7 @@ pub(crate) fn google_status() -> CloudConnection {
 /// and keeps the refresh token like a catalog password.
 #[tauri::command(async)]
 pub(crate) fn google_connect(app: AppHandle, store: State<Store>) -> CmdResult<()> {
-    store.read(|s| modules::require(s, "capability:googledrive"))?;
+    store.read(|s| modules::require(s, modules::id::GOOGLE_DRIVE))?;
     let pending = google::begin()?;
     app.opener().open_url(&pending.url, None::<&str>).map_err(|e| e.to_string())?;
     google::finish(pending)
@@ -107,7 +107,7 @@ pub(crate) fn google_disconnect() -> CmdResult<()> {
 /// The desktop waits on a loopback address instead (`google_connect`).
 #[tauri::command(async)]
 pub(crate) fn google_connect_android(app: AppHandle, store: State<Store>) -> CmdResult<String> {
-    store.read(|s| modules::require(s, "capability:googledrive"))?;
+    store.read(|s| modules::require(s, modules::id::GOOGLE_DRIVE))?;
     let url = google::begin_android()?;
     app.opener().open_url(&url, None::<&str>).map_err(|e| e.to_string())?;
     Ok(url)
@@ -116,7 +116,7 @@ pub(crate) fn google_connect_android(app: AppHandle, store: State<Store>) -> Cmd
 /// Finishes the phone's Google login with the address the browser came back to.
 #[tauri::command(async)]
 pub(crate) fn google_finish(answer: String, store: State<Store>) -> CmdResult<()> {
-    store.read(|s| modules::require(s, "capability:googledrive"))?;
+    store.read(|s| modules::require(s, modules::id::GOOGLE_DRIVE))?;
     google::finish_answer(&answer)
 }
 
@@ -142,14 +142,14 @@ pub(crate) fn open_repository(app: AppHandle) -> CmdResult<()> {
 /// Opens the latest release's page, where its files are, in the browser.
 #[tauri::command]
 pub(crate) fn open_latest_release(app: AppHandle, store: State<Store>) -> CmdResult<()> {
-    store.read(|s| modules::require(s, "capability:update-check"))?;
+    store.read(|s| modules::require(s, modules::id::UPDATE_CHECK))?;
     app.opener().open_url(format!("{}/releases/latest", updates::REPOSITORY), None::<&str>).map_err(|e| e.to_string())
 }
 
 /// Asks GitHub for the latest release and compares it with this copy.
 #[tauri::command(async)]
 pub(crate) fn check_for_update(store: State<Store>) -> CmdResult<updates::UpdateCheck> {
-    store.read(|s| modules::require(s, "capability:update-check"))?;
+    store.read(|s| modules::require(s, modules::id::UPDATE_CHECK))?;
     updates::check()
 }
 

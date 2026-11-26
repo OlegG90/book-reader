@@ -95,7 +95,7 @@ impl CloudStore for Dropbox {
     }
 
     fn module(&self) -> &'static str {
-        "capability:dropbox"
+        crate::modules::id::DROPBOX
     }
 
     fn token_id(&self) -> &'static str {

@@ -35,6 +35,7 @@ import { createLibraryView, type View } from './library-view'
 import { SYNC_EVERY_MS, SYNC_ON_CLOSE_MS } from './sync-manager'
 import { readSettings, SAVE_DELAY_MS, type Settings } from './settings'
 import { $ } from './dom'
+import { MODULE } from './modules'
 
 /** The top bar shows when the mouse comes this close to the top edge. */
 const TOP_EDGE_PX = 48
@@ -414,7 +415,7 @@ const appearancePanel = createAppearancePanel($('appearance'), settings, changes
 })
 // The catalogs (OPDS servers), the key list and the version have their own sections in the settings.
 const sourcesPanel = createSourcesPanel(settingsPage.catalogs, {
-  syncOff: () => settings.disabledModules.includes('capability:progress-sync'),
+  syncOff: () => settings.disabledModules.includes(MODULE.progressSync),
   cloudReady: () => connectedCloud !== null && !settings.disabledModules.includes(cloudModuleId(connectedCloud)),
 })
 settingsPage.shortcuts.append($('shortcuts').querySelector('dl')!.cloneNode(true))
@@ -576,18 +577,18 @@ function refreshModules() {
 /** Hides what disabled capability modules take away (catalogs UI, sync UI). */
 function applyCapabilities() {
   const off = new Set(settings.disabledModules)
-  const catalogs = !off.has('capability:catalogs')
+  const catalogs = !off.has(MODULE.catalogs)
   for (const item of navItems) {
     if (item.dataset.nav === 'catalogs' || item.dataset.nav === 'settings:catalogs') item.hidden = !catalogs
   }
   settingsPage.setSectionVisible('catalogs', catalogs)
-  settingsPage.setOrganizeVisible(!off.has('capability:organize'))
-  settingsPage.setFileTypesVisible(!isAndroid && !off.has('capability:file-types'))
-  const cloudsOn = !off.has('capability:dropbox') || !off.has('capability:googledrive')
+  settingsPage.setOrganizeVisible(!off.has(MODULE.organize))
+  settingsPage.setFileTypesVisible(!isAndroid && !off.has(MODULE.fileTypes))
+  const cloudsOn = !off.has(MODULE.dropbox) || !off.has(MODULE.googleDrive)
   settingsPage.setCloudVisible(cloudsOn)
   // The desktop counts every network as unmetered, so the rule means nothing there.
   settingsPage.setBooksWifiVisible(cloudsOn && isAndroid)
-  settingsPage.setUpdatesVisible(!off.has('capability:update-check'))
+  settingsPage.setUpdatesVisible(!off.has(MODULE.updateCheck))
   if (!catalogs && (view === 'catalogs' || view === 'settings:catalogs')) {
     showView(view === 'catalogs' ? 'library' : 'settings:modules')
   }

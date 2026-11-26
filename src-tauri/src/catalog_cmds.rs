@@ -30,7 +30,7 @@ pub(crate) struct SourceView {
 
 #[tauri::command(async)]
 pub(crate) fn catalog_sources(store: State<Store>) -> CmdResult<Vec<SourceView>> {
-    store.read(|s| modules::require(s, "capability:catalogs"))?;
+    store.read(|s| modules::require(s, modules::id::CATALOGS))?;
     let sources = store.read(|s| s.sources.clone());
     // One bridge round-trip for all sources, not one per source.
     let ids: Vec<_> = sources.iter().map(|s| s.id.clone()).collect();
@@ -78,7 +78,7 @@ pub(crate) fn save_catalog_source(
     templates: State<SearchTemplates>,
     input: SourceInput,
 ) -> CmdResult<SavedSource> {
-    store.read(|s| modules::require(s, "capability:catalogs"))?;
+    store.read(|s| modules::require(s, modules::id::CATALOGS))?;
     let url = catalog::check_url(&input.url)?;
     let id = source_id(&store, input.id)?;
     let name = match input.name.trim() {
@@ -112,7 +112,7 @@ pub(crate) fn save_catalog_source(
 
 #[tauri::command(async)]
 pub(crate) fn delete_catalog_source(app: AppHandle, store: State<Store>, id: String) -> CmdResult<()> {
-    store.read(|s| modules::require(s, "capability:catalogs"))?;
+    store.read(|s| modules::require(s, modules::id::CATALOGS))?;
     let mut removed = false;
     store
         .update(|s| {
@@ -137,13 +137,13 @@ fn source_by_id(store: &Store, id: &str) -> CmdResult<catalog::Source> {
 /// A page of a catalog: its root, or `url` on its server.
 #[tauri::command(async)]
 pub(crate) fn catalog_feed(store: State<Store>, id: String, url: Option<String>) -> CmdResult<opds::Feed> {
-    store.read(|s| modules::require(s, "capability:catalogs"))?;
+    store.read(|s| modules::require(s, modules::id::CATALOGS))?;
     catalog::feed(&source_by_id(&store, &id)?, url.as_deref())
 }
 
 #[tauri::command(async)]
 pub(crate) fn catalog_search(store: State<Store>, templates: State<SearchTemplates>, id: String, query: String) -> CmdResult<opds::Feed> {
-    store.read(|s| modules::require(s, "capability:catalogs"))?;
+    store.read(|s| modules::require(s, modules::id::CATALOGS))?;
     let source = source_by_id(&store, &id)?;
     let known = templates.0.lock().unwrap().get(&id).cloned();
     let template = match known {
@@ -159,7 +159,7 @@ pub(crate) fn catalog_search(store: State<Store>, templates: State<SearchTemplat
 
 #[tauri::command(async)]
 pub(crate) fn catalog_image(store: State<Store>, id: String, url: String) -> CmdResult<Response> {
-    store.read(|s| modules::require(s, "capability:catalogs"))?;
+    store.read(|s| modules::require(s, modules::id::CATALOGS))?;
     catalog::image(&source_by_id(&store, &id)?, &url).map(Response::new)
 }
 
@@ -175,7 +175,7 @@ pub(crate) fn catalog_download(
     format: opds::FileFormat,
     blurb: Option<String>,
 ) -> CmdResult<Added> {
-    store.read(|s| modules::require(s, "capability:catalogs"))?;
+    store.read(|s| modules::require(s, modules::id::CATALOGS))?;
     let source = source_by_id(&store, &id)?;
     let reader = formats::by_module(format.module()).ok_or("Not a book file")?;
     store.read(|s| formats::check(s, reader))?;

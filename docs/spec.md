@@ -36,7 +36,7 @@ Layer 0 (the core) is never modular: book identity and fingerprints, positions a
 A disabled module removes its interface entries and refuses its actions with a sentence (never a broken button):
 
 - `"<Label> is turned off in Settings > Modules"` — every refused action, e.g. `FB2 is turned off in Settings > Modules` when opening, picking, adding or downloading an FB2 book with the format off; `Catalogs is turned off in Settings > Modules` for every `catalog_*` action.
-- `"Catalogs is in use: delete its catalog sources first."` — turning `catalogs` off is refused while sources exist (and `"<Label> is in use: turn off <Other> first."` while a module that needs it is on). Progress sync is no blocker: clouds keep working with catalogs off.
+- `"Catalogs is in use: delete its catalog sources first."` — turning `catalogs` off is refused while sources exist. Progress sync is no blocker: clouds keep working with catalogs off.
 
 Off behavior per module:
 
