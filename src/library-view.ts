@@ -15,8 +15,8 @@ import {
 import { deleteFileNote } from './platform'
 import type { Settings } from './settings'
 import type { SettingsSection } from './settings-panel'
+import { $ } from './dom'
 
-const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 
 /** How far a book is read, as the library shows it: at least 1% once started. */
 const percent = (fraction: number) => `${Math.max(1, Math.round(fraction * 100))}%`
@@ -504,11 +504,11 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     row('Fingerprint', details.fingerprint)
     row('From catalog', details.catalogSource ?? 'Not from a catalog')
     if (details.annotation) $('book-details-annotation').textContent = details.annotation
-    void fillCloudState(fingerprint, details.fingerprint)
+    void fillCloudState(fingerprint)
   }
 
   /** Asks the clouds about the book; unknown on timeout or failure. */
-  async function fillCloudState(key: string, fingerprint: string) {
+  async function fillCloudState(fingerprint: string) {
     const rows = $('book-details-rows')
     const dt = el('dt', { textContent: 'Cloud' })
     const dd = el('dd', { textContent: 'Checking…' })
@@ -517,7 +517,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
       invoke<{ id: string; label: string; state: string }[]>('book_cloud', { fingerprint }).catch((): null => null),
       new Promise<null>(resolve => setTimeout(() => resolve(null), 8000)),
     ])
-    if (detailsKey !== key || $('book-details').hidden) return
+    if (detailsKey !== fingerprint || $('book-details').hidden) return
     dt.remove()
     dd.remove()
     if (!settled) {

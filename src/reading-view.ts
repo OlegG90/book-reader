@@ -7,8 +7,8 @@ import { createSyncManager, type SyncManager } from './sync-manager'
 import { SAVE_DELAY_MS, type Settings } from './settings'
 import { FINISHED_AT } from './library'
 import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
+import { $ } from './dom'
 
-const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 
 export interface Position {
   cfi: string

@@ -35,12 +35,12 @@ export function initVolumeKeys(onKey: (direction: 'next' | 'prev') => void): voi
   void addPluginListener<{ direction: 'next' | 'prev' }>('system', 'volumeKey', ({ direction }) => onKey(direction)).catch(console.error)
 }
 
-/** A Google sign-in answer arriving on the app's scheme (a phone redirect back
-from the browser): the address to finish the login with. Nothing arrives on
-the desktop, where the login waits on a loopback address instead. */
-export function initOauthAnswer(answer: (url: string) => void): void {
+/** Calls `arrived` when the phone says a Google sign-in answer came back on
+the app's scheme; the answer itself waits in a stash (`google_take_answer`).
+Nothing arrives on the desktop, where the login waits on a loopback address. */
+export function initOauthAnswer(arrived: () => void): void {
   if (!isAndroid) return
-  void addPluginListener<{ url: string }>('system', 'oauth', ({ url }) => answer(url)).catch(console.error)
+  void addPluginListener('system', 'oauth', () => arrived()).catch(console.error)
 }
 
 /** Polls the phone's stashed OAuth answer until the browser comes back with it.

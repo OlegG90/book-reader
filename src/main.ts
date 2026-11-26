@@ -34,13 +34,13 @@ import { createReadingView, type AddMode, type Offer } from './reading-view'
 import { createLibraryView, type View } from './library-view'
 import { SYNC_EVERY_MS, SYNC_ON_CLOSE_MS } from './sync-manager'
 import { readSettings, SAVE_DELAY_MS, type Settings } from './settings'
+import { $ } from './dom'
 
 /** The top bar shows when the mouse comes this close to the top edge. */
 const TOP_EDGE_PX = 48
 /** The bottom bar shows when the mouse comes this close to the bottom edge. */
 const BOTTOM_EDGE_PX = 56
 
-const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const appWindow = getCurrentWindow()
 const topbar = $('topbar')
 

@@ -1,12 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { BookView } from 'reader-core'
+import { $ } from './dom'
 
 /** How often a changed position goes to the sync server while reading. */
 export const SYNC_EVERY_MS = 60_000
 /** Closing the window waits this long at most for the last push. */
 export const SYNC_ON_CLOSE_MS = 3_000
 
-const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 
 export interface SyncOffer {
   cfi: string

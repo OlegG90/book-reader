@@ -38,18 +38,20 @@ pub(crate) fn file_types_registered() -> bool {
     register::registered()
 }
 
-/// Dropbox: whether a refresh token is kept, and the last sync failure,
-/// if any (sync stays quiet, but the settings show what went wrong).
+/// A cloud's connection for the settings: whether a refresh token is kept,
+/// and the last sync failure, if any (sync stays quiet, but the settings
+/// show what went wrong).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DropboxStatus {
+pub(crate) struct CloudConnection {
     connected: bool,
     last_error: Option<String>,
 }
 
+/// Dropbox's connection for the settings.
 #[tauri::command(async)]
-pub(crate) fn dropbox_status() -> DropboxStatus {
-    DropboxStatus { connected: dropbox::is_connected(), last_error: dropbox::last_error() }
+pub(crate) fn dropbox_status() -> CloudConnection {
+    CloudConnection { connected: dropbox::is_connected(), last_error: dropbox::last_error() }
 }
 
 /// Connects Dropbox: opens its login in the browser, waits for the answer
@@ -70,18 +72,10 @@ pub(crate) fn dropbox_disconnect() -> CmdResult<()> {
     Ok(())
 }
 
-/// Google Drive: whether a refresh token is kept, and the last sync failure,
-/// if any (sync stays quiet, but the settings show what went wrong).
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct GoogleStatus {
-    connected: bool,
-    last_error: Option<String>,
-}
-
+/// Google Drive's connection for the settings.
 #[tauri::command(async)]
-pub(crate) fn google_status() -> GoogleStatus {
-    GoogleStatus { connected: google::is_connected(), last_error: google::last_error() }
+pub(crate) fn google_status() -> CloudConnection {
+    CloudConnection { connected: google::is_connected(), last_error: google::last_error() }
 }
 
 /// Connects Google Drive: opens its login in the browser, waits for the answer
