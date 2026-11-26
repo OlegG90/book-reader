@@ -105,7 +105,9 @@ fn read_answer(stream: TcpStream, state: &str, service: &str) -> Option<Result<S
     // The accepted socket may inherit the listener's non-blocking mode (it
     // does on Windows), and the request bytes may not have arrived yet.
     stream.set_nonblocking(false).ok()?;
-    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    // The browser sends its request at once; a speculative connection that
+    // never does must not hold up the real answer.
+    stream.set_read_timeout(Some(Duration::from_secs(1))).ok()?;
     let mut first = String::new();
     BufReader::new(&stream).read_line(&mut first).ok()?;
     let answer = first.split_whitespace().nth(1).map(|target| format!("http://localhost{target}"));

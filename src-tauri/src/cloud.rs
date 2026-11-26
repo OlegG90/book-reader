@@ -108,6 +108,16 @@ pub fn remote_book_name(fingerprint: &str, name: &str) -> String {
     format!("book-{fingerprint}-{safe}")
 }
 
+/// The ids the clouds keep their refresh tokens under, in the same
+/// credential store as catalog passwords.
+const TOKEN_IDS: [&str; 2] = [crate::dropbox::TOKEN_ID, crate::google::TOKEN_ID];
+
+/// Whether an id belongs to a cloud's token: no catalog source may use one,
+/// even one hand-written into the config.
+pub fn is_token_id(id: &str) -> bool {
+    TOKEN_IDS.contains(&id)
+}
+
 /// Uploads a book file the cloud manifest lacks, then records it: the
 /// fingerprint means same bytes, so an entry already there means nothing to
 /// do. The manifest is re-read before writing, so two devices uploading at

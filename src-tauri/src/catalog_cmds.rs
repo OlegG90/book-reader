@@ -2,6 +2,7 @@
 
 use crate::catalog;
 use crate::clock;
+use crate::cloud;
 use crate::fingerprint;
 use crate::formats;
 use crate::library_cmds::{library_root, put_in_library, record_book_source, AddMode, Added, LibraryBooks, CACHE_DIR};
@@ -57,18 +58,13 @@ pub(crate) struct SavedSource {
     warning: Option<String>,
 }
 
-/// The ids the clouds keep their tokens under; no catalog source may use one,
-/// even one hand-written into the config.
-const CLOUD_TOKEN_IDS: [&str; 2] = [crate::dropbox::TOKEN_ID, crate::google::TOKEN_ID];
-
 /// The id a saved source keeps: an edit names an existing source, a new one
 /// gets a fresh id. Ids are never taken from the page for a new source, as
 /// the credential store keyed by them also keeps the clouds' tokens.
 fn source_id(store: &Store, requested: Option<String>) -> CmdResult<String> {
     match requested.filter(|id| !id.is_empty()) {
         None => Ok(format!("{:x}", clock::now_nanos())),
-        Some(id) if CLOUD_TOKEN_IDS.contains(&id.as_str()) => Err("This catalog source no longer exists.".into()),
-        Some(id) if store.read(|s| s.sources.iter().any(|source| source.id == id)) => Ok(id),
+        Some(id) if !cloud::is_token_id(&id) && store.read(|s| s.sources.iter().any(|source| source.id == id)) => Ok(id),
         Some(_) => Err("This catalog source no longer exists.".into()),
     }
 }
@@ -127,7 +123,7 @@ pub(crate) fn delete_catalog_source(app: AppHandle, store: State<Store>, id: Str
         .map_err(|e| e.to_string())?;
     // Only a real source's password: the credential store also keeps the
     // clouds' tokens, which no catalog id may reach.
-    if removed && !CLOUD_TOKEN_IDS.contains(&id.as_str()) {
+    if removed && !cloud::is_token_id(&id) {
         Active::forget_password(&id);
     }
     let _ = app.emit("catalogs-changed", ());

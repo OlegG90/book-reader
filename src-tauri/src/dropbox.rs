@@ -59,14 +59,13 @@ fn auth_url(app_key: &str, challenge: &str, state: &str) -> String {
         .finish()
 }
 
-/// Listens on the loopback addresses and builds the Dropbox authorize address. The port is fixed: it must match
-/// the URI registered in the App Console.
+/// Listens on the loopback addresses and builds the Dropbox authorize
+/// address. The port is fixed: it must match the URI registered in the App
+/// Console.
 pub fn begin() -> Result<PendingLogin, String> {
     let app_key = app_key()?;
     let verifier = oauth::random_string(64);
     let state = oauth::random_string(16);
-    // `localhost` may resolve to ::1 or 127.0.0.1 depending on the device;
-    // oauth::bind listens on both, so the browser always lands.
     let listener = oauth::bind(51943)?;
     let url = auth_url(app_key, &oauth::challenge(&verifier), &state);
     Ok(PendingLogin { verifier, state, listener, url })
