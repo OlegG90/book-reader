@@ -96,10 +96,12 @@ pub fn stores() -> [&'static dyn CloudStore; 2] {
     [&crate::dropbox::STORE, &crate::google::STORE]
 }
 
-/// Forgets a cloud's login: the refresh token and the access token.
+/// Forgets a cloud's login: the refresh token, the access token, and the
+/// last failure the settings showed for it.
 pub fn disconnect(store: &dyn CloudStore) {
     Active::forget_password(store.token_id());
     store.tokens().clear();
+    let _ = store.errors().track::<(), SyncError>(Ok(()));
 }
 
 /// Keeps the refresh token of a new login, then drops an access token of an
@@ -346,14 +348,11 @@ pub fn push_book_missing(
 /// as a rejected login like 401.
 pub fn token_post(url: &str, form: &str, service: &str) -> Result<Vec<u8>, SyncError> {
     let reply = crate::net::post(url, &[("Content-Type", "application/x-www-form-urlencoded")], form.as_bytes()).map_err(SyncError::offline)?;
-    if reply.status != 200 {
-        let mut e = SyncError::from_reply(&format!("{service} login"), &reply);
-        if reply.status == 400 {
-            e.kind = Kind::Rejected;
-        }
-        return Err(e);
+    match reply.status {
+        200 => Ok(reply.body),
+        400 => Err(SyncError { kind: Kind::Rejected, ..SyncError::from_reply(&format!("{service} login"), &reply) }),
+        _ => Err(SyncError::from_reply(&format!("{service} login"), &reply)),
     }
-    Ok(reply.body)
 }
 
 /// Parses a token endpoint answer.

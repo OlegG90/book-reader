@@ -250,7 +250,7 @@ pub(crate) fn sync_pull_all(store: State<Store>, books: State<LibraryBooks>) -> 
     pull_all_clouds(&store, &books, &transports())
 }
 
-/// Merges every usable cloud's positions file into the local positions, for
+/// Merges every enabled cloud's positions file into the local positions, for
 /// the whole library; returns how many books changed.
 fn pull_all_clouds(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport]) -> CmdResult<usize> {
     let library: BTreeSet<String> =

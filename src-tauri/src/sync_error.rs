@@ -14,12 +14,16 @@ pub enum Kind {
     Offline,
     /// The server turned the login down (an expired or revoked token).
     Rejected,
-    /// The server asks to slow down.
+    /// The server asks to slow down. Shown like any failure for now; it is
+    /// kept apart for a back-off in the sync engine (#101).
     RateLimited,
     /// Any other answer that isn't a success.
     Http,
     /// The answer came, but it isn't what the app wrote (a foreign or broken file).
     Data,
+    /// A failure from code that doesn't sort its failures (KOSync, the
+    /// configuration, the local store).
+    Other,
 }
 
 /// A sync failure: its kind and the sentence shown for it.
@@ -47,14 +51,17 @@ impl SyncError {
 
     /// An answer that isn't a success: "<what> failed (status): <what the
     /// server said>", sorted by status — 401 and 403 turn the login down, 429
-    /// asks to slow down.
+    /// asks to slow down. Google Drive also slows clients down with a 403
+    /// that names a rate limit, which counts as slowing down too.
     pub fn from_reply(what: &str, reply: &crate::net::Reply) -> Self {
+        let said = String::from_utf8_lossy(&reply.body);
         let kind = match reply.status {
-            401 | 403 => Kind::Rejected,
             429 => Kind::RateLimited,
+            403 if said.contains("ateLimitExceeded") => Kind::RateLimited,
+            401 | 403 => Kind::Rejected,
             _ => Kind::Http,
         };
-        SyncError::new(kind, format!("{what} failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)))
+        SyncError::new(kind, format!("{what} failed ({}): {said}", reply.status))
     }
 }
 
@@ -72,17 +79,17 @@ impl From<SyncError> for String {
 }
 
 /// A sentence from code that doesn't sort its failures (KOSync, the
-/// credential store) counts as an answer that isn't a success.
+/// configuration, the local store).
 impl From<String> for SyncError {
     fn from(message: String) -> Self {
-        SyncError::new(Kind::Http, message)
+        SyncError::new(Kind::Other, message)
     }
 }
 
 /// The same, for a fixed sentence.
 impl From<&str> for SyncError {
     fn from(message: &str) -> Self {
-        SyncError::new(Kind::Http, message)
+        SyncError::new(Kind::Other, message)
     }
 }
 
@@ -92,6 +99,13 @@ mod tests {
 
     fn reply(status: u16) -> crate::net::Reply {
         crate::net::Reply::for_test(status, b"nope")
+    }
+
+    #[test]
+    fn drive_rate_limits_are_not_a_rejected_login() {
+        let throttled = crate::net::Reply::for_test(403, br#"{"error":{"errors":[{"reason":"userRateLimitExceeded"}]}}"#);
+        assert_eq!(SyncError::from_reply("Google Drive list", &throttled).kind, Kind::RateLimited);
+        assert_eq!(SyncError::from("kosync: no answer".to_string()).kind, Kind::Other);
     }
 
     #[test]
