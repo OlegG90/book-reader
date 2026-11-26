@@ -11,6 +11,10 @@ export interface PanelValues extends Appearance {
   offerLibrary: boolean
   /** Android: the volume keys turn pages. */
   volumeKeys: boolean
+  /** Android: a sideways swipe moves between the library's panels and the settings' sections. */
+  swipePanels: boolean
+  /** A sideways swipe turns pages (taps turn them either way). */
+  swipePages: boolean
   /** Book files travel only on unmetered networks; positions always sync. */
   booksWifiOnly: boolean
   /** How many books "Continue reading" shows (1–5). */
@@ -241,6 +245,9 @@ const SECTIONS = [
 
 export type SettingsSection = (typeof SECTIONS)[number]['id']
 
+/** The sections a phone doesn't show (its keyboard shortcuts are a desktop's). */
+export const DESKTOP_ONLY_SECTIONS: readonly SettingsSection[] = SECTIONS.filter(s => 'desktopOnly' in s).map(s => s.id)
+
 /**
  * The settings page: a back button, the sections' names on the left as tabs,
  * and one section at a time (Reading with the appearance, Catalogs, Modules,
@@ -252,7 +259,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const appearance = el('div', { className: 'appearance' })
   const appearancePanel = createAppearancePanel(appearance, initial, onChange)
 
-  const checkbox = (key: 'savePositions' | 'offerLibrary' | 'volumeKeys' | 'booksWifiOnly') => {
+  const checkbox = (key: 'savePositions' | 'offerLibrary' | 'volumeKeys' | 'booksWifiOnly' | 'swipePanels' | 'swipePages') => {
     const box = el('input', { type: 'checkbox' })
     box.onchange = () => onChange({ [key]: box.checked })
     return box
@@ -260,6 +267,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const savePositions = checkbox('savePositions')
   const offerLibrary = checkbox('offerLibrary')
   const volumeKeys = checkbox('volumeKeys')
+  const swipePanels = checkbox('swipePanels')
+  const swipePages = checkbox('swipePages')
   const booksWifiOnly = checkbox('booksWifiOnly')
 
   const libraryFolder = el('span', { className: 'hint path' })
@@ -356,6 +365,11 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   // The volume keys are a phone's.
   const volumeKeysRow = checkRow('Volume keys turn pages', 'While a book is open.', volumeKeys)
   volumeKeysRow.classList.add('android-only')
+  // Swipes are a touch screen's: the phone.
+  const swipePagesRow = checkRow('Swipe turns pages', 'Taps on the sides turn them either way.', swipePages)
+  const swipePanelsRow = checkRow('Swipe between panels', 'Reading, Library, Series, Catalogs and Settings; in Settings, its sections.', swipePanels)
+  swipePagesRow.classList.add('android-only')
+  swipePanelsRow.classList.add('android-only')
 
   /** Shows the backend's modules, grouped by kind, with toggle switches. */
   function setModules(list: ModuleInfo[]) {
@@ -390,6 +404,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       appearance,
       checkRow('Remember reading position', 'Positions sync through the catalog marked "sync".', savePositions),
       volumeKeysRow,
+      swipePagesRow,
+      swipePanelsRow,
     ],
     catalogs: [catalogs],
     modules: [
@@ -502,6 +518,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     savePositions.checked = values.savePositions
     offerLibrary.checked = values.offerLibrary
     volumeKeys.checked = values.volumeKeys
+    swipePanels.checked = values.swipePanels
+    swipePages.checked = values.swipePages
     booksWifiOnly.checked = values.booksWifiOnly
     historyLength.value = String(values.historyLength)
     uiFont.value = values.uiFont

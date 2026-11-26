@@ -28,7 +28,7 @@ import { closePopup, confirmDialog } from './book-menu'
 import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
-import { cloudModuleId, createAppearancePanel, createSettingsPage, type CloudConnection, type ModuleInfo, type RemovedBook, type SettingsSection } from './settings-panel'
+import { DESKTOP_ONLY_SECTIONS, cloudModuleId, createAppearancePanel, createSettingsPage, type CloudConnection, type ModuleInfo, type RemovedBook, type SettingsSection } from './settings-panel'
 import { initBackButton, initIncoming, initOauthAnswer, initVolumeKeys, isAndroid, pollOauthAnswer, setReading } from './platform'
 import { createReadingView, type AddMode, type Offer } from './reading-view'
 import { createLibraryView, type View } from './library-view'
@@ -36,6 +36,7 @@ import { SYNC_EVERY_MS, SYNC_ON_CLOSE_MS } from './sync-manager'
 import { readSettings, SAVE_DELAY_MS, type Settings } from './settings'
 import { $ } from './dom'
 import { MODULE } from './modules'
+import { neighbour, onSwipe, type SwipeDirection } from './swipe'
 
 /** The top bar shows when the mouse comes this close to the top edge. */
 const TOP_EDGE_PX = 48
@@ -493,6 +494,28 @@ function showView(to: View) {
   }
 }
 
+/** The views a swipe walks through: the bottom bar's panels, or within Settings its sections, in their order. */
+function swipeOrder(): View[] {
+  if (view?.startsWith('settings:')) {
+    const sections = [...document.querySelectorAll<HTMLElement>('#settings-nav [data-nav]')].filter(item => !item.hidden)
+    return sections.map(item => item.dataset.nav as View).filter(nav => !DESKTOP_ONLY_SECTIONS.some(id => nav === `settings:${id}`))
+  }
+  return [...document.querySelectorAll<HTMLElement>('#bottom-nav [data-nav]')].filter(item => !item.hidden).map(item => item.dataset.nav as View)
+}
+
+/** A swipe on the library screen: the next or previous panel slides in. */
+function swipeView(direction: SwipeDirection) {
+  const to = view && neighbour(swipeOrder(), view, direction)
+  if (!to) return
+  showView(to)
+  const panel = to.startsWith('settings:') && library.isSettingsEmbedded() ? $('settings') : $('start-main')
+  panel.classList.remove('slide-next', 'slide-prev')
+  void panel.offsetWidth
+  panel.classList.add(`slide-${direction}`)
+  // Gone once played, so a panel shown again later (after a book, say) doesn't replay it.
+  panel.addEventListener('animationend', () => panel.classList.remove(`slide-${direction}`), { once: true })
+}
+
 /** Folds the Settings group in the pane away (`true`) or open. */
 function foldSettingsNav(fold: boolean) {
   $('settings-nav').hidden = fold
@@ -556,6 +579,7 @@ function applySettings(changes: Partial<Settings>) {
     updateFlowButton()
   }
   if ('volumeKeys' in changes) setReading(!!open, settings.volumeKeys)
+  if ('swipePages' in changes) open?.setSwipe(settings.swipePages)
   if ('historyLength' in changes && !open) void library.refreshRecent()
   if ('uiFont' in changes) applyTheme()
   applyCapabilities()
@@ -792,6 +816,10 @@ document.addEventListener('visibilitychange', () => {
 $('organize-cancel').addEventListener('click', closePanels)
 // The library window's pane (desktop): its items, Settings folding out, its width.
 for (const item of navItems) item.addEventListener('click', () => showView(item.dataset.nav as View))
+// The phone: a sideways swipe on the library screen moves between its panels.
+const swipeOn = () => isAndroid && settings.swipePanels && !reading.book && !library.isOrganizeOpen() && !library.isDetailsOpen()
+// The embedded settings sit inside it, so one listener covers both.
+onSwipe($('start'), swipeOn, swipeView)
 settingsHead.addEventListener('click', () => foldSettingsNav(!$('settings-nav').hidden))
 sidebarResizer($('start'), $('sidebar-resizer'))
 appWindow.listen('catalogs-changed', () => {

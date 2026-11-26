@@ -151,6 +151,7 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
     } finally {
       restoring = false
     }
+    book.setSwipe(deps.getSettings().swipePages)
     const title = book.title || info.fileName
     deps.setTitle(title)
     void invoke('remember_book', { fingerprint, title, author: book.author }).catch(console.error)

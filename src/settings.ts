@@ -34,6 +34,8 @@ export function readSettings(stored: Record<string, unknown>): Settings {
     savePositions: stored.savePositions !== false,
     offerLibrary: stored.offerLibrary !== false,
     volumeKeys: stored.volumeKeys === true,
+    swipePanels: stored.swipePanels !== false,
+    swipePages: stored.swipePages !== false,
   booksWifiOnly: stored.booksWifiOnly !== false,
     historyLength: HISTORY_LENGTHS.find(n => n === stored.historyLength) ?? 3,
     uiFont: oneOf(stored.uiFont, UI_FONTS, 'classic'),
