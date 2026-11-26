@@ -98,6 +98,26 @@ describe('createSyncManager', () => {
     expect(invokeMock).not.toHaveBeenCalled()
   })
 
+  it('sends a new position to every transport while one still owes an ack', async () => {
+    const book = { view: { lastLocation: { cfi: 'a', fraction: 0.5 } } } as unknown as BookView
+    const sync = createSyncManager({ book: () => book, fingerprint: () => 'fp', syncOff: () => false })
+    invokeMock.mockImplementation((command: string) => {
+      if (command === 'sync_document') return Promise.resolve('doc1')
+      if (command === 'sync_pull') return Promise.resolve({ offer: null, push: false })
+      if (command === 'sync_push') return Promise.resolve([{ transport: 'kosync', error: null }, { transport: 'dropbox', error: 'down' }])
+      throw new Error(`unexpected ${command}`)
+    })
+    await sync.pull()
+    sync.markDirty()
+    await sync.push()
+    // Dropbox still owes an ack, but the reader moved on: KOSync gets the new place too.
+    sync.markDirty()
+    await sync.push()
+    const pushes = invokeMock.mock.calls.filter(call => call[0] === 'sync_push')
+    expect(pushes).toHaveLength(2)
+    expect(pushes[1][1].only).toBeUndefined()
+  })
+
   it('stays quiet when progress sync is turned off', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const sync = manager(true)

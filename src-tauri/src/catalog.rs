@@ -74,8 +74,14 @@ pub fn login(source: &Source) -> Option<Login> {
 pub fn login_with(source: &Source, password: Option<&str>) -> Option<Login> {
     (!source.user.is_empty()).then(|| Login {
         user: source.user.clone(),
-        password: password.map(str::to_string).or_else(|| Active::password(&source.id)).unwrap_or_default(),
+        password: password.map(str::to_string).or_else(|| kept_password(source)).unwrap_or_default(),
     })
+}
+
+/// The source's kept password. A source whose id is a cloud token's never
+/// gets one, so a refresh token can't leave as a catalog's Basic auth.
+fn kept_password(source: &Source) -> Option<String> {
+    (!crate::cloud::is_token_id(&source.id)).then(|| Active::password(&source.id)).flatten()
 }
 
 /// What a refused login reads as.
@@ -162,6 +168,15 @@ mod tests {
 
     fn source(url: &str) -> Source {
         Source { id: "1".into(), name: "CWA".into(), url: url.into(), user: String::new(), sync: false }
+    }
+
+    #[test]
+    fn a_source_with_a_cloud_tokens_id_gets_no_password() {
+        let mut hijack = source("https://books.example/opds");
+        hijack.id = crate::google::TOKEN_ID.into();
+        hijack.user = "me".into();
+        // Never reaches the credential store, so the token can't leave as Basic auth.
+        assert_eq!(login(&hijack).unwrap().password, "");
     }
 
     #[test]

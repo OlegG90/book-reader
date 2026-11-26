@@ -49,7 +49,7 @@ pub const CLIENT_SECRET: &str = match option_env!("GOOGLE_CLIENT_SECRET") {
 pub const CLIENT_SECRET: &str = "";
 
 /// Where the refresh token is kept, like catalog passwords.
-const TOKEN_ID: &str = "google";
+pub(crate) const TOKEN_ID: &str = "google";
 
 /// The positions file in the app folder; the envelope leaves room for
 /// bookmarks and settings later (the same shape as the Dropbox one).
@@ -310,6 +310,8 @@ pub fn book_manifest() -> Option<HashMap<String, BookRecord>> {
     LAST_ERROR.track(manifest_map()).ok().flatten()
 }
 
+/// The cloud's book manifest: `None` when no book was ever uploaded, an
+/// error when it could not be read (never mistaken for an empty one).
 fn manifest_map() -> Result<Option<HashMap<String, BookRecord>>, String> {
     let access = access_token()?;
     let Some(id) = find_file(&access, MANIFEST_NAME)? else { return Ok(None) };
@@ -348,7 +350,7 @@ pub fn push_book(fingerprint: &str, record: &BookRecord, bytes: &[u8]) -> Result
         fingerprint,
         record,
         bytes,
-        book_manifest,
+        manifest_map,
         upload_book_file,
         store_manifest,
     ))

@@ -319,11 +319,12 @@ class SystemPlugin(private val activity: Activity) : Plugin(activity) {
 
   private fun prefs() = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-  /** Whether the active network is metered (mobile data): book files wait for Wi-Fi. */
+  /** Whether the active network is metered (mobile data): book files wait for Wi-Fi.
+   *  A network it can't check counts as metered, so books never slip out over mobile data. */
   @Command
   fun networkMetered(invoke: Invoke) {
     val manager = activity.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-    val metered = runCatching { manager.isActiveNetworkMetered }.getOrDefault(false)
+    val metered = runCatching { manager.isActiveNetworkMetered }.getOrDefault(true)
     invoke.resolve(JSObject().put("metered", metered))
   }
 

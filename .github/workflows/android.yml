@@ -22,12 +22,11 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     env:
-      # Baked into google::CLIENT_ID/CLIENT_SECRET at compile time. Empty when
-      # the repository secrets are missing: Google Drive then refuses with
-      # setup help instead of failing the build. The phone uses its own
-      # Android OAuth client (package + release-key SHA-1 in the console).
-      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      # Baked into google::CLIENT_ID at compile time. Empty when the
+      # repository secret is missing: Google Drive then refuses with setup
+      # help instead of failing the build. The phone uses its own Android
+      # OAuth client (package + release-key SHA-1 in the console), which has
+      # no secret.
       GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.GOOGLE_ANDROID_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v7
