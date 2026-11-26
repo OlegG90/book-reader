@@ -25,7 +25,7 @@ pub fn last_error() -> Option<String> {
 pub const APP_KEY: &str = "hq54wf951whc1jv";
 
 /// Where the refresh token is kept, like catalog passwords.
-const TOKEN_ID: &str = "dropbox";
+pub(crate) const TOKEN_ID: &str = "dropbox";
 
 /// The positions file in the app's Dropbox folder; the envelope leaves room
 /// for bookmarks and settings later.
@@ -191,6 +191,8 @@ pub fn book_manifest() -> Option<HashMap<String, BookRecord>> {
     LAST_ERROR.track(manifest_map()).ok().flatten()
 }
 
+/// The cloud's book manifest: `None` when no book was ever uploaded, an
+/// error when it could not be read (never mistaken for an empty one).
 fn manifest_map() -> Result<Option<HashMap<String, BookRecord>>, String> {
     let access = access_token()?;
     let Some(body) = download_bytes(&access, BOOKS_MANIFEST)? else { return Ok(None) };

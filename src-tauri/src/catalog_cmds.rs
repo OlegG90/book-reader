@@ -57,12 +57,17 @@ pub(crate) struct SavedSource {
     warning: Option<String>,
 }
 
+/// The ids the clouds keep their tokens under; no catalog source may use one,
+/// even one hand-written into the config.
+const CLOUD_TOKEN_IDS: [&str; 2] = [crate::dropbox::TOKEN_ID, crate::google::TOKEN_ID];
+
 /// The id a saved source keeps: an edit names an existing source, a new one
 /// gets a fresh id. Ids are never taken from the page for a new source, as
 /// the credential store keyed by them also keeps the clouds' tokens.
 fn source_id(store: &Store, requested: Option<String>) -> CmdResult<String> {
     match requested.filter(|id| !id.is_empty()) {
         None => Ok(format!("{:x}", clock::now_nanos())),
+        Some(id) if CLOUD_TOKEN_IDS.contains(&id.as_str()) => Err("This catalog source no longer exists.".into()),
         Some(id) if store.read(|s| s.sources.iter().any(|source| source.id == id)) => Ok(id),
         Some(_) => Err("This catalog source no longer exists.".into()),
     }
@@ -122,7 +127,7 @@ pub(crate) fn delete_catalog_source(app: AppHandle, store: State<Store>, id: Str
         .map_err(|e| e.to_string())?;
     // Only a real source's password: the credential store also keeps the
     // clouds' tokens, which no catalog id may reach.
-    if removed {
+    if removed && !CLOUD_TOKEN_IDS.contains(&id.as_str()) {
         Active::forget_password(&id);
     }
     let _ = app.emit("catalogs-changed", ());
@@ -204,19 +209,18 @@ mod tests {
     fn source_ids_never_come_from_the_page_for_new_sources() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::load(dir.path().join("breader.json"));
-        store
-            .update(|s| {
-                s.sources.push(crate::catalog::Source {
-                    id: "1a".into(),
-                    name: "CWA".into(),
-                    url: "https://books.example/opds".into(),
-                    user: String::new(),
-                    sync: false,
-                })
-            })
-            .unwrap();
+        let source = |id: &str| crate::catalog::Source {
+            id: id.into(),
+            name: "CWA".into(),
+            url: "https://books.example/opds".into(),
+            user: String::new(),
+            sync: false,
+        };
+        // "google" as if hand-written into the config.
+        store.update(|s| s.sources.extend([source("1a"), source("google")])).unwrap();
         assert_eq!(source_id(&store, Some("1a".into())).unwrap(), "1a", "an edit keeps its id");
         assert!(source_id(&store, Some("dropbox".into())).is_err(), "a cloud token's id is refused");
+        assert!(source_id(&store, Some("google".into())).is_err(), "even when a source already has it");
         let fresh = source_id(&store, None).unwrap();
         assert!(fresh.chars().all(|c| c.is_ascii_hexdigit()));
         assert_eq!(source_id(&store, Some(String::new())).unwrap().len(), fresh.len());

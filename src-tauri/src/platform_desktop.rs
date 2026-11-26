@@ -107,7 +107,6 @@ fn file_dialog(window: &Window) -> FileDialogBuilder<Wry> {
     window.dialog().file().set_parent(window)
 }
 
-/// The credential store entry for a catalog's password.
 /// A credential-store entry by its full account name (`catalog:<id>` for catalogs).
 fn credential(account: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new("Book Reader", account).map_err(|e| e.to_string())

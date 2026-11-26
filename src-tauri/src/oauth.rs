@@ -46,11 +46,16 @@ pub fn bind(port: u16) -> Result<Loopback, String> {
     for address in [format!("[::1]:{port}"), format!("127.0.0.1:{port}")] {
         match TcpListener::bind(&address).and_then(|l| l.set_nonblocking(true).map(|_| l)) {
             Ok(listener) => listeners.push(listener),
+            // Another program on the port would catch the browser's answer.
+            Err(e) if e.kind() == io::ErrorKind::AddrInUse => {
+                return Err(format!("login: the redirect port is busy ({e})"));
+            }
+            // A system without IPv6 (or IPv4) loopback just has one address.
             Err(e) => failure = Some(e),
         }
     }
     match failure {
-        Some(e) if listeners.is_empty() => Err(format!("login: the redirect port is busy ({e})")),
+        Some(e) if listeners.is_empty() => Err(format!("login: no loopback address to listen on ({e})")),
         _ => Ok(Loopback(listeners)),
     }
 }
@@ -63,14 +68,12 @@ pub fn wait_for_code(listener: Loopback, state: &str, service: &str) -> Result<S
     let start = Instant::now();
     loop {
         for socket in &listener.0 {
-            match socket.accept() {
-                Ok((stream, _)) => {
-                    if let Some(answer) = read_answer(stream, state, service) {
-                        return answer;
-                    }
+            // An accept error means nothing is waiting, or a connection
+            // dropped before it was taken: either way the wait goes on.
+            if let Ok((stream, _)) = socket.accept() {
+                if let Some(answer) = read_answer(stream, state, service) {
+                    return answer;
                 }
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
-                Err(e) => return Err(format!("login: {e}")),
             }
         }
         if start.elapsed() > LOGIN_TIMEOUT {
