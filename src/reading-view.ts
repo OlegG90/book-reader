@@ -8,6 +8,7 @@ import { SAVE_DELAY_MS, type Settings } from './settings'
 import { FINISHED_AT } from './library'
 import { bookmarkLabel, hasBookmark, toggleBookmark, upgradeBookmarks, type Bookmark } from './bookmarks'
 import { $ } from './dom'
+import { MODULE } from './modules'
 
 export interface Position {
   cfi: string
@@ -100,7 +101,7 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
   const sync = createSyncManager({
     book: () => book,
     fingerprint: () => fingerprint,
-    syncOff: () => deps.getSettings().disabledModules.includes('capability:progress-sync'),
+    syncOff: () => deps.getSettings().disabledModules.includes(MODULE.progressSync),
   })
 
   /** Reads the window's book as a file for foliate-js. */

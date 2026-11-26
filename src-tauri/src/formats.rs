@@ -39,7 +39,7 @@ pub struct Fb2Reader;
 
 impl FormatReader for EpubReader {
     fn module(&self) -> &'static str {
-        "format:epub"
+        crate::modules::id::EPUB
     }
 
     fn label(&self) -> &'static str {
@@ -57,7 +57,7 @@ impl FormatReader for EpubReader {
 
 impl FormatReader for Fb2Reader {
     fn module(&self) -> &'static str {
-        "format:fb2"
+        crate::modules::id::FB2
     }
 
     fn label(&self) -> &'static str {
@@ -142,16 +142,16 @@ mod tests {
 
     #[test]
     fn detects_and_splits_per_format() {
-        assert_eq!(of(Path::new("A.EPUB")).unwrap().module(), "format:epub");
-        assert_eq!(of(Path::new("a.fb2")).unwrap().module(), "format:fb2");
-        assert_eq!(of(Path::new("a.FB2.zip")).unwrap().module(), "format:fb2");
-        assert_eq!(of(Path::new("a.fbz")).unwrap().module(), "format:fb2");
+        assert_eq!(of(Path::new("A.EPUB")).unwrap().module(), crate::modules::id::EPUB);
+        assert_eq!(of(Path::new("a.fb2")).unwrap().module(), crate::modules::id::FB2);
+        assert_eq!(of(Path::new("a.FB2.zip")).unwrap().module(), crate::modules::id::FB2);
+        assert_eq!(of(Path::new("a.fbz")).unwrap().module(), crate::modules::id::FB2);
         assert!(of(Path::new("a.zip")).is_none());
         assert!(of(Path::new("a.md")).is_none());
         // The archive suffix wins over the plain one.
         let (stem, reader) = split("a.fb2.zip").unwrap();
         assert_eq!(stem, "a");
-        assert_eq!(reader.module(), "format:fb2");
+        assert_eq!(reader.module(), crate::modules::id::FB2);
         assert_eq!(split("a.FBZ").unwrap().0, "a");
         assert!(by_module("format:mobi").is_none());
     }
@@ -160,11 +160,11 @@ mod tests {
     fn extensions_follow_the_registry() {
         let none = BTreeSet::new();
         assert_eq!(enabled_extensions(&none), ["epub", "fb2.zip", "fbz", "fb2"]);
-        let off = BTreeSet::from(["format:fb2".to_string()]);
+        let off = BTreeSet::from([crate::modules::id::FB2.to_string()]);
         assert_eq!(enabled_extensions(&off), ["epub"]);
-        assert_eq!(by_module("format:fb2").unwrap().extension_for("a.FB2.ZIP"), Some("fb2.zip"));
-        assert_eq!(by_module("format:fb2").unwrap().extension_for("a.fbz"), Some("fbz"));
-        assert_eq!(by_module("format:fb2").unwrap().extension_for("a.fb2"), Some("fb2"));
+        assert_eq!(by_module(crate::modules::id::FB2).unwrap().extension_for("a.FB2.ZIP"), Some("fb2.zip"));
+        assert_eq!(by_module(crate::modules::id::FB2).unwrap().extension_for("a.fbz"), Some("fbz"));
+        assert_eq!(by_module(crate::modules::id::FB2).unwrap().extension_for("a.fb2"), Some("fb2"));
     }
 
     #[test]
@@ -180,12 +180,12 @@ mod tests {
     #[test]
     fn check_refuses_a_module_that_is_off() {
         let mut settings = Map::new();
-        settings.insert("disabledModules".into(), serde_json::json!(["format:fb2"]));
+        settings.insert("disabledModules".into(), serde_json::json!([crate::modules::id::FB2]));
         let state = store::State { settings, ..store::State::default() };
-        let epub = by_module("format:epub").unwrap();
-        let fb2 = by_module("format:fb2").unwrap();
+        let epub = by_module(crate::modules::id::EPUB).unwrap();
+        let fb2 = by_module(crate::modules::id::FB2).unwrap();
         assert_eq!(check(&state, epub), Ok(()));
         assert_eq!(check(&state, fb2), Err("FB2 is turned off in Settings > Modules".into()));
-        assert!(modules::is_off(&state, "format:fb2"));
+        assert!(modules::is_off(&state, crate::modules::id::FB2));
     }
 }

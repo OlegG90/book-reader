@@ -1,5 +1,6 @@
 import { FONTS, LINE_HEIGHT, LINE_LENGTH, THEMES, el, stepFontSize, type Appearance, type Flow, type Font, type Range, type Theme } from 'reader-core'
 import { icon } from './icons'
+import { MODULE } from './modules'
 
 /** Everything the settings edit. */
 export interface PanelValues extends Appearance {
@@ -51,7 +52,7 @@ export const CLOUD_PROVIDERS = [
 export type CloudProviderId = (typeof CLOUD_PROVIDERS)[number]['id']
 
 /** The Modules switch behind a cloud picker entry. */
-export const cloudModuleId = (id: string) => (id === 'google' ? 'capability:googledrive' : `capability:${id}`)
+export const cloudModuleId = (id: string) => (id === 'google' ? MODULE.googleDrive : `capability:${id}`)
 
 /** Buttons in the settings page that act instead of changing a value. */
 export interface PanelActions {
