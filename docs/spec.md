@@ -65,7 +65,7 @@ Inherited from Simple Reader unless noted:
 
 - Tap zones: left third — previous page, right third — next page, centre — shows or hides the top and bottom bars.
 - Swipe to turn pages (a setting, on by default: **Swipe turns pages** in Settings › Reading; taps turn them either way).
-- **Swipe between panels** (a setting, on by default, in Settings › Reading): on the library screen a sideways swipe moves to the next or previous panel in the bottom bar's order — Reading, Library, Series, Catalogs, Settings — and within Settings between its sections; the new panel slides in briefly (not with reduced motion). It takes a clear sideways move (longer than up or down, and quick); a swipe that starts on a field, a slider or anything that scrolls sideways is theirs, and the screen's edges belong to the system's back gesture. There is no wrap-around at the ends.
+- **Swipe between panels** (a setting, on by default, in Settings › Reading): on the library screen a sideways swipe moves to the next or previous panel in the bottom bar's order — Reading, Library, Series, Catalogs, Settings — and within Settings between its sections; the new panel slides in briefly (not with reduced motion). It takes a clear sideways move (half again as far as up or down, and quick); a swipe that starts on a field, a slider or anything that scrolls sideways is theirs, and the screen's edges belong to the system's back gesture. There is no wrap-around at the ends.
 - Volume keys turn pages while a book is open (a setting, off by default).
 - Full screen with the status bar hidden while reading (a swipe from the top shows it for a moment).
 - The screen stays on while a book is open.

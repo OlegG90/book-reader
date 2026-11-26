@@ -27,9 +27,13 @@ export function swipeDirection(start: TouchPoint, end: TouchPoint, width: number
   return dx < 0 ? 'next' : 'prev'
 }
 
-/** Whether a touch that starts on `target` is its own: a field, a slider, or anything that scrolls sideways. */
-export function ownsSideways(target: Element | null): boolean {
-  for (let node = target; node && node !== document.body; node = node.parentElement) {
+/**
+ * Whether a touch that starts on `target` is its own: a field, a slider, or
+ * anything that scrolls sideways, up to (not including) `within`, the
+ * element that listens for swipes.
+ */
+export function ownsSideways(target: Element | null, within: Element = document.body): boolean {
+  for (let node = target; node && node !== within; node = node.parentElement) {
     if (node.matches('input, select, textarea, [contenteditable="true"]')) return true
     if (node.scrollWidth > node.clientWidth && /auto|scroll/.test(getComputedStyle(node).overflowX)) return true
   }
@@ -40,7 +44,7 @@ export function ownsSideways(target: Element | null): boolean {
 export function onSwipe(target: HTMLElement, enabled: () => boolean, swiped: (direction: SwipeDirection) => void): void {
   let start: TouchPoint | null = null
   target.addEventListener('pointerdown', e => {
-    const own = e.pointerType === 'touch' && enabled() && !ownsSideways(e.target as Element)
+    const own = e.pointerType === 'touch' && enabled() && !ownsSideways(e.target as Element, target)
     start = own ? { x: e.clientX, y: e.clientY, time: e.timeStamp } : null
   })
   target.addEventListener('pointerup', e => {

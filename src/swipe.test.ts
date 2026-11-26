@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { neighbour, ownsSideways, swipeDirection } from './swipe'
+import { neighbour, onSwipe, ownsSideways, swipeDirection } from './swipe'
 
 const at = (x: number, y = 300, time = 0) => ({ x, y, time })
 
@@ -25,6 +25,31 @@ describe('ownsSideways', () => {
     document.body.innerHTML = '<div><input type="range" id="slider"><p id="text">x</p></div>'
     expect(ownsSideways(document.getElementById('slider'))).toBe(true)
     expect(ownsSideways(document.getElementById('text'))).toBe(false)
+  })
+})
+
+describe('onSwipe', () => {
+  const touch = (type: string, x: number, timeStamp: number) =>
+    Object.defineProperties(new Event(type, { bubbles: true }), {
+      pointerType: { value: 'touch' },
+      clientX: { value: x },
+      clientY: { value: 300 },
+      timeStamp: { value: timeStamp },
+    })
+
+  it('reports one swipe per gesture, and none while disabled', () => {
+    document.body.innerHTML = '<div id="outer"><p id="text">x</p></div>'
+    const outer = document.getElementById('outer')!
+    const seen: string[] = []
+    let enabled = true
+    onSwipe(outer, () => enabled, direction => seen.push(direction))
+    const text = document.getElementById('text')!
+    text.dispatchEvent(touch('pointerdown', 300, 0))
+    text.dispatchEvent(touch('pointerup', 150, 100))
+    enabled = false
+    text.dispatchEvent(touch('pointerdown', 300, 200))
+    text.dispatchEvent(touch('pointerup', 150, 300))
+    expect(seen).toEqual(['next'])
   })
 })
 

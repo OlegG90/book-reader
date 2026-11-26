@@ -28,7 +28,7 @@ import { closePopup, confirmDialog } from './book-menu'
 import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
-import { cloudModuleId, createAppearancePanel, createSettingsPage, type CloudConnection, type ModuleInfo, type RemovedBook, type SettingsSection } from './settings-panel'
+import { DESKTOP_ONLY_SECTIONS, cloudModuleId, createAppearancePanel, createSettingsPage, type CloudConnection, type ModuleInfo, type RemovedBook, type SettingsSection } from './settings-panel'
 import { initBackButton, initIncoming, initOauthAnswer, initVolumeKeys, isAndroid, pollOauthAnswer, setReading } from './platform'
 import { createReadingView, type AddMode, type Offer } from './reading-view'
 import { createLibraryView, type View } from './library-view'
@@ -496,23 +496,24 @@ function showView(to: View) {
 
 /** The views a swipe walks through: the bottom bar's panels, or within Settings its sections, in their order. */
 function swipeOrder(): View[] {
-  const settings = !!view?.startsWith('settings:')
-  const items = settings ? document.querySelectorAll<HTMLElement>('#settings-nav [data-nav]') : document.querySelectorAll<HTMLElement>('#bottom-nav [data-nav]')
-  return [...items].filter(item => !item.hidden).map(item => item.dataset.nav as View)
+  if (view?.startsWith('settings:')) {
+    const sections = [...document.querySelectorAll<HTMLElement>('#settings-nav [data-nav]')].filter(item => !item.hidden)
+    return sections.map(item => item.dataset.nav as View).filter(nav => !DESKTOP_ONLY_SECTIONS.some(id => nav === `settings:${id}`))
+  }
+  return [...document.querySelectorAll<HTMLElement>('#bottom-nav [data-nav]')].filter(item => !item.hidden).map(item => item.dataset.nav as View)
 }
 
 /** A swipe on the library screen: the next or previous panel slides in. */
 function swipeView(direction: SwipeDirection) {
-  if (!view) return
-  // The phone's Settings button stands for every section; within them, the sections are the order.
-  const current = !view.startsWith('settings:') || swipeOrder().includes(view) ? view : 'settings:reading'
-  const to = neighbour(swipeOrder(), current, direction)
+  const to = view && neighbour(swipeOrder(), view, direction)
   if (!to) return
   showView(to)
   const panel = to.startsWith('settings:') && library.isSettingsEmbedded() ? $('settings') : $('start-main')
   panel.classList.remove('slide-next', 'slide-prev')
   void panel.offsetWidth
   panel.classList.add(`slide-${direction}`)
+  // Gone once played, so a panel shown again later (after a book, say) doesn't replay it.
+  panel.addEventListener('animationend', () => panel.classList.remove(`slide-${direction}`), { once: true })
 }
 
 /** Folds the Settings group in the pane away (`true`) or open. */
@@ -816,8 +817,8 @@ $('organize-cancel').addEventListener('click', closePanels)
 for (const item of navItems) item.addEventListener('click', () => showView(item.dataset.nav as View))
 // The phone: a sideways swipe on the library screen moves between its panels.
 const swipeOn = () => isAndroid && settings.swipePanels && !reading.book && !library.isOrganizeOpen() && !library.isDetailsOpen()
+// The embedded settings sit inside it, so one listener covers both.
 onSwipe($('start'), swipeOn, swipeView)
-onSwipe($('settings'), swipeOn, swipeView)
 settingsHead.addEventListener('click', () => foldSettingsNav(!$('settings-nav').hidden))
 sidebarResizer($('start'), $('sidebar-resizer'))
 appWindow.listen('catalogs-changed', () => {

@@ -234,6 +234,9 @@ const SECTIONS = [
 
 export type SettingsSection = (typeof SECTIONS)[number]['id']
 
+/** The sections a phone doesn't show (its keyboard shortcuts are a desktop's). */
+export const DESKTOP_ONLY_SECTIONS: readonly SettingsSection[] = SECTIONS.filter(s => 'desktopOnly' in s).map(s => s.id)
+
 /**
  * The settings page: a back button, the sections' names on the left as tabs,
  * and one section at a time (Reading with the appearance, Catalogs, Modules,
