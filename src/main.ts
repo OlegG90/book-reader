@@ -397,7 +397,7 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
         void refreshCloudStatus()
         void sourcesPanel.refresh()
       },
-      console.error,
+      e => showError(undefined, e),
     )
   },
   changeLibrary: () => void library.chooseLibrary(true),

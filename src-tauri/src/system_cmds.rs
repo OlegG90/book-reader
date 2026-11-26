@@ -62,10 +62,10 @@ pub(crate) fn dropbox_connect(app: AppHandle, store: State<Store>) -> CmdResult<
     dropbox::finish(pending)
 }
 
-/// Forgets the Dropbox token; connecting again starts over.
+/// Forgets the Dropbox token; connecting again starts over. Works with the
+/// module off too, so a switched-off cloud never keeps its token.
 #[tauri::command(async)]
-pub(crate) fn dropbox_disconnect(store: State<Store>) -> CmdResult<()> {
-    store.read(|s| modules::require(s, "capability:dropbox"))?;
+pub(crate) fn dropbox_disconnect() -> CmdResult<()> {
     dropbox::disconnect();
     Ok(())
 }
@@ -94,10 +94,10 @@ pub(crate) fn google_connect(app: AppHandle, store: State<Store>) -> CmdResult<(
     google::finish(pending)
 }
 
-/// Forgets the Google token; connecting again starts over.
+/// Forgets the Google token; connecting again starts over. Works with the
+/// module off too, so a switched-off cloud never keeps its token.
 #[tauri::command(async)]
-pub(crate) fn google_disconnect(store: State<Store>) -> CmdResult<()> {
-    store.read(|s| modules::require(s, "capability:googledrive"))?;
+pub(crate) fn google_disconnect() -> CmdResult<()> {
     google::disconnect();
     Ok(())
 }
