@@ -68,6 +68,13 @@ fn runnable(pending: &Pending, now: u64, files_allowed: bool) -> bool {
     pending.not_before <= now && (files_allowed || !moves_a_file(&pending.job))
 }
 
+/// Whether book files may move now; the network is asked (a bridge call on
+/// the phone) only when a file job among those `pick` chooses is waiting.
+/// The engine owns this gate: the transfers themselves don't check it.
+fn files_allowed(store: &Store, pick: impl Fn(&Job) -> bool) -> bool {
+    store.read(|s| s.outbox.iter().any(|p| moves_a_file(&p.job) && pick(&p.job))) && book_transfer_allowed(store)
+}
+
 /// Tries one job; a book that arrives from a cloud is added to `arrived`.
 fn work(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], job: &Job, arrived: &mut Vec<String>) -> Verdict {
     match job {
@@ -122,7 +129,7 @@ fn settle(outbox: &mut Vec<Pending>, tried: &Pending, verdict: Verdict, now: u64
 /// that arrived from a cloud. A job that panics counts as failed, so one bad
 /// job never stops the engine.
 fn run(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], now: u64, pick: impl Fn(&Job) -> bool) -> Vec<String> {
-    let files_allowed = book_transfer_allowed(store);
+    let files_allowed = files_allowed(store, &pick);
     let due: Vec<Pending> =
         store.read(|s| s.outbox.iter().filter(|p| runnable(p, now, files_allowed) && pick(&p.job)).cloned().collect());
     if due.is_empty() {
@@ -157,7 +164,7 @@ pub(super) fn run_positions(store: &Store, books: &LibraryBooks, transports: &[&
 /// How long the worker may sleep: until the next job that can run is due,
 /// at most `IDLE_MS`.
 fn sleep_for(store: &Store, now: u64) -> u64 {
-    let files_allowed = book_transfer_allowed(store);
+    let files_allowed = files_allowed(store, |_| true);
     let next = store.read(|s| s.outbox.iter().filter(|p| files_allowed || !moves_a_file(&p.job)).map(|p| p.not_before).min());
     next.map_or(IDLE_MS, |due| due.saturating_sub(now)).clamp(1_000, IDLE_MS)
 }

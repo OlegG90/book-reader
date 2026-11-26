@@ -270,9 +270,6 @@ fn merge_cloud_positions(store: &Store, clouds: &[&dyn Transport], library: &BTr
 /// true when one gained it. A cloud's failure is reported only when no cloud
 /// gained the book.
 fn push_book_to_cloud(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], fingerprint: &str) -> CmdResult<bool> {
-    if !book_transfer_allowed(store) {
-        return Ok(false);
-    }
     let clouds = book_stores(store, transports);
     if clouds.is_empty() {
         return Ok(false);
@@ -419,9 +416,6 @@ fn book_format_allowed(store: &Store, name: &str) -> CmdResult<()> {
 /// Downloads one book from the first cloud with a good copy and lands it in the
 /// library; true when it landed.
 fn pull_book_from_cloud(store: &Store, transports: &[&dyn Transport], fingerprint: &str) -> CmdResult<bool> {
-    if !book_transfer_allowed(store) {
-        return Ok(false);
-    }
     let root = library_root(store)?;
     let mut failed = None;
     // A cloud that fails, or sends a copy that fails its hash, hands over to the next.
@@ -597,7 +591,7 @@ pub(crate) fn sync_wake(engine: State<SyncEngine>) {
 /// worker ends with the app, so the last window can't leave them to it.
 #[tauri::command(async)]
 pub(crate) fn sync_flush(store: State<Store>, books: State<LibraryBooks>) {
-    engine::run_positions(&store, &books, &transports(), crate::clock::now_ms());
+    engine::run_positions(&store, &books, &transports(), now_ms());
 }
 
 /// Whether the engine's startup pull changed positions, for a window that
