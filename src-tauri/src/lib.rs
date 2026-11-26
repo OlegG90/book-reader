@@ -135,11 +135,13 @@ pub fn run() {
             catalog_cmds::catalog_download,
             sync_cmds::sync_document,
             sync_cmds::sync_pull,
-            sync_cmds::sync_pull_all,
-            sync_cmds::sync_pull_book,
-            sync_cmds::sync_push,
             sync_cmds::sync_missing_books,
-            sync_cmds::sync_push_book,
+            sync_cmds::sync_queue_position,
+            sync_cmds::sync_queue_upload,
+            sync_cmds::sync_queue_downloads,
+            sync_cmds::sync_wake,
+            sync_cmds::sync_flush,
+            sync_cmds::sync_pulled,
             library_cmds::add_to_library,
             books::decline_library,
             books::get_bookmarks,
@@ -174,6 +176,7 @@ pub fn run() {
             #[cfg(mobile)]
             let data_dir = Some(app.path().app_data_dir()?);
             app.manage(Store::load(data_dir::resolve_state_file(data_dir.as_deref())));
+            sync_cmds::start_engine(app.handle());
             windows::open_window(app.handle(), launch)?;
             Ok(())
         })

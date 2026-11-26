@@ -583,21 +583,20 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     $('cloud-offer').hidden = false
   }
 
-  /** Downloads the offered books, then rescans so they appear. */
+  /** Hands the offered books to the sync engine; they appear as they land
+  (on Wi-Fi only, when the setting says so). */
   async function downloadCloudBooks(): Promise<void> {
     const books = cloudMissing
     cloudMissing = []
     hideCloudOffer()
-    let failed = 0
-    for (const book of books) {
-      try {
-        await invoke<boolean>('sync_pull_book', { fingerprint: book.fingerprint })
-      } catch {
-        failed += 1
-      }
+    for (const book of books) dismissedCloud.add(book.fingerprint)
+    try {
+      await invoke('sync_queue_downloads', { fingerprints: books.map(book => book.fingerprint) })
+      const n = books.length
+      showLibraryMessage(`${n === 1 ? 'The book is' : `${n} books are`} on the way; they appear here as they arrive.`)
+    } catch (e) {
+      showLibraryMessage(`Couldn't download from the cloud: ${e}`)
     }
-    await refreshLibrary()
-    if (failed) showLibraryMessage(`Couldn't download ${failed === 1 ? 'a book' : `${failed} books`} from the cloud.`)
   }
 
   $('cloud-download').addEventListener('click', () => void downloadCloudBooks())

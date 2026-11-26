@@ -34,6 +34,57 @@ pub struct State {
     /// This install's id for progress sync, so its own positions on the
     /// server can be told from another device's.
     pub device_id: String,
+    /// Sync work still owed to the transports (see sync_cmds::engine); kept
+    /// here so it survives a restart.
+    #[serde(deserialize_with = "lenient_outbox")]
+    pub outbox: Vec<Pending>,
+}
+
+/// Reads the outbox, skipping entries this build doesn't know (a job kind
+/// from a newer version), so they never cost the rest of the config.
+fn lenient_outbox<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Pending>, D::Error> {
+    let raw = Vec::<Value>::deserialize(d)?;
+    Ok(raw.into_iter().filter_map(|v| serde_json::from_value(v).ok()).collect())
+}
+
+/// One piece of sync work the engine still owes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Job {
+    /// Send a book's position through one transport.
+    #[serde(rename_all = "camelCase")]
+    Position { transport: String, fingerprint: String, document: String, cfi: String, fraction: f64 },
+    /// Upload a library book's file to the clouds that lack it.
+    Upload { fingerprint: String },
+    /// Download a cloud book the library lacks.
+    Download { fingerprint: String },
+}
+
+impl Job {
+    /// Two jobs with the same key are the same work: a newer one replaces
+    /// the older (a book's newest position per transport, one upload or
+    /// download per book).
+    pub fn same_work(&self, other: &Job) -> bool {
+        match (self, other) {
+            (Job::Position { transport: a, fingerprint: f, .. }, Job::Position { transport: b, fingerprint: g, .. }) => a == b && f == g,
+            (Job::Upload { fingerprint: f }, Job::Upload { fingerprint: g }) => f == g,
+            (Job::Download { fingerprint: f }, Job::Download { fingerprint: g }) => f == g,
+            _ => false,
+        }
+    }
+}
+
+/// A job in the outbox with its retry state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Pending {
+    pub job: Job,
+    /// Failed tries so far; sets how long the next one waits.
+    #[serde(default)]
+    pub attempts: u32,
+    /// Not tried before this time (ms since the Unix epoch).
+    #[serde(default)]
+    pub not_before: u64,
 }
 
 /// How many books the start screen lists.

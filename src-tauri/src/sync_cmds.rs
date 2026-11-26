@@ -10,14 +10,17 @@ use crate::library_cmds::{library_root, LibraryBooks};
 use crate::modules;
 use crate::naming;
 use crate::platform::{Active, Platform};
-use crate::store::{self, Position, Store};
-use crate::sync_error::{Kind, SyncError};
+use crate::store::{self, Job, Position, Store};
+use crate::sync_error::SyncError;
 use crate::windows::ReaderWindows;
 use crate::CmdResult;
 use serde::Serialize;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use tauri::{Manager, State, Window};
+
+mod engine;
+pub(crate) use engine::{start as start_engine, SyncEngine};
 
 /// The source that syncs progress, if one is set and sync is on: with the
 /// module off the sync commands no-op (no network) instead of failing.
@@ -234,24 +237,10 @@ fn merge_remote(
     changed
 }
 
-/// Downloads every cloud's positions file once and refreshes the local
-/// positions where the cloud is newer (newest-wins, the same rule as pull on
-/// open): Continue reading shows the fresh percent, and opening such a book
-/// goes straight to it. Silent: no offers, no pushes, a dead transport is
-/// skipped like in a pull. Once per start of the app, however many windows
-/// ask: later calls report nothing changed.
-#[tauri::command(async)]
-pub(crate) fn sync_pull_all(store: State<Store>, books: State<LibraryBooks>) -> CmdResult<usize> {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    static DONE: AtomicBool = AtomicBool::new(false);
-    if DONE.swap(true, Ordering::SeqCst) {
-        return Ok(0);
-    }
-    pull_all_clouds(&store, &books, &transports())
-}
-
 /// Merges every enabled cloud's positions file into the local positions, for
-/// the whole library; returns how many books changed.
+/// the whole library (newest-wins, the same rule as pull on open): Continue
+/// reading shows the fresh percent, and opening such a book goes straight to
+/// it. The engine runs it once per start; returns how many books changed.
 fn pull_all_clouds(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport]) -> CmdResult<usize> {
     let library: BTreeSet<String> =
         library_root(store).map(|root| books.snapshot(store, &root).into_iter().map(|b| b.fingerprint).collect()).unwrap_or_default();
@@ -277,22 +266,10 @@ fn merge_cloud_positions(store: &Store, clouds: &[&dyn Transport], library: &BTr
     Ok(updated)
 }
 
-/// Uploads a reading book's file to every connected cloud that lacks it.
-/// Best-effort and silent: without a login there is nothing to push to, and
-/// books the library scan never saw are skipped. True when at least one
-/// cloud gained the book.
-#[tauri::command(async)]
-pub(crate) fn sync_push_book(store: State<Store>, books: State<LibraryBooks>, fingerprint: String) -> CmdResult<bool> {
-    push_book_to_cloud(&store, &books, &transports(), &fingerprint)
-}
-
 /// Uploads a library book's file to every cloud that keeps books and lacks it;
 /// true when one gained it. A cloud's failure is reported only when no cloud
 /// gained the book.
 fn push_book_to_cloud(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], fingerprint: &str) -> CmdResult<bool> {
-    if !book_transfer_allowed(store) {
-        return Ok(false);
-    }
     let clouds = book_stores(store, transports);
     if clouds.is_empty() {
         return Ok(false);
@@ -436,20 +413,9 @@ fn book_format_allowed(store: &Store, name: &str) -> CmdResult<()> {
     store.read(|s| formats::check(s, reader))
 }
 
-/// Downloads a book file the library lacks, verifying it against the
-/// manifest hash, and places it in the library. Best-effort and silent like
-/// an upload.
-#[tauri::command(async)]
-pub(crate) fn sync_pull_book(store: State<Store>, fingerprint: String) -> CmdResult<bool> {
-    pull_book_from_cloud(&store, &transports(), &fingerprint)
-}
-
 /// Downloads one book from the first cloud with a good copy and lands it in the
 /// library; true when it landed.
 fn pull_book_from_cloud(store: &Store, transports: &[&dyn Transport], fingerprint: &str) -> CmdResult<bool> {
-    if !book_transfer_allowed(store) {
-        return Ok(false);
-    }
     let root = library_root(store)?;
     let mut failed = None;
     // A cloud that fails, or sends a copy that fails its hash, hands over to the next.
@@ -483,37 +449,6 @@ fn pull_book_from_cloud(store: &Store, transports: &[&dyn Transport], fingerprin
         return Ok(landed);
     }
     failed.map_or(Ok(false), Err)
-}
-
-/// What one push round achieved, per transport: the frontend retries only
-/// the failed ones, each on its own rhythm.
-#[derive(Serialize)]
-pub(crate) struct PushReport {
-    transport: String,
-    error: Option<String>,
-}
-
-/// Sends the position through the enabled transports (`only` narrows a
-/// retry); every failure is reported instead of failing the push. A cloud
-/// without a login sends nothing and reports nothing: it isn't a failure to
-/// retry.
-fn push_all(
-    store: &Store,
-    transports: &[&dyn Transport],
-    only: &Option<BTreeSet<String>>,
-    book: &BookKey,
-    cfi: &str,
-    fraction: f64,
-) -> Vec<PushReport> {
-    transports
-        .iter()
-        .filter(|t| enabled(store, **t))
-        .filter(|t| only.as_ref().is_none_or(|ids| ids.contains(t.id())))
-        .filter_map(|t| match t.push(store, book, cfi, fraction) {
-            Err(e) if e.kind == Kind::NotConnected => None,
-            result => Some(PushReport { transport: t.id().into(), error: result.err().map(String::from) }),
-        })
-        .collect()
 }
 
 /// This install's id for the sync server, made once.
@@ -606,27 +541,85 @@ fn compare_positions(local: Option<&Position>, remote: Option<kosync::Progress>,
     SyncState { offer: Some(SyncOffer { cfi: remote.progress, fraction: remote.percentage, device: remote.device, time }), push: false }
 }
 
-/// Sends a book's position through the enabled transports (`only` narrows a
-/// retry to the transports that still owe an ack).
+/// Queues a book's position for every enabled transport; the engine sends
+/// it, and retries a transport that fails on its own.
 #[tauri::command(async)]
-pub(crate) fn sync_push(
+pub(crate) fn sync_queue_position(
     store: State<Store>,
+    engine: State<SyncEngine>,
     document: String,
     fingerprint: String,
     cfi: String,
     fraction: f64,
-    only: Option<Vec<String>>,
-) -> CmdResult<Vec<PushReport>> {
-    let only = only.map(|ids| ids.into_iter().collect::<BTreeSet<_>>());
-    let book = BookKey { document: &document, fingerprint: &fingerprint };
-    Ok(push_all(&store, &transports(), &only, &book, &cfi, fraction))
+) -> CmdResult<()> {
+    let ids: Vec<&str> = transports().into_iter().filter(|t| enabled(&store, *t)).map(|t| t.id()).collect();
+    queue_jobs(
+        &store,
+        &engine,
+        ids.into_iter().map(|id| Job::Position {
+            transport: id.into(),
+            fingerprint: fingerprint.clone(),
+            document: document.clone(),
+            cfi: cfi.clone(),
+            fraction,
+        }),
+    )
+}
+
+/// Queues a library book's file for the clouds that lack it (when a book
+/// being read closes); held on metered networks until Wi-Fi is back, and
+/// dropped when no cloud has a login.
+#[tauri::command(async)]
+pub(crate) fn sync_queue_upload(store: State<Store>, engine: State<SyncEngine>, fingerprint: String) -> CmdResult<()> {
+    queue_jobs(&store, &engine, [Job::Upload { fingerprint }])
+}
+
+/// Queues downloads of cloud books the library lacks; the windows hear
+/// `sync-books-arrived` as they land. Held on metered networks until Wi-Fi is back.
+#[tauri::command(async)]
+pub(crate) fn sync_queue_downloads(store: State<Store>, engine: State<SyncEngine>, fingerprints: Vec<String>) -> CmdResult<()> {
+    queue_jobs(&store, &engine, fingerprints.into_iter().map(|fingerprint| Job::Download { fingerprint }))
+}
+
+/// Has the engine look at its outbox now (the app came back to the front).
+#[tauri::command]
+pub(crate) fn sync_wake(engine: State<SyncEngine>) {
+    engine.wake();
+}
+
+/// Sends the positions still owed, before a window closes: the engine's
+/// worker ends with the app, so the last window can't leave them to it.
+#[tauri::command(async)]
+pub(crate) fn sync_flush(store: State<Store>, books: State<LibraryBooks>) {
+    engine::run_positions(&store, &books, &transports(), now_ms());
+}
+
+/// Whether the engine's startup pull changed positions, for a window that
+/// started listening for `sync-positions-updated` after it was said.
+#[tauri::command]
+pub(crate) fn sync_pulled(engine: State<SyncEngine>) -> bool {
+    engine.pulled()
+}
+
+/// Puts jobs in the outbox and wakes the engine.
+fn queue_jobs(store: &Store, engine: &SyncEngine, jobs: impl IntoIterator<Item = Job>) -> CmdResult<()> {
+    store
+        .update(|s| {
+            for job in jobs {
+                engine::queue(&mut s.outbox, job);
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    engine.wake();
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{book_format_allowed, book_transfer_allowed, book_transfer_gate, collect_missing, compare_positions, land_book, merge_remote, missing_cloud_books, place_book, pull_all_clouds, pull_book_from_cloud, pull_merged, push_all, push_book_to_cloud, safe_relative, sync_source, transports, BookKey, CloudTransport, Kosync, Transport, DROPBOX, GOOGLE};
+    use super::{book_format_allowed, book_transfer_allowed, book_transfer_gate, collect_missing, compare_positions, land_book, merge_remote, missing_cloud_books, place_book, pull_all_clouds, pull_book_from_cloud, pull_merged, push_book_to_cloud, safe_relative, sync_source, transports, BookKey, CloudTransport, Kosync, Transport, DROPBOX, GOOGLE};
     use crate::cloud::CloudStore;
     use crate::sync_error::{Kind, SyncError};
+    use crate::store::Job;
     use crate::library_cmds::library_root;
     use crate::library_cmds::LibraryBooks;
     use crate::cloud::push_book_missing;
@@ -1250,16 +1243,41 @@ mod tests {
         assert_eq!(remote.map(|p| p.progress).as_deref(), Some("b"), "ties keep the first");
     }
 
+    /// Queues the book's position for these transports, as a window does.
+    fn queue_position(store: &Store, ids: &[&str]) {
+        store
+            .update(|s| {
+                for id in ids {
+                    let job = Job::Position { transport: id.to_string(), fingerprint: "fp".into(), document: "doc".into(), cfi: "a".into(), fraction: 0.5 };
+                    super::engine::queue(&mut s.outbox, job);
+                }
+            })
+            .unwrap();
+    }
+
+    /// The transports still owed a position.
+    fn owed(store: &Store) -> Vec<String> {
+        store.read(|s| {
+            s.outbox
+                .iter()
+                .filter_map(|p| match &p.job {
+                    Job::Position { transport, .. } => Some(transport.clone()),
+                    _ => None,
+                })
+                .collect()
+        })
+    }
+
     #[test]
     fn disabled_transports_are_skipped() {
         let (_dir, store) = synced_store(&[]);
         let off = Fake::of("off", Ok(Some(server("b", "phone", 2))), Ok(())).off();
         let remote = pull_merged(&store, &as_transports(&[&off]), &book());
         assert!(remote.is_none());
+        queue_position(&store, &["off"]);
+        super::engine::run_due(&store, &LibraryBooks::default(), &as_transports(&[&off]), 0);
         assert!(off.calls.borrow().is_empty());
-        let reports = push_all(&store, &as_transports(&[&off]), &None, &book(), "a", 0.5);
-        assert!(reports.is_empty());
-        assert!(off.calls.borrow().is_empty());
+        assert!(owed(&store).is_empty(), "nothing to do for a transport that is off");
     }
 
     #[test]
@@ -1268,25 +1286,46 @@ mod tests {
         let kosync = Fake::of("kosync", Ok(None), Ok(()));
         let cloud = Fake::of("dropbox", Ok(Some(server("b", "phone", 2))), Err("not connected".into())).disconnected();
         assert!(pull_merged(&store, &as_transports(&[&kosync, &cloud]), &book()).is_none());
-        let reports = push_all(&store, &as_transports(&[&kosync, &cloud]), &None, &book(), "a", 0.5);
-        assert_eq!(reports.len(), 1, "no report means no retry for the cloud");
-        assert_eq!((reports[0].transport.as_str(), reports[0].error.as_deref()), ("kosync", None));
+        queue_position(&store, &["kosync", "dropbox"]);
+        super::engine::run_due(&store, &LibraryBooks::default(), &as_transports(&[&kosync, &cloud]), 0);
+        assert!(owed(&store).is_empty(), "a cloud without a login is never retried");
         assert!(cloud.calls.borrow().is_empty());
     }
 
     #[test]
-    fn push_reports_failures_and_honors_only() {
+    fn a_failing_transport_is_retried_alone_later() {
         let (_dir, store) = synced_store(&[]);
         let ok = Fake::of("ok", Ok(None), Ok(()));
         let failing = Fake::of("failing", Ok(None), Err("down".into()));
-        let reports = push_all(&store, &as_transports(&[&ok, &failing]), &None, &book(), "a", 0.5);
-        assert_eq!(reports.len(), 2);
-        assert_eq!((reports[0].transport.as_str(), reports[0].error.as_deref()), ("ok", None));
-        assert_eq!((reports[1].transport.as_str(), reports[1].error.as_deref()), ("failing", Some("down")));
-        let only: Option<std::collections::BTreeSet<String>> = Some(["failing".to_string()].into_iter().collect());
-        let reports = push_all(&store, &as_transports(&[&ok, &failing]), &only, &book(), "a", 0.5);
-        assert_eq!(reports.len(), 1);
-        assert_eq!(ok.calls.borrow().as_slice(), ["push"], "clean transports are not retried");
+        let both = as_transports(&[&ok, &failing]);
+        queue_position(&store, &["ok", "failing"]);
+        super::engine::run_due(&store, &LibraryBooks::default(), &both, 1_000);
+        assert_eq!(owed(&store), ["failing"]);
+        // Not due yet: nothing is tried.
+        super::engine::run_due(&store, &LibraryBooks::default(), &both, 2_000);
+        assert_eq!(failing.calls.borrow().len(), 1);
+        // Due again later: only the failing one goes.
+        super::engine::run_due(&store, &LibraryBooks::default(), &both, 1_000_000);
+        assert_eq!(ok.calls.borrow().as_slice(), ["push"], "a clean transport is not sent the same place again");
         assert_eq!(failing.calls.borrow().as_slice(), ["push", "push"]);
+        assert_eq!(store.read(|s| s.outbox[0].attempts), 2);
     }
+
+    #[test]
+    fn book_files_wait_and_arrive_through_the_outbox() {
+        let cloud = MemCloud::new(false);
+        let via = CloudTransport(&cloud);
+        let (_dir, store, books, _root) = library_with(&[("Book.epub", "bytes")]);
+        let fp = books.snapshot(&store, &library_root(&store).unwrap()).into_iter().next().unwrap().fingerprint;
+        store.update(|s| super::engine::queue(&mut s.outbox, Job::Upload { fingerprint: fp.clone() })).unwrap();
+        super::engine::run_due(&store, &books, &[&via], 0);
+        assert_eq!(cloud.names().len(), 2, "uploaded");
+        assert!(store.read(|s| s.outbox.is_empty()));
+        // Another device asks for it: it lands and is reported as arrived.
+        let (_dir2, other, other_books, other_root) = library_with(&[]);
+        other.update(|s| super::engine::queue(&mut s.outbox, Job::Download { fingerprint: fp.clone() })).unwrap();
+        assert_eq!(super::engine::run_due(&other, &other_books, &[&via], 0), [fp]);
+        assert!(other_root.join("Book.epub").is_file());
+    }
+
 }
