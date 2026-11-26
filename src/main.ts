@@ -579,6 +579,7 @@ function applySettings(changes: Partial<Settings>) {
     updateFlowButton()
   }
   if ('volumeKeys' in changes) setReading(!!open, settings.volumeKeys)
+  if ('swipePages' in changes) open?.setSwipe(settings.swipePages)
   if ('historyLength' in changes && !open) void library.refreshRecent()
   if ('uiFont' in changes) applyTheme()
   applyCapabilities()
