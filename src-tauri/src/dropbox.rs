@@ -174,7 +174,9 @@ impl CloudStore for Dropbox {
             return Err(SyncError::from_reply("Dropbox space", &reply));
         }
         let usage: serde_json::Value = serde_json::from_slice(&reply.body).map_err(|e| SyncError::data(format!("Dropbox space is not ours: {e}")))?;
-        Ok(usage["used"].as_u64().zip(usage["allocation"]["allocated"].as_u64()))
+        // A team account shares its space: its own `used` counts against the team's.
+        let used = usage["allocation"]["used"].as_u64().or_else(|| usage["used"].as_u64());
+        Ok(used.zip(usage["allocation"]["allocated"].as_u64()))
     }
 
     fn list(&self, access: &str, prefix: &str) -> Result<Vec<String>, SyncError> {

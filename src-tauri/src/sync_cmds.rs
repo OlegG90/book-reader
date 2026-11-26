@@ -315,7 +315,9 @@ fn push_book_to_cloud(store: &Store, books: &LibraryBooks, transports: &[&dyn Tr
     for t in clouds {
         match t.push_book(store, fingerprint, &record, &bytes) {
             Ok(gained) => pushed |= gained,
-            Err(e) => failed = Some(e),
+            // A full cloud outweighs another failure: the book waits for space.
+            Err(e) if failed.as_ref().is_none_or(|f: &SyncError| f.kind != crate::sync_error::Kind::NoSpace) => failed = Some(e),
+            Err(_) => {}
         }
     }
     match failed {

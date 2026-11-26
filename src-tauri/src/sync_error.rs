@@ -59,7 +59,7 @@ impl SyncError {
         let said = String::from_utf8_lossy(&reply.body);
         let kind = match reply.status {
             // Dropbox answers a full account with 409, Drive with 403.
-            409 | 403 | 507 if said.contains("insufficient_space") || said.contains("storageQuotaExceeded") => Kind::NoSpace,
+            409 | 403 if said.contains("insufficient_space") || said.contains("storageQuotaExceeded") => Kind::NoSpace,
             429 => Kind::RateLimited,
             403 if said.contains("ateLimitExceeded") => Kind::RateLimited,
             401 | 403 => Kind::Rejected,

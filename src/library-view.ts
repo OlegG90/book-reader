@@ -121,7 +121,6 @@ export interface LibraryView {
   embedSettings(embed: boolean): void
 }
 
-/** The library window: Continue reading, the book grid with its search and filters, Organize, book details and the cloud download offer. */
 /** Where a library book is in the clouds: every cloud holds it, its upload
 waits, or a cloud is full. */
 export type CloudPlace = 'cloud' | 'waiting' | 'nofit'
@@ -138,10 +137,12 @@ export function cloudMark(place: CloudPlace | undefined): HTMLElement | string {
   const mark = icon(CLOUD_MARKS[place].icon)
   mark.classList.add('cloud-mark', place)
   mark.title = CLOUD_MARKS[place].label
+  mark.setAttribute('role', 'img')
   mark.setAttribute('aria-label', CLOUD_MARKS[place].label)
   return mark
 }
 
+/** The library window: Continue reading, the book grid with its search and filters, Organize, book details and the cloud download offer. */
 export function createLibraryView(deps: LibraryDeps): LibraryView {
   /** A library folder is chosen (else the first-run choice shows). */
   let libraryReady = false

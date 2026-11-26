@@ -71,8 +71,11 @@ export interface CloudConnection {
 
 /** "3.1 GB of 15 GB used", for a cloud's row. */
 export function spaceText([used, total]: [number, number]): string {
-  const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(bytes < 10 * 1024 ** 3 ? 1 : 0)} GB`
-  return `${gb(used)} of ${gb(total)} used`
+  const size = (bytes: number) => {
+    const [value, unit] = bytes >= 1024 ** 4 ? [bytes / 1024 ** 4, 'TB'] : [bytes / 1024 ** 3, 'GB']
+    return `${Number(value.toFixed(value < 10 ? 1 : 0))} ${unit}`
+  }
+  return `${size(used)} of ${size(total)} used`
 }
 
 /** The Modules switch behind a cloud. */

@@ -120,11 +120,11 @@ fn files_allowed(store: &Store, pick: impl Fn(&Job) -> bool) -> bool {
 }
 
 /// What a run of the outbox brought: books that arrived from a cloud, and
-/// books now uploaded.
+/// whether any book went up (the clouds then hold more than the engine knew).
 #[derive(Debug, Default, PartialEq)]
 pub(super) struct Outcome {
     pub(super) arrived: Vec<String>,
-    pub(super) uploaded: Vec<String>,
+    pub(super) uploaded: bool,
 }
 
 /// Tries one job, noting in `outcome` what it brought.
@@ -143,7 +143,7 @@ fn work(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], job:
         }
         Job::Upload { fingerprint } => match push_book_to_cloud(store, books, transports, fingerprint) {
             Ok(_) => {
-                outcome.uploaded.push(fingerprint.clone());
+                outcome.uploaded = true;
                 Verdict::Done
             }
             Err(e) => Verdict::Retry(e.kind),
@@ -166,10 +166,9 @@ fn work(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], job:
 pub(super) struct Reconciled {
     /// Library books removed from the clouds on another device, moved out here.
     pub(super) moved_out: usize,
-    /// Library books every readable cloud holds.
-    pub(super) in_clouds: BTreeSet<String>,
-    /// Each cloud's used and total space, by transport id.
-    pub(super) space: HashMap<String, (u64, u64)>,
+    /// What it learned of the clouds; `None` when no cloud could be read
+    /// (offline), so what was known stays.
+    pub(super) known: Option<Known>,
 }
 
 /// What each library book needs: an upload (a cloud lacks it, or it came
@@ -249,7 +248,7 @@ pub(super) fn reconcile(store: &Store, books: &LibraryBooks, transports: &[&dyn 
             moved += 1;
         }
     }
-    Reconciled { moved_out: moved, in_clouds, space }
+    Reconciled { moved_out: moved, known: Some((in_clouds, space)) }
 }
 
 /// Records how a try went. Only the job as it was tried is touched: a newer
@@ -279,8 +278,8 @@ fn settle(outbox: &mut Vec<Pending>, tried: &Pending, verdict: Verdict, now: u64
 }
 
 /// Runs every job that may run at `now` and that `pick` chooses, once, and
-/// records the outcomes in one write; says what the run brought. A job that panics counts as failed, so one bad
-/// job never stops the engine.
+/// records the outcomes in one write; says what the run brought. A job that
+/// panics counts as failed, so one bad job never stops the engine.
 fn run(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], now: u64, pick: impl Fn(&Job) -> bool) -> Outcome {
     let files_allowed = files_allowed(store, &pick);
     let due: Vec<Pending> =
@@ -290,9 +289,16 @@ fn run(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], now: 
     }
     let mut outcome = Outcome::default();
     let mut verdicts = Vec::new();
+    let mut full = false;
     for tried in due {
-        let verdict = catch_unwind(AssertUnwindSafe(|| work(store, books, transports, &tried.job, &mut outcome)))
-            .unwrap_or(Verdict::Retry(Kind::Other));
+        // Once a cloud says it is full, the round's other uploads wait with
+        // it instead of each sending its whole file to be refused.
+        let verdict = if full && matches!(tried.job, Job::Upload { .. }) {
+            Verdict::Retry(Kind::NoSpace)
+        } else {
+            catch_unwind(AssertUnwindSafe(|| work(store, books, transports, &tried.job, &mut outcome))).unwrap_or(Verdict::Retry(Kind::Other))
+        };
+        full |= verdict == Verdict::Retry(Kind::NoSpace);
         verdicts.push((tried, verdict));
     }
     let _ = store.update(|s| {
@@ -401,15 +407,18 @@ pub(crate) fn start(app: &AppHandle) {
                 if found.moved_out > 0 {
                     let _ = app.emit("library-updated", ());
                 }
-                *engine.known.lock().unwrap() = (found.in_clouds, found.space);
-                let _ = app.emit("sync-states-changed", ());
+                if let Some(known) = found.known {
+                    *engine.known.lock().unwrap() = known;
+                    let _ = app.emit("sync-states-changed", ());
+                }
             }
             let ran = run_due(&store, &books, &transports(), now_ms());
             if !ran.arrived.is_empty() {
                 let _ = app.emit("sync-books-arrived", ());
             }
-            if !ran.uploaded.is_empty() {
-                engine.known.lock().unwrap().0.extend(ran.uploaded);
+            // Books went up: the next round learns which clouds hold them now.
+            if ran.uploaded {
+                engine.reconcile.store(true, Ordering::SeqCst);
                 let _ = app.emit("sync-states-changed", ());
             }
             engine.sleep(sleep_for(&store, now_ms()));

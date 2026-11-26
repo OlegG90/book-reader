@@ -278,9 +278,10 @@ pub fn download_book(store: &dyn CloudStore, remote_name: &str) -> Result<Option
     settle(store, store.access_token().and_then(|access| store.get(&access, remote_name)))
 }
 
-/// The cloud's used and total space, if it says; a failure goes to the settings.
+/// The cloud's used and total space, if it says. A failure here isn't a
+/// sync failure, so the settings' last error stays as sync left it.
 pub fn space(store: &dyn CloudStore) -> Option<(u64, u64)> {
-    settle(store, store.access_token().and_then(|access| store.space(&access))).ok().flatten()
+    store.access_token().and_then(|access| store.space(&access)).ok().flatten()
 }
 
 /// Removes a book from the cloud: this device's manifest records the removal
