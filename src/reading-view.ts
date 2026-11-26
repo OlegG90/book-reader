@@ -193,7 +193,7 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
   function pushBookFile() {
     const fraction = book?.view.lastLocation?.fraction
     if (noSave || fraction == null || fraction <= 0 || fraction >= FINISHED_AT || !fingerprint) return
-    void invoke<boolean>('sync_push_book', { fingerprint }).catch(e => console.warn('sync:', e))
+    void invoke('sync_queue_upload', { fingerprint }).catch(e => console.warn('sync:', e))
   }
 
   /** Closes the open book: pushes its last position, uploads its file when it counts as reading, and clears the reading chrome. */

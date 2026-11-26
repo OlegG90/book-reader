@@ -22,16 +22,11 @@ export interface SyncDeps {
   syncOff: () => boolean
 }
 
-/** What one push round achieved, per transport. */
-export interface PushReport {
-  transport: string
-  error: string | null
-}
-
 export interface SyncManager {
   /** Asks the sync server whether another device read on, and offers to jump there. */
   pull(): Promise<void>
-  /** Sends the position if it moved; failures stay quiet and are retried next time. */
+  /** Hands the position to the sync engine if it moved; the engine sends it
+  and retries each transport that fails on its own. */
   push(): Promise<void>
   /** Jumps to the offered position, falling back to its share read. */
   jump(): Promise<void>
@@ -54,15 +49,13 @@ export function timeAgo(time: number) {
   return days === 1 ? 'yesterday' : `${days} days ago`
 }
 
-/** Keeps the open book's sync offer, its unsent position and the transports that still owe an ack. */
+/** Keeps the open book's sync offer and whether its position moved since it was last handed to the engine. */
 export function createSyncManager(deps: SyncDeps): SyncManager {
   let offer: SyncOffer | null = null
   /** The open book's id on the sync server; null when it doesn't sync. */
   let document: string | null = null
-  /** The position moved since every transport acked it. */
+  /** The position moved since it was last handed to the engine. */
   let dirty = false
-  /** Transports that still owe an ack; only they are retried. */
-  let pending = new Set<string>()
 
   async function pull() {
     if (deps.syncOff()) return
@@ -91,18 +84,13 @@ export function createSyncManager(deps: SyncDeps): SyncManager {
     const location = deps.book()?.view.lastLocation
     const synced = document
     const fingerprint = deps.fingerprint()
-    if ((!dirty && pending.size === 0) || !location || !synced || !fingerprint) return
-    // A new position goes to every transport; a retry of the same one only
-    // to the transports that still owe an ack.
-    const moved = dirty
+    if (!dirty || !location || !synced || !fingerprint) return
     dirty = false
-    const only = moved ? undefined : [...pending]
     try {
-      const reports = await invoke<PushReport[]>('sync_push', { document: synced, fingerprint, cfi: location.cfi, fraction: location.fraction, only })
-      pending = new Set(reports.filter(r => r.error).map(r => r.transport))
+      await invoke('sync_queue_position', { document: synced, fingerprint, cfi: location.cfi, fraction: location.fraction })
     } catch (e) {
-      // Retried next time, unless another book has opened meanwhile.
-      if (document === synced && moved) dirty = true
+      // Handed over next time, unless another book has opened meanwhile.
+      if (document === synced) dirty = true
       console.warn('sync:', e)
     }
   }
@@ -132,7 +120,6 @@ export function createSyncManager(deps: SyncDeps): SyncManager {
     reset: () => {
       document = null
       dirty = false
-      pending.clear()
       hide()
     },
   }

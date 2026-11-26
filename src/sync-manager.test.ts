@@ -48,74 +48,42 @@ describe('createSyncManager', () => {
     expect(document.getElementById('sync-bar')!.hidden).toBe(true)
   })
 
-  it('retries only the transports that still owe an ack', async () => {
-    const book = { view: { lastLocation: { cfi: 'a', fraction: 0.5 } } } as unknown as BookView
-    const sync = createSyncManager({ book: () => book, fingerprint: () => 'fp', syncOff: () => false })
-    invokeMock.mockImplementation((command: string, args?: { only?: string[] }) => {
-      if (command === 'sync_document') return Promise.resolve('doc1')
-      if (command === 'sync_pull') return Promise.resolve({ offer: null, push: false })
-      if (command === 'sync_push') {
-        if (!args?.only) return Promise.resolve([{ transport: 'kosync', error: 'down' }])
-        expect(args.only).toEqual(['kosync'])
-        return Promise.resolve([{ transport: 'kosync', error: null }])
-      }
-      throw new Error(`unexpected ${command}`)
-    })
-    await sync.pull()
-    sync.markDirty()
-    await sync.push()
-    await sync.push()
-    const pushes = invokeMock.mock.calls.filter(call => call[0] === 'sync_push')
-    expect(pushes).toHaveLength(2)
-    // The third push has nothing to send.
-    invokeMock.mockClear()
-    await sync.push()
-    expect(invokeMock).not.toHaveBeenCalled()
-  })
-
-  it('keeps each transport on its own rhythm', async () => {
-    const book = { view: { lastLocation: { cfi: 'a', fraction: 0.5 } } } as unknown as BookView
-    const sync = createSyncManager({ book: () => book, fingerprint: () => 'fp', syncOff: () => false })
-    invokeMock.mockImplementation((command: string, args?: { only?: string[] }) => {
-      if (command === 'sync_document') return Promise.resolve('doc1')
-      if (command === 'sync_pull') return Promise.resolve({ offer: null, push: false })
-      if (command === 'sync_push') {
-        if (!args?.only) return Promise.resolve([{ transport: 'kosync', error: null }, { transport: 'dropbox', error: 'down' }])
-        expect(args.only).toEqual(['dropbox'])
-        return Promise.resolve([{ transport: 'dropbox', error: null }])
-      }
-      throw new Error(`unexpected ${command}`)
-    })
-    await sync.pull()
-    sync.markDirty()
-    await sync.push()
-    await sync.push()
-    const pushes = invokeMock.mock.calls.filter(call => call[0] === 'sync_push')
-    expect(pushes).toHaveLength(2)
-    // Everything acked: the third push stays quiet.
-    invokeMock.mockClear()
-    await sync.push()
-    expect(invokeMock).not.toHaveBeenCalled()
-  })
-
-  it('sends a new position to every transport while one still owes an ack', async () => {
+  it('hands a moved position to the engine once', async () => {
     const book = { view: { lastLocation: { cfi: 'a', fraction: 0.5 } } } as unknown as BookView
     const sync = createSyncManager({ book: () => book, fingerprint: () => 'fp', syncOff: () => false })
     invokeMock.mockImplementation((command: string) => {
       if (command === 'sync_document') return Promise.resolve('doc1')
       if (command === 'sync_pull') return Promise.resolve({ offer: null, push: false })
-      if (command === 'sync_push') return Promise.resolve([{ transport: 'kosync', error: null }, { transport: 'dropbox', error: 'down' }])
+      if (command === 'sync_queue_position') return Promise.resolve()
       throw new Error(`unexpected ${command}`)
     })
     await sync.pull()
     sync.markDirty()
     await sync.push()
-    // Dropbox still owes an ack, but the reader moved on: KOSync gets the new place too.
+    // Nothing moved since: the engine already has it.
+    await sync.push()
+    const queued = invokeMock.mock.calls.filter(call => call[0] === 'sync_queue_position')
+    expect(queued).toEqual([['sync_queue_position', { document: 'doc1', fingerprint: 'fp', cfi: 'a', fraction: 0.5 }]])
+  })
+
+  it('hands the position over again when the engine could not take it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const book = { view: { lastLocation: { cfi: 'a', fraction: 0.5 } } } as unknown as BookView
+    const sync = createSyncManager({ book: () => book, fingerprint: () => 'fp', syncOff: () => false })
+    let refuse = true
+    invokeMock.mockImplementation((command: string) => {
+      if (command === 'sync_document') return Promise.resolve('doc1')
+      if (command === 'sync_pull') return Promise.resolve({ offer: null, push: false })
+      if (command === 'sync_queue_position') return refuse ? Promise.reject(new Error('store busy')) : Promise.resolve()
+      throw new Error(`unexpected ${command}`)
+    })
+    await sync.pull()
     sync.markDirty()
     await sync.push()
-    const pushes = invokeMock.mock.calls.filter(call => call[0] === 'sync_push')
-    expect(pushes).toHaveLength(2)
-    expect(pushes[1][1].only).toBeUndefined()
+    refuse = false
+    await sync.push()
+    expect(invokeMock.mock.calls.filter(call => call[0] === 'sync_queue_position')).toHaveLength(2)
+    warn.mockRestore()
   })
 
   it('stays quiet when progress sync is turned off', async () => {
