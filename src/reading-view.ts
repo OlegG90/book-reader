@@ -9,7 +9,6 @@ import { FINISHED_AT } from './library'
 import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
 import { $ } from './dom'
 
-
 export interface Position {
   cfi: string
   fraction: number

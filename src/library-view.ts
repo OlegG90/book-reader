@@ -17,7 +17,6 @@ import type { Settings } from './settings'
 import type { SettingsSection } from './settings-panel'
 import { $ } from './dom'
 
-
 /** How far a book is read, as the library shows it: at least 1% once started. */
 const percent = (fraction: number) => `${Math.max(1, Math.round(fraction * 100))}%`
 

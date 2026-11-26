@@ -7,7 +7,6 @@ export const SYNC_EVERY_MS = 60_000
 /** Closing the window waits this long at most for the last push. */
 export const SYNC_ON_CLOSE_MS = 3_000
 
-
 export interface SyncOffer {
   cfi: string
   fraction: number

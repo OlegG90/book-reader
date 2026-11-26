@@ -409,7 +409,8 @@ fn remote_map() -> Result<Option<HashMap<String, RemoteRecord>>, String> {
     }
 }
 
-/// One book's position from the positions file, as a pull reports it.
+/// One book's position from the positions file, in KOSync's shape (time in
+/// seconds), so it merges with the other transports' answers.
 fn pull_inner(fingerprint: &str) -> Result<Option<kosync::Progress>, String> {
     let remote = remote_map()?;
     // `time` is ms here like locally; KOSync counts seconds.

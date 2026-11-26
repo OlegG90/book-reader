@@ -330,7 +330,8 @@ pub(crate) fn sync_push_book(store: State<Store>, books: State<LibraryBooks>, fi
 }
 
 /// Uploads a library book's file to every cloud that keeps books and lacks it;
-/// true when one gained it, an error only when none did.
+/// true when one gained it. A cloud's failure is reported only when no cloud
+/// gained the book.
 fn push_book_to_cloud(store: &Store, books: &LibraryBooks, fingerprint: &str) -> CmdResult<bool> {
     if !book_transfer_allowed(store) {
         return Ok(false);

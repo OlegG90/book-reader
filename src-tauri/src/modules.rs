@@ -185,7 +185,7 @@ fn use_reason(state: &store::State, id: &str) -> Option<String> {
     if id == "capability:catalogs" && !state.sources.is_empty() {
         return Some("delete its catalog sources first".into());
     }
-    required_by(state, id).first().map(|label| format!("turn off \"{label}\" first"))
+    required_by(state, id).first().map(|label| format!("turn off {label} first"))
 }
 
 /// Every layer-1 module with its current switch position.
@@ -221,7 +221,7 @@ pub fn check_turning_off(state: &store::State, next: &BTreeSet<String>) -> Resul
             return Err(format!("Unknown module: \"{id}\"."));
         };
         if !def.optional {
-            return Err(format!("\"{}\" cannot be turned off.", def.label));
+            return Err(format!("{} cannot be turned off.", def.label));
         }
     }
     if next.contains("capability:catalogs") && !state.sources.is_empty() {
@@ -441,7 +441,7 @@ mod tests {
                 );
                 let listed = list(&state).into_iter().find(|m| m.id == *req).unwrap();
                 assert!(listed.in_use);
-                assert_eq!(listed.in_use_reason.as_deref(), Some(format!("turn off \"{}\" first", def.label).as_str()));
+                assert_eq!(listed.in_use_reason.as_deref(), Some(format!("turn off {} first", def.label).as_str()));
             }
         }
     }
