@@ -95,6 +95,9 @@ pub struct Pending {
     /// Not tried before this time (ms since the Unix epoch).
     #[serde(default)]
     pub not_before: u64,
+    /// The last try found the cloud full: the book doesn't fit (yet).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_room: bool,
 }
 
 /// How many books the start screen lists.

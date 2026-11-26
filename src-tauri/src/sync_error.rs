@@ -21,6 +21,8 @@ pub enum Kind {
     Http,
     /// The answer came, but it isn't what the app wrote (a foreign or broken file).
     Data,
+    /// The cloud is full: the book waits until space frees.
+    NoSpace,
     /// A failure from code that doesn't sort its failures (KOSync, the
     /// configuration, the local store).
     Other,
@@ -56,6 +58,8 @@ impl SyncError {
     pub fn from_reply(what: &str, reply: &crate::net::Reply) -> Self {
         let said = String::from_utf8_lossy(&reply.body);
         let kind = match reply.status {
+            // Dropbox answers a full account with 409, Drive with 403.
+            409 | 403 if said.contains("insufficient_space") || said.contains("storageQuotaExceeded") => Kind::NoSpace,
             429 => Kind::RateLimited,
             403 if said.contains("ateLimitExceeded") => Kind::RateLimited,
             401 | 403 => Kind::Rejected,
@@ -99,6 +103,14 @@ mod tests {
 
     fn reply(status: u16) -> crate::net::Reply {
         crate::net::Reply::for_test(status, b"nope")
+    }
+
+    #[test]
+    fn a_full_cloud_is_told_apart() {
+        let dropbox = crate::net::Reply::for_test(409, br#"{"error_summary":"path/insufficient_space/.."}"#);
+        let drive = crate::net::Reply::for_test(403, br#"{"error":{"errors":[{"reason":"storageQuotaExceeded"}]}}"#);
+        assert_eq!(SyncError::from_reply("Dropbox upload", &dropbox).kind, Kind::NoSpace);
+        assert_eq!(SyncError::from_reply("Google Drive upload", &drive).kind, Kind::NoSpace);
     }
 
     #[test]

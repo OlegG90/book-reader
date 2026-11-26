@@ -889,6 +889,8 @@ void appWindow.listen('sync-positions-updated', () => void library.refreshScreen
 )
 // Books downloaded from a cloud have landed in the library.
 appWindow.listen('sync-books-arrived', () => void library.refreshScreen())
+// The engine learned where books are (an upload, a reconcile): the cards' cloud marks follow.
+appWindow.listen('sync-states-changed', () => library.refreshCloudMarks())
 // Another window changed a setting: apply it here too (it is already saved).
 appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
   const valid = readSettings({ ...settings, ...payload })

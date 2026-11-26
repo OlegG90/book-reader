@@ -333,6 +333,17 @@ impl CloudStore for Google {
         Ok(())
     }
 
+    fn space(&self, access: &str) -> Result<Option<(u64, u64)>, SyncError> {
+        let reply = net::bearer_get("https://www.googleapis.com/drive/v3/about?fields=storageQuota", access).map_err(SyncError::offline)?;
+        if reply.status != 200 {
+            return Err(SyncError::from_reply("Google Drive space", &reply));
+        }
+        let about: serde_json::Value = serde_json::from_slice(&reply.body).map_err(|e| SyncError::data(format!("Google Drive space is not ours: {e}")))?;
+        // Drive sends the numbers as strings; an account without a limit has none.
+        let number = |key: &str| about["storageQuota"][key].as_str().and_then(|n| n.parse().ok());
+        Ok(number("usage").zip(number("limit")))
+    }
+
     fn list(&self, access: &str, prefix: &str) -> Result<Vec<String>, SyncError> {
         let mut names = Vec::new();
         let mut page_token: Option<String> = None;

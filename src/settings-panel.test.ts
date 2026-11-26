@@ -344,10 +344,10 @@ describe('settings page', () => {
     expect(cloudRow(host, 'Dropbox').hint).toBe('Not connected')
     panel.setClouds([
       { id: 'dropbox', connected: true, lastError: 'Dropbox upload failed (401)' },
-      { id: 'google', connected: true, lastError: null },
+      { id: 'google', connected: true, lastError: null, space: [3.2 * 1024 ** 3, 15 * 1024 ** 3] },
     ])
     expect(cloudRow(host, 'Dropbox').hint).toBe('Dropbox upload failed (401)')
-    expect(cloudRow(host, 'Google Drive').hint).toBe('Reading positions and books sync through it.')
+    expect(cloudRow(host, 'Google Drive').hint).toBe('Reading positions and books sync through it. 3.2 GB of 15 GB used.')
     // OneDrive waits for its transport.
     expect(cloudRow(host, 'OneDrive').button.disabled).toBe(true)
     expect(cloudRow(host, 'OneDrive').hint).toContain('Coming soon')

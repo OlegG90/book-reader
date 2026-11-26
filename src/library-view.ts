@@ -16,6 +16,7 @@ import { deleteFileNote } from './platform'
 import type { Settings } from './settings'
 import type { SettingsSection } from './settings-panel'
 import { $ } from './dom'
+import { icon } from './icons'
 
 /** How far a book is read, as the library shows it: at least 1% once started. */
 const percent = (fraction: number) => `${Math.max(1, Math.round(fraction * 100))}%`
@@ -99,6 +100,8 @@ export interface LibraryView {
   isOrganizeOpen(): boolean
   showScreen(): Promise<void>
   refreshScreen(): Promise<void>
+  /** Redraws the cards' cloud marks from what the sync engine last learned. */
+  refreshCloudMarks(): void
   refreshRecent(): Promise<void>
   render(): void
   showControls(): void
@@ -118,12 +121,35 @@ export interface LibraryView {
   embedSettings(embed: boolean): void
 }
 
+/** Where a library book is in the clouds: every cloud holds it, its upload
+waits, or a cloud is full. */
+export type CloudPlace = 'cloud' | 'waiting' | 'nofit'
+
+const CLOUD_MARKS: Record<CloudPlace, { icon: string; label: string }> = {
+  cloud: { icon: 'cloud-check', label: 'In the cloud' },
+  waiting: { icon: 'cloud-upload', label: 'Waiting to upload' },
+  nofit: { icon: 'cloud-off', label: "Doesn't fit in the cloud" },
+}
+
+/** A small cloud mark for a book's card; nothing without a state. */
+export function cloudMark(place: CloudPlace | undefined): HTMLElement | string {
+  if (!place) return ''
+  const mark = icon(CLOUD_MARKS[place].icon)
+  mark.classList.add('cloud-mark', place)
+  mark.title = CLOUD_MARKS[place].label
+  mark.setAttribute('role', 'img')
+  mark.setAttribute('aria-label', CLOUD_MARKS[place].label)
+  return mark
+}
+
 /** The library window: Continue reading, the book grid with its search and filters, Organize, book details and the cloud download offer. */
 export function createLibraryView(deps: LibraryDeps): LibraryView {
   /** A library folder is chosen (else the first-run choice shows). */
   let libraryReady = false
   let libraryFolder: string | null = null
   let libraryBooks: LibraryBook[] = []
+  /** Each book's place in the clouds, by fingerprint (see `sync_book_states`). */
+  let cloudStates: Record<string, CloudPlace> = {}
   let scanning: Promise<void> | null = null
   /** The reading history isn't empty (the desktop then opens on it). */
   let hasRecent = false
@@ -276,6 +302,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
       }).catch((): undefined => undefined)
       try {
         libraryBooks = await invoke<LibraryBook[]>('scan_library')
+        cloudStates = await bookCloudStates()
         renderLibrary()
         void offerCloudBooks()
       } catch (e) {
@@ -286,6 +313,17 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
       }
     })()
     return scanning
+  }
+
+  /** The engine's last word on where each book is; nothing when it can't say. */
+  function bookCloudStates(): Promise<Record<string, CloudPlace>> {
+    return invoke<Record<string, CloudPlace>>('sync_book_states').catch((): Record<string, CloudPlace> => ({}))
+  }
+
+  /** Redraws the cloud marks after the engine learned more (an upload, a reconcile). */
+  async function refreshCloudMarks() {
+    cloudStates = await bookCloudStates()
+    if (libraryBooks.length) renderLibrary()
   }
 
   /** Shows a line above the grid (empty hides it). */
@@ -380,7 +418,12 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
       el('span', { className: 'title', textContent: book.title }),
       el('span', { className: 'author', textContent: book.authors.join(', ') }),
       seriesLine(book),
-      el('span', { className: 'meta', textContent: [book.format, book.disabled ? 'turned off' : progress].filter(Boolean).join(' · ') }),
+      el(
+        'span',
+        { className: 'meta' },
+        cloudMark(cloudStates[book.fingerprint]),
+        [book.format, book.disabled ? 'turned off' : progress].filter(Boolean).join(' · '),
+      ),
     )
     onLongPress(button, at => showMenu(at, withDelete))
     return el('li', {}, button)
@@ -617,6 +660,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     showBookDetails: (fingerprint: string, title: string) => void showBookDetails(fingerprint, title),
     showScreen,
     refreshScreen,
+    refreshCloudMarks: () => void refreshCloudMarks(),
     refreshRecent,
     render: renderLibrary,
     showControls,

@@ -65,6 +65,17 @@ export interface CloudConnection {
   connected: boolean
   /** The last sync failure, until a sync succeeds. */
   lastError: string | null
+  /** Used and total space in bytes, when the cloud says. */
+  space?: [number, number] | null
+}
+
+/** "3.1 GB of 15 GB used", for a cloud's row. */
+export function spaceText([used, total]: [number, number]): string {
+  const size = (bytes: number) => {
+    const [value, unit] = bytes >= 1024 ** 4 ? [bytes / 1024 ** 4, 'TB'] : [bytes / 1024 ** 3, 'GB']
+    return `${Number(value.toFixed(value < 10 ? 1 : 0))} ${unit}`
+  }
+  return `${size(used)} of ${size(total)} used`
 }
 
 /** The Modules switch behind a cloud. */
@@ -280,7 +291,8 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
       row.hidden = off && !state?.connected
       hint.title = state?.lastError ?? ''
       if (state?.connected) {
-        hint.textContent = off ? 'Turned off in Modules; disconnect to forget the login.' : (state.lastError ?? 'Reading positions and books sync through it.')
+        const space = state.space ? ` ${spaceText(state.space)}.` : ''
+        hint.textContent = off ? 'Turned off in Modules; disconnect to forget the login.' : (state.lastError ?? `Reading positions and books sync through it.${space}`)
         button.textContent = 'Disconnect'
         button.disabled = false
         button.onclick = () => actions.disconnectCloud(provider.id)

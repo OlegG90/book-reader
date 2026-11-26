@@ -136,6 +136,7 @@ pub fn run() {
             sync_cmds::sync_queue_position,
             sync_cmds::sync_remove_from_clouds,
             sync_cmds::sync_removed_books,
+            sync_cmds::sync_book_states,
             sync_cmds::sync_queue_downloads,
             sync_cmds::sync_wake,
             sync_cmds::sync_flush,

@@ -37,6 +37,12 @@ pub trait CloudStore: Sync {
     fn list(&self, access: &str, prefix: &str) -> Result<Vec<String>, SyncError>;
     /// Deletes a file by name; a file that isn't there is no failure.
     fn delete(&self, access: &str, name: &str) -> Result<(), SyncError>;
+    /// How much of the account is used and how much there is (bytes);
+    /// `None` when the cloud doesn't say (no limit).
+    fn space(&self, access: &str) -> Result<Option<(u64, u64)>, SyncError> {
+        let _ = access;
+        Ok(None)
+    }
     /// The cloud's last failure, for the settings.
     fn errors(&self) -> &ErrorSlot;
     /// The access token while it lives, so one sync round asks for it once.
@@ -270,6 +276,12 @@ pub fn book_manifest(store: &dyn CloudStore) -> Option<HashMap<String, BookRecor
 /// A book file by its cloud name; `None` when the cloud never saw it.
 pub fn download_book(store: &dyn CloudStore, remote_name: &str) -> Result<Option<Vec<u8>>, SyncError> {
     settle(store, store.access_token().and_then(|access| store.get(&access, remote_name)))
+}
+
+/// The cloud's used and total space, if it says. A failure here isn't a
+/// sync failure, so the settings' last error stays as sync left it.
+pub fn space(store: &dyn CloudStore) -> Option<(u64, u64)> {
+    store.access_token().and_then(|access| store.space(&access)).ok().flatten()
 }
 
 /// Removes a book from the cloud: this device's manifest records the removal
