@@ -1617,6 +1617,42 @@ body.library-mode #topbar {
   overflow: hidden;
 }
 
+/* A panel a swipe brought in slides in from that side (not with reduced motion). */
+@keyframes slide-from-right {
+  from {
+    transform: translateX(24px);
+    opacity: 0.4;
+  }
+}
+
+@keyframes slide-from-left {
+  from {
+    transform: translateX(-24px);
+    opacity: 0.4;
+  }
+}
+
+.slide-next {
+  animation: slide-from-right 150ms ease-out;
+}
+
+.slide-prev {
+  animation: slide-from-left 150ms ease-out;
+}
+
+/* Sideways moves on the phone's library screen reach the swipe; up and down still scroll. */
+:root.android #start,
+:root.android #settings {
+  touch-action: pan-y pinch-zoom;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-next,
+  .slide-prev {
+    animation: none;
+  }
+}
+
 #start-main {
   min-width: 0;
   overflow-y: auto;
