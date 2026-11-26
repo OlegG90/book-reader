@@ -204,13 +204,16 @@ fn access_token() -> Result<String, String> {
 /// The book manifest's name in the app folder.
 const MANIFEST_NAME: &str = "sync-books.json";
 
-/// The positions file's id in the app folder, if the app ever synced.
+/// A file's id in the app folder by its name, if there is one. Drive allows
+/// two files with one name (two devices creating it at once); every device
+/// then picks the oldest, so they all keep reading and writing the same one.
 fn find_file(access: &str, name: &str) -> Result<Option<String>, String> {
     let query = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("spaces", "appDataFolder")
-        .append_pair("q", &format!("name = '{name}' and trashed = false"))
+        .append_pair("q", &name_query(name))
+        .append_pair("orderBy", "createdTime")
         .append_pair("fields", "files(id)")
-        .append_pair("pageSize", "10")
+        .append_pair("pageSize", "1")
         .finish();
     let reply = net::bearer_get(&format!("https://www.googleapis.com/drive/v3/files?{query}"), access)?;
     if reply.status != 200 {
@@ -218,6 +221,13 @@ fn find_file(access: &str, name: &str) -> Result<Option<String>, String> {
     }
     let list: serde_json::Value = serde_json::from_slice(&reply.body).map_err(|e| format!("Google Drive list is not ours: {e}"))?;
     Ok(list["files"].as_array().and_then(|files| files.first()).and_then(|file| file["id"].as_str()).map(str::to_string))
+}
+
+/// The Drive search for one file name; quotes and backslashes in book names
+/// are escaped, as the query language asks.
+fn name_query(name: &str) -> String {
+    let escaped = name.replace('\\', "\\\\").replace('\'', "\\'");
+    format!("name = '{escaped}' and trashed = false")
 }
 
 /// Downloads an opaque cloud file by its id.
@@ -430,6 +440,13 @@ fn push_inner(
 mod tests {
     use super::*;
     use crate::cloud::pick_refresh;
+
+    #[test]
+    fn names_with_quotes_stay_one_search_term() {
+        assert_eq!(name_query("sync-books.json"), "name = 'sync-books.json' and trashed = false");
+        assert_eq!(name_query("book-fp-O'Brien.epub"), r"name = 'book-fp-O\'Brien.epub' and trashed = false");
+        assert_eq!(name_query(r"a\b"), r"name = 'a\\b' and trashed = false");
+    }
 
     fn record(cfi: &str, time: u64) -> RemoteRecord {
         RemoteRecord { cfi: cfi.into(), fraction: 0.5, time, device: "phone".into(), device_id: "phone".into() }
