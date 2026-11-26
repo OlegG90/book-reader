@@ -296,14 +296,21 @@ pub(crate) fn sync_pull_all(store: State<Store>, books: State<LibraryBooks>) -> 
     pull_all_clouds(&store, &books)
 }
 
-/// Merges every usable cloud's positions file into the local positions;
-/// returns how many books changed.
+/// Merges every usable cloud's positions file into the local positions, for
+/// the whole library; returns how many books changed.
 fn pull_all_clouds(store: &Store, books: &LibraryBooks) -> CmdResult<usize> {
-    let device = device_id(store)?;
     let library: BTreeSet<String> = match library_root(store) {
         Ok(root) => books.snapshot(store, &root).into_iter().map(|b| b.fingerprint).collect(),
         Err(_) => BTreeSet::new(),
     };
+    merge_cloud_positions(store, &library)
+}
+
+/// Merges every usable cloud's positions file into the local positions;
+/// books in `library` never opened here take the cloud's place too.
+/// Returns how many books changed.
+fn merge_cloud_positions(store: &Store, library: &BTreeSet<String>) -> CmdResult<usize> {
+    let device = device_id(store)?;
     let mut updated = 0;
     for t in transports() {
         if !usable(store, t) {
@@ -312,7 +319,7 @@ fn pull_all_clouds(store: &Store, books: &LibraryBooks) -> CmdResult<usize> {
         if let Some(remote) = t.remote(store) {
             store
                 .update(|s| {
-                    updated += merge_remote(&mut s.positions, &remote, &device, &library);
+                    updated += merge_remote(&mut s.positions, &remote, &device, library);
                 })
                 .map_err(|e| e.to_string())?;
         }
@@ -419,7 +426,9 @@ fn missing_cloud_books(store: &Store, books: &LibraryBooks) -> CmdResult<Vec<Mis
     let local: BTreeSet<String> = books.snapshot(store, &root).into_iter().map(|b| b.fingerprint).collect();
     let mut manifests = Vec::new();
     for t in book_stores(store) {
-        if let Some(books) = t.books() {
+        if let Some(mut books) = t.books() {
+            // Only books this device would open: a book file, its format on.
+            books.retain(|_, record| book_format_allowed(store, &record.name).is_ok());
             manifests.push(books);
         }
     }
@@ -493,6 +502,13 @@ fn land_book(root: &Path, name: &str, fingerprint: &str, bytes: &[u8]) -> CmdRes
     Err("No free name for the downloaded book.".into())
 }
 
+/// Whether a cloud name is a book file in a format turned on in Modules; the
+/// refusal says why, as a catalog download does.
+fn book_format_allowed(store: &Store, name: &str) -> CmdResult<()> {
+    let (_, reader) = formats::split(name).ok_or("The cloud name is not a book file.")?;
+    store.read(|s| formats::check(s, reader))
+}
+
 /// Downloads a book file the library lacks, verifying it against the
 /// manifest hash, and places it in the library. Best-effort and silent like
 /// an upload.
@@ -511,9 +527,9 @@ fn pull_book_from_cloud(store: &Store, fingerprint: &str) -> CmdResult<bool> {
     for t in book_stores(store) {
         let Some(manifest) = t.books() else { continue };
         let Some(record) = manifest.get(fingerprint) else { continue };
-        // A format switched off in Modules refuses, as a catalog download does.
-        if let Some((_, reader)) = formats::split(&record.name) {
-            store.read(|s| formats::check(s, reader))?;
+        if let Err(e) = book_format_allowed(store, &record.name) {
+            failed = Some(e);
+            continue;
         }
         let remote_name = crate::cloud::remote_book_name(fingerprint, &record.name);
         let bytes = match t.pull_book(&remote_name) {
@@ -529,7 +545,12 @@ fn pull_book_from_cloud(store: &Store, fingerprint: &str) -> CmdResult<bool> {
             failed = Some("The cloud copy failed its hash check.".into());
             continue;
         }
-        return land_book(&root, &record.name, fingerprint, &bytes);
+        let landed = land_book(&root, &record.name, fingerprint, &bytes)?;
+        if landed {
+            // The new book opens where the other device is, not with a jump offer.
+            let _ = merge_cloud_positions(store, &[fingerprint.to_string()].into_iter().collect());
+        }
+        return Ok(landed);
     }
     failed.map_or(Ok(false), Err)
 }
@@ -667,7 +688,7 @@ pub(crate) fn sync_push(
 
 #[cfg(test)]
 mod tests {
-    use super::{book_transfer_allowed, book_transfer_gate, collect_missing, compare_positions, land_book, merge_remote, write_new, missing_cloud_books, place_book, pull_all_clouds, pull_book_from_cloud, pull_merged, push_all, push_book_to_cloud, safe_relative, sync_source, BookKey, Dropbox, Google, Kosync, Transport};
+    use super::{book_format_allowed, book_transfer_allowed, book_transfer_gate, collect_missing, compare_positions, land_book, merge_remote, write_new, missing_cloud_books, place_book, pull_all_clouds, pull_book_from_cloud, pull_merged, push_all, push_book_to_cloud, safe_relative, sync_source, BookKey, Dropbox, Google, Kosync, Transport};
     use crate::library_cmds::LibraryBooks;
     use crate::cloud::push_book_missing;
     use crate::kosync::Progress;
@@ -905,6 +926,14 @@ mod tests {
         // Another book under the same name: " (2)", like Organize.
         let dest2 = place_book(root, "Author/Book.epub", "other").unwrap().unwrap();
         assert_eq!(dest2, root.join("Author/Book (2).epub"));
+    }
+
+    #[test]
+    fn cloud_books_need_a_book_name_in_a_format_that_is_on() {
+        let (_dir, store) = synced_store(&["format:fb2"]);
+        assert!(book_format_allowed(&store, "A/B.epub").is_ok());
+        assert!(book_format_allowed(&store, "A/B.fb2").is_err(), "its module is off");
+        assert!(book_format_allowed(&store, "A/run.exe").is_err());
     }
 
     #[test]

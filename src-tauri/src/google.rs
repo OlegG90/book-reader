@@ -171,6 +171,7 @@ pub fn is_connected() -> bool {
 /// Forgets the refresh token; connecting again starts over.
 pub fn disconnect() {
     Active::forget_password(TOKEN_ID);
+    Active::forget_password(LOGIN_ID);
 }
 
 /// Trades an auth code (or a refresh token) for tokens.

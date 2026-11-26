@@ -186,7 +186,7 @@ pub fn scan(root: &Path, cache: &Cache, progress: &mut dyn FnMut(usize)) -> io::
     Ok(books)
 }
 
-/// All kept book files under `dir`, skipping hidden folders.
+/// Every book file under `dir`, skipping hidden folders.
 fn find_books(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
     for item in fs::read_dir(dir)?.flatten() {
         let path = item.path();
