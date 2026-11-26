@@ -6,7 +6,8 @@
 //! reach. Secrets stay out of the config: the refresh token is kept like
 //! catalog passwords (the OS credential store, the Android Keystore).
 
-use crate::cloud::{self, access_with_life, http_error, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
+use crate::cloud::{self, access_with_life, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
+use crate::sync_error::SyncError;
 use crate::platform::{Active, Platform};
 use crate::{net, oauth};
 use oauth::PendingLogin;
@@ -186,7 +187,7 @@ fn exchange(code: &str, verifier: &str, stored: Option<String>) -> Result<(Strin
 /// A file's id in the app folder by its name, if there is one. Drive allows
 /// two files with one name (two devices creating it at once); every device
 /// then picks the oldest, so they all keep reading and writing the same one.
-fn find_file(access: &str, name: &str) -> Result<Option<String>, String> {
+fn find_file(access: &str, name: &str) -> Result<Option<String>, SyncError> {
     let query = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("spaces", "appDataFolder")
         .append_pair("q", &name_query(name))
@@ -194,11 +195,12 @@ fn find_file(access: &str, name: &str) -> Result<Option<String>, String> {
         .append_pair("fields", "files(id)")
         .append_pair("pageSize", "1")
         .finish();
-    let reply = net::bearer_get(&format!("https://www.googleapis.com/drive/v3/files?{query}"), access)?;
+    let reply = net::bearer_get(&format!("https://www.googleapis.com/drive/v3/files?{query}"), access).map_err(SyncError::offline)?;
     if reply.status != 200 {
-        return Err(http_error("Google Drive list", &reply));
+        return Err(SyncError::from_reply("Google Drive list", &reply));
     }
-    let list: serde_json::Value = serde_json::from_slice(&reply.body).map_err(|e| format!("Google Drive list is not ours: {e}"))?;
+    let list: serde_json::Value =
+        serde_json::from_slice(&reply.body).map_err(|e| SyncError::data(format!("Google Drive list is not ours: {e}")))?;
     Ok(list["files"].as_array().and_then(|files| files.first()).and_then(|file| file["id"].as_str()).map(str::to_string))
 }
 
@@ -210,10 +212,10 @@ fn name_query(name: &str) -> String {
 }
 
 /// Downloads an opaque cloud file by its id.
-fn download_bytes(access: &str, file_id: &str) -> Result<Vec<u8>, String> {
-    let reply = net::bearer_get(&format!("https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"), access)?;
+fn download_bytes(access: &str, file_id: &str) -> Result<Vec<u8>, SyncError> {
+    let reply = net::bearer_get(&format!("https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"), access).map_err(SyncError::offline)?;
     if reply.status != 200 {
-        return Err(http_error("Google Drive download", &reply));
+        return Err(SyncError::from_reply("Google Drive download", &reply));
     }
     Ok(reply.body)
 }
@@ -242,8 +244,8 @@ fn store_bytes(
     metadata: serde_json::Value,
     data: Vec<u8>,
     content_type: &str,
-) -> Result<(), String> {
-    let (content_type, body) = multipart_body(metadata, data, content_type)?;
+) -> Result<(), SyncError> {
+    let (content_type, body) = multipart_body(metadata, data, content_type).map_err(SyncError::data)?;
     let url = match file_id {
         Some(id) => format!("https://www.googleapis.com/upload/drive/v3/files/{id}?uploadType=multipart"),
         None => "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart".into(),
@@ -251,19 +253,20 @@ fn store_bytes(
     let headers = [("Authorization", format!("Bearer {access}")), ("Content-Type", content_type)];
     let headers: Vec<(&str, &str)> = headers.iter().map(|(name, value)| (*name, value.as_str())).collect();
     let reply = match file_id {
-        Some(_) => net::patch(&url, &headers, &body)?,
-        None => net::post(&url, &headers, &body)?,
-    };
+        Some(_) => net::patch(&url, &headers, &body),
+        None => net::post(&url, &headers, &body),
+    }
+    .map_err(SyncError::offline)?;
     if reply.status == 200 {
         Ok(())
     } else {
-        Err(http_error("Google Drive upload", &reply))
+        Err(SyncError::from_reply("Google Drive upload", &reply))
     }
 }
 
 /// Uploads an opaque cloud file: created in the app folder the first time,
 /// replaced afterwards.
-fn upload_bytes(access: &str, file_id: Option<&str>, name: &str, data: &[u8]) -> Result<(), String> {
+fn upload_bytes(access: &str, file_id: Option<&str>, name: &str, data: &[u8]) -> Result<(), SyncError> {
     let metadata = match file_id {
         Some(_) => serde_json::json!({}),
         None => serde_json::json!({ "name": name, "parents": ["appDataFolder"] }),
@@ -290,7 +293,7 @@ impl CloudStore for Google {
         "Google Drive"
     }
 
-    fn refresh(&self, refresh_token: &str) -> Result<(String, u64), String> {
+    fn refresh(&self, refresh_token: &str) -> Result<(String, u64), SyncError> {
         let (client_id, client_secret) = credentials()?;
         let mut form = url::form_urlencoded::Serializer::new(String::new());
         form.append_pair("refresh_token", refresh_token)
@@ -300,15 +303,15 @@ impl CloudStore for Google {
             form.append_pair("client_secret", client_secret);
         }
         // A refresh answer carries no refresh token (only the code exchange does).
-        access_with_life(&token_post(TOKEN_URL, &form.finish(), "Google")?, "Google")
+        access_with_life(&token_post(TOKEN_URL, &form.finish(), "Google")?, "Google").map_err(SyncError::data)
     }
 
-    fn get(&self, access: &str, name: &str) -> Result<Option<Vec<u8>>, String> {
+    fn get(&self, access: &str, name: &str) -> Result<Option<Vec<u8>>, SyncError> {
         let Some(id) = find_file(access, name)? else { return Ok(None) };
         download_bytes(access, &id).map(Some)
     }
 
-    fn put(&self, access: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
+    fn put(&self, access: &str, name: &str, bytes: &[u8]) -> Result<(), SyncError> {
         let file_id = find_file(access, name)?;
         upload_bytes(access, file_id.as_deref(), name, bytes)
     }

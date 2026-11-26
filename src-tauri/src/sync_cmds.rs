@@ -11,6 +11,7 @@ use crate::modules;
 use crate::naming;
 use crate::platform::{Active, Platform};
 use crate::store::{self, Position, Store};
+use crate::sync_error::{Kind, SyncError};
 use crate::windows::ReaderWindows;
 use crate::CmdResult;
 use serde::Serialize;
@@ -42,9 +43,9 @@ trait Transport {
     /// False when the transport's module is off.
     fn enabled(&self, state: &store::State) -> bool;
     /// The newest remote position for the book, if any.
-    fn pull(&self, store: &Store, book: &BookKey) -> Result<Option<kosync::Progress>, String>;
-    /// Sends the position.
-    fn push(&self, store: &Store, book: &BookKey, cfi: &str, fraction: f64) -> Result<(), String>;
+    fn pull(&self, store: &Store, book: &BookKey) -> Result<Option<kosync::Progress>, SyncError>;
+    /// Sends the position; a cloud without a login answers `NotConnected`.
+    fn push(&self, store: &Store, book: &BookKey, cfi: &str, fraction: f64) -> Result<(), SyncError>;
     /// The cloud's whole positions file, for the startup pull; transports
     /// without one (KOSync) have nothing to fetch in bulk.
     fn remote(&self, _store: &Store) -> Option<HashMap<String, RemoteRecord>> {
@@ -52,7 +53,8 @@ trait Transport {
     }
     /// Whether the transport can reach its store: a cloud needs a login (a
     /// refresh token is kept); KOSync needs nothing more than being enabled.
-    /// A disconnected cloud is skipped silently, never reported as failed.
+    /// Asked before book work, so no file is read and hashed for nothing;
+    /// positions learn it from the `NotConnected` answer instead.
     fn connected(&self) -> bool {
         true
     }
@@ -66,13 +68,13 @@ trait Transport {
     }
     /// Downloads a book file by its cloud name; `None` when the cloud never
     /// saw it.
-    fn pull_book(&self, remote_name: &str) -> Result<Option<Vec<u8>>, String> {
+    fn pull_book(&self, remote_name: &str) -> Result<Option<Vec<u8>>, SyncError> {
         let _ = remote_name;
         Ok(None)
     }
     /// Uploads a book file the cloud lacks, and records it in the cloud
     /// manifest; true when the cloud gained the book.
-    fn push_book(&self, fingerprint: &str, record: &crate::cloud::BookRecord, bytes: &[u8]) -> Result<bool, String> {
+    fn push_book(&self, fingerprint: &str, record: &crate::cloud::BookRecord, bytes: &[u8]) -> Result<bool, SyncError> {
         let _ = (fingerprint, record, bytes);
         Ok(false)
     }
@@ -95,18 +97,18 @@ impl Transport for Kosync {
             && state.sources.iter().any(|s| s.sync)
     }
 
-    fn pull(&self, store: &Store, book: &BookKey) -> Result<Option<kosync::Progress>, String> {
+    fn pull(&self, store: &Store, book: &BookKey) -> Result<Option<kosync::Progress>, SyncError> {
         let Some(source) = sync_source(store) else { return Ok(None) };
-        kosync::pull(&source, book.document)
+        Ok(kosync::pull(&source, book.document)?)
     }
 
-    fn push(&self, store: &Store, book: &BookKey, cfi: &str, fraction: f64) -> Result<(), String> {
+    fn push(&self, store: &Store, book: &BookKey, cfi: &str, fraction: f64) -> Result<(), SyncError> {
         let Some(source) = sync_source(store) else { return Ok(()) };
         let device_id = device_id(store)?;
-        kosync::push(
+        Ok(kosync::push(
             &source,
             &kosync::Update { document: book.document, progress: cfi, percentage: fraction, device: DEVICE_NAME, device_id: &device_id },
-        )
+        )?)
     }
 }
 
@@ -123,11 +125,11 @@ impl Transport for CloudTransport<'_> {
         !modules::is_off(state, "capability:progress-sync") && !modules::is_off(state, self.0.module())
     }
 
-    fn pull(&self, _store: &Store, book: &BookKey) -> Result<Option<kosync::Progress>, String> {
+    fn pull(&self, _store: &Store, book: &BookKey) -> Result<Option<kosync::Progress>, SyncError> {
         Ok(cloud::pull(self.0, book.fingerprint))
     }
 
-    fn push(&self, store: &Store, book: &BookKey, cfi: &str, fraction: f64) -> Result<(), String> {
+    fn push(&self, store: &Store, book: &BookKey, cfi: &str, fraction: f64) -> Result<(), SyncError> {
         let local = store.read(|s| s.positions.clone());
         let device_id = device_id(store)?;
         cloud::push(self.0, &local, book.fingerprint, cfi, fraction, DEVICE_NAME, &device_id)
@@ -149,11 +151,11 @@ impl Transport for CloudTransport<'_> {
         cloud::book_manifest(self.0)
     }
 
-    fn pull_book(&self, remote_name: &str) -> Result<Option<Vec<u8>>, String> {
+    fn pull_book(&self, remote_name: &str) -> Result<Option<Vec<u8>>, SyncError> {
         cloud::download_book(self.0, remote_name)
     }
 
-    fn push_book(&self, fingerprint: &str, record: &cloud::BookRecord, bytes: &[u8]) -> Result<bool, String> {
+    fn push_book(&self, fingerprint: &str, record: &cloud::BookRecord, bytes: &[u8]) -> Result<bool, SyncError> {
         cloud::push_book(self.0, fingerprint, record, bytes)
     }
 }
@@ -167,15 +169,16 @@ fn transports() -> [&'static dyn Transport; 3] {
     [&KOSYNC, &DROPBOX, &GOOGLE]
 }
 
-/// Whether a transport takes part right now: its modules are on and it is
-/// connected. Anything else is skipped silently, not counted as a failure.
-fn usable(store: &Store, t: &dyn Transport) -> bool {
-    store.read(|s| t.enabled(s)) && t.connected()
+/// Whether a transport's modules are on.
+fn enabled(store: &Store, t: &dyn Transport) -> bool {
+    store.read(|s| t.enabled(s))
 }
 
-/// The usable transports among `transports` that keep book files.
+/// The transports among `transports` that keep book files and can take
+/// part now: enabled and connected (asked up front, so no book file is read
+/// and hashed for nothing).
 fn book_stores<'a>(store: &Store, transports: &[&'a dyn Transport]) -> Vec<&'a dyn Transport> {
-    transports.iter().copied().filter(|t| t.keeps_books() && usable(store, *t)).collect()
+    transports.iter().copied().filter(|t| t.keeps_books() && enabled(store, *t) && t.connected()).collect()
 }
 
 /// The newest remote position across the transports. A transport that fails
@@ -184,7 +187,7 @@ fn book_stores<'a>(store: &Store, transports: &[&'a dyn Transport]) -> Vec<&'a d
 fn pull_merged(store: &Store, transports: &[&dyn Transport], book: &BookKey) -> Option<kosync::Progress> {
     let mut remote = None;
     for t in transports {
-        if !usable(store, *t) {
+        if !enabled(store, *t) {
             continue;
         }
         if let Ok(found) = t.pull(store, book) {
@@ -247,13 +250,13 @@ pub(crate) fn sync_pull_all(store: State<Store>, books: State<LibraryBooks>) -> 
     pull_all_clouds(&store, &books, &transports())
 }
 
-/// Merges every usable cloud's positions file into the local positions, for
+/// Merges every enabled cloud's positions file into the local positions, for
 /// the whole library; returns how many books changed.
 fn pull_all_clouds(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport]) -> CmdResult<usize> {
     let library: BTreeSet<String> =
         library_root(store).map(|root| books.snapshot(store, &root).into_iter().map(|b| b.fingerprint).collect()).unwrap_or_default();
-    let usable_now: Vec<_> = transports.iter().copied().filter(|t| usable(store, *t)).collect();
-    merge_cloud_positions(store, &usable_now, &library)
+    let enabled_now: Vec<_> = transports.iter().copied().filter(|t| enabled(store, *t)).collect();
+    merge_cloud_positions(store, &enabled_now, &library)
 }
 
 /// Merges these clouds' positions files into the local positions; books in
@@ -314,7 +317,7 @@ fn push_book_to_cloud(store: &Store, books: &LibraryBooks, transports: &[&dyn Tr
     for t in clouds {
         match t.push_book(fingerprint, &record, &bytes) {
             Ok(gained) => pushed |= gained,
-            Err(e) => failed = Some(e),
+            Err(e) => failed = Some(e.message),
         }
     }
     match failed {
@@ -462,7 +465,7 @@ fn pull_book_from_cloud(store: &Store, transports: &[&dyn Transport], fingerprin
             Ok(Some(bytes)) => bytes,
             Ok(None) => continue,
             Err(e) => {
-                failed = Some(e);
+                failed = Some(e.message);
                 continue;
             }
         };
@@ -491,7 +494,9 @@ pub(crate) struct PushReport {
 }
 
 /// Sends the position through the enabled transports (`only` narrows a
-/// retry); every failure is reported instead of failing the push.
+/// retry); every failure is reported instead of failing the push. A cloud
+/// without a login sends nothing and reports nothing: it isn't a failure to
+/// retry.
 fn push_all(
     store: &Store,
     transports: &[&dyn Transport],
@@ -502,9 +507,12 @@ fn push_all(
 ) -> Vec<PushReport> {
     transports
         .iter()
-        .filter(|t| usable(store, **t))
+        .filter(|t| enabled(store, **t))
         .filter(|t| only.as_ref().is_none_or(|ids| ids.contains(t.id())))
-        .map(|t| PushReport { transport: t.id().into(), error: t.push(store, book, cfi, fraction).err() })
+        .filter_map(|t| match t.push(store, book, cfi, fraction) {
+            Err(e) if e.kind == Kind::NotConnected => None,
+            result => Some(PushReport { transport: t.id().into(), error: result.err().map(String::from) }),
+        })
         .collect()
 }
 
@@ -618,6 +626,7 @@ pub(crate) fn sync_push(
 mod tests {
     use super::{book_format_allowed, book_transfer_allowed, book_transfer_gate, collect_missing, compare_positions, land_book, merge_remote, missing_cloud_books, place_book, pull_all_clouds, pull_book_from_cloud, pull_merged, push_all, push_book_to_cloud, safe_relative, sync_source, transports, BookKey, CloudTransport, Kosync, Transport, DROPBOX, GOOGLE};
     use crate::cloud::CloudStore;
+    use crate::sync_error::{Kind, SyncError};
     use crate::library_cmds::library_root;
     use crate::library_cmds::LibraryBooks;
     use crate::cloud::push_book_missing;
@@ -664,14 +673,20 @@ mod tests {
             self.linked
         }
 
-        fn pull(&self, _store: &Store, _book: &BookKey) -> Result<Option<Progress>, String> {
+        fn pull(&self, _store: &Store, _book: &BookKey) -> Result<Option<Progress>, SyncError> {
+            if !self.linked {
+                return Err(SyncError::new(Kind::NotConnected, "not connected"));
+            }
             self.calls.borrow_mut().push("pull");
-            self.pull.clone()
+            Ok(self.pull.clone()?)
         }
 
-        fn push(&self, _store: &Store, _book: &BookKey, _cfi: &str, _fraction: f64) -> Result<(), String> {
+        fn push(&self, _store: &Store, _book: &BookKey, _cfi: &str, _fraction: f64) -> Result<(), SyncError> {
+            if !self.linked {
+                return Err(SyncError::new(Kind::NotConnected, "not connected"));
+            }
             self.calls.borrow_mut().push("push");
-            self.push.clone()
+            Ok(self.push.clone()?)
         }
     }
 
@@ -897,11 +912,11 @@ mod tests {
             || Ok(None),
             |_, bytes| {
                 uploaded.borrow_mut().push(bytes.to_vec());
-                Ok::<(), String>(())
+                Ok::<(), SyncError>(())
             },
             |books| {
                 stored.borrow_mut().push(books.clone());
-                Ok::<(), String>(())
+                Ok::<(), SyncError>(())
             },
         )
         .unwrap();
@@ -930,10 +945,10 @@ mod tests {
                     Ok(Some(other.clone()))
                 }
             },
-            |_, _| Ok::<(), String>(()),
+            |_, _| Ok::<(), SyncError>(()),
             |books| {
                 stored.borrow_mut().push(books.clone());
-                Ok::<(), String>(())
+                Ok::<(), SyncError>(())
             },
         )
         .unwrap();
@@ -956,9 +971,9 @@ mod tests {
             || Ok(Some(manifest.clone())),
             |_, bytes| {
                 uploaded.borrow_mut().push(bytes.to_vec());
-                Ok::<(), String>(())
+                Ok::<(), SyncError>(())
             },
-            |_| Ok::<(), String>(()),
+            |_| Ok::<(), SyncError>(()),
         )
         .unwrap();
         assert!(!ok);
@@ -983,10 +998,10 @@ mod tests {
                     Err("offline".into())
                 }
             },
-            |_, _| Ok::<(), String>(()),
+            |_, _| Ok::<(), SyncError>(()),
             |books| {
                 stored.borrow_mut().push(books.clone());
-                Ok::<(), String>(())
+                Ok::<(), SyncError>(())
             },
         );
         assert!(result.is_err());
@@ -1083,19 +1098,19 @@ mod tests {
         fn label(&self) -> &'static str {
             "Mem"
         }
-        fn refresh(&self, _refresh_token: &str) -> Result<(String, u64), String> {
+        fn refresh(&self, _refresh_token: &str) -> Result<(String, u64), SyncError> {
             Ok(("token".into(), 3600))
         }
         fn connected(&self) -> bool {
             true
         }
-        fn access_token(&self) -> Result<String, String> {
-            if self.down { Err("Mem is down".into()) } else { Ok("token".into()) }
+        fn access_token(&self) -> Result<String, SyncError> {
+            if self.down { Err(SyncError::offline("Mem is down".into())) } else { Ok("token".into()) }
         }
-        fn get(&self, _access: &str, name: &str) -> Result<Option<Vec<u8>>, String> {
+        fn get(&self, _access: &str, name: &str) -> Result<Option<Vec<u8>>, SyncError> {
             Ok(self.files.lock().unwrap().get(name).cloned())
         }
-        fn put(&self, _access: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
+        fn put(&self, _access: &str, name: &str, bytes: &[u8]) -> Result<(), SyncError> {
             self.files.lock().unwrap().insert(name.into(), bytes.to_vec());
             Ok(())
         }

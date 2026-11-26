@@ -27,6 +27,14 @@ pub enum Auth {
     Basic,
 }
 
+#[cfg(test)]
+impl Reply {
+    /// An answer for tests elsewhere.
+    pub fn for_test(status: u16, body: &[u8]) -> Self {
+        Reply { status, body: body.to_vec(), challenge: None }
+    }
+}
+
 /// Servers (origins) that asked for Basic: they get it without asking again.
 static BASIC_SERVERS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 

@@ -317,7 +317,7 @@ pub(crate) struct BookDetails {
 
 /// One connected cloud's verdict for the book: unknown when the manifest
 /// cannot be fetched, otherwise recorded or not.
-fn cloud_state(manifest: Result<Option<HashMap<String, crate::cloud::BookRecord>>, String>, fingerprint: &str) -> CloudState {
+fn cloud_state(manifest: Result<Option<HashMap<String, crate::cloud::BookRecord>>, crate::sync_error::SyncError>, fingerprint: &str) -> CloudState {
     match manifest {
         Err(_) => CloudState::Unknown,
         Ok(Some(books)) if books.contains_key(fingerprint) => CloudState::Synced,

@@ -5,7 +5,8 @@
 //! config: the refresh token is kept like catalog passwords (the OS
 //! credential store, the Android Keystore).
 
-use crate::cloud::{self, access_with_life, http_error, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
+use crate::cloud::{self, access_with_life, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
+use crate::sync_error::SyncError;
 use crate::platform::{Active, Platform};
 use crate::{net, oauth};
 use oauth::PendingLogin;
@@ -105,43 +106,45 @@ impl CloudStore for Dropbox {
         "Dropbox"
     }
 
-    fn refresh(&self, refresh_token: &str) -> Result<(String, u64), String> {
+    fn refresh(&self, refresh_token: &str) -> Result<(String, u64), SyncError> {
         let body = url::form_urlencoded::Serializer::new(String::new())
             .append_pair("grant_type", "refresh_token")
             .append_pair("refresh_token", refresh_token)
             .append_pair("client_id", app_key()?)
             .finish();
         // A refresh answer carries no refresh token (only the code exchange does).
-        access_with_life(&token_post(TOKEN_URL, &body, "Dropbox")?, "Dropbox")
+        access_with_life(&token_post(TOKEN_URL, &body, "Dropbox")?, "Dropbox").map_err(SyncError::data)
     }
 
-    fn get(&self, access: &str, name: &str) -> Result<Option<Vec<u8>>, String> {
+    fn get(&self, access: &str, name: &str) -> Result<Option<Vec<u8>>, SyncError> {
         let arg = serde_json::json!({ "path": format!("/{name}") }).to_string();
         let reply = net::post(
             "https://content.dropboxapi.com/2/files/download",
             &[("Authorization", &format!("Bearer {access}")), ("Dropbox-API-Arg", &arg)],
             &[],
-        )?;
+        )
+        .map_err(SyncError::offline)?;
         if reply.status == 200 {
             return Ok(Some(reply.body));
         }
         if reply.status == 409 && String::from_utf8_lossy(&reply.body).contains("not_found") {
             return Ok(None);
         }
-        Err(http_error("Dropbox download", &reply))
+        Err(SyncError::from_reply("Dropbox download", &reply))
     }
 
-    fn put(&self, access: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
+    fn put(&self, access: &str, name: &str, bytes: &[u8]) -> Result<(), SyncError> {
         let arg = serde_json::json!({ "path": format!("/{name}"), "mode": "overwrite", "autorename": false, "mute": true }).to_string();
         let reply = net::post(
             "https://content.dropboxapi.com/2/files/upload",
             &[("Authorization", &format!("Bearer {access}")), ("Content-Type", "application/octet-stream"), ("Dropbox-API-Arg", &arg)],
             bytes,
-        )?;
+        )
+        .map_err(SyncError::offline)?;
         if reply.status == 200 {
             Ok(())
         } else {
-            Err(http_error("Dropbox upload", &reply))
+            Err(SyncError::from_reply("Dropbox upload", &reply))
         }
     }
 

@@ -38,6 +38,7 @@ mod books;
 mod catalog_cmds;
 mod library_cmds;
 mod sync_cmds;
+mod sync_error;
 mod system_cmds;
 mod windows;
 

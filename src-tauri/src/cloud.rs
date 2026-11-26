@@ -8,6 +8,7 @@
 use crate::kosync;
 use crate::platform::{Active, Platform};
 use crate::store::Position;
+use crate::sync_error::{Kind, SyncError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -26,11 +27,11 @@ pub trait CloudStore: Sync {
     /// The cloud's name in messages ("Dropbox", "Google Drive").
     fn label(&self) -> &'static str;
     /// Trades the refresh token for an access token and how many seconds it lives.
-    fn refresh(&self, refresh_token: &str) -> Result<(String, u64), String>;
+    fn refresh(&self, refresh_token: &str) -> Result<(String, u64), SyncError>;
     /// A file's bytes by name; `None` when the cloud has no such file.
-    fn get(&self, access: &str, name: &str) -> Result<Option<Vec<u8>>, String>;
+    fn get(&self, access: &str, name: &str) -> Result<Option<Vec<u8>>, SyncError>;
     /// Writes a file by name, creating it or replacing what is there.
-    fn put(&self, access: &str, name: &str, bytes: &[u8]) -> Result<(), String>;
+    fn put(&self, access: &str, name: &str, bytes: &[u8]) -> Result<(), SyncError>;
     /// The cloud's last failure, for the settings.
     fn errors(&self) -> &ErrorSlot;
     /// The access token while it lives, so one sync round asks for it once.
@@ -42,11 +43,12 @@ pub trait CloudStore: Sync {
     }
 
     /// An access token: the kept one while it lives, else a fresh one.
-    fn access_token(&self) -> Result<String, String> {
+    fn access_token(&self) -> Result<String, SyncError> {
         if let Some(token) = self.tokens().fresh() {
             return Ok(token);
         }
-        let refresh = Active::password(self.token_id()).ok_or_else(|| format!("{} is not connected.", self.label()))?;
+        let refresh = Active::password(self.token_id())
+            .ok_or_else(|| SyncError::new(Kind::NotConnected, format!("{} is not connected.", self.label())))?;
         let (token, lives) = self.refresh(&refresh)?;
         self.tokens().keep(&token, lives);
         Ok(token)
@@ -94,10 +96,12 @@ pub fn stores() -> [&'static dyn CloudStore; 2] {
     [&crate::dropbox::STORE, &crate::google::STORE]
 }
 
-/// Forgets a cloud's login: the refresh token and the access token.
+/// Forgets a cloud's login: the refresh token, the access token, and the
+/// last failure the settings showed for it.
 pub fn disconnect(store: &dyn CloudStore) {
     Active::forget_password(store.token_id());
     store.tokens().clear();
+    let _ = store.errors().track::<(), SyncError>(Ok(()));
 }
 
 /// Keeps the refresh token of a new login, then drops an access token of an
@@ -109,20 +113,23 @@ pub fn keep_login(store: &dyn CloudStore, refresh: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Records a cloud call's outcome for the settings. A failure also drops the
-/// kept access token, so a revoked or rejected one is not reused until it
-/// expires: the next call logs in again and says what is wrong.
-fn settle<T>(store: &dyn CloudStore, result: Result<T, String>) -> Result<T, String> {
-    if result.is_err() {
-        store.tokens().clear();
+/// Records a cloud call's outcome for the settings. A cloud without a login
+/// has nothing to report. A rejected login also drops the kept access token,
+/// so the next call logs in again and says what is wrong instead of reusing
+/// a revoked token until it expires.
+fn settle<T>(store: &dyn CloudStore, result: Result<T, SyncError>) -> Result<T, SyncError> {
+    match &result {
+        Err(e) if e.kind == Kind::NotConnected => return result,
+        Err(e) if e.kind == Kind::Rejected => store.tokens().clear(),
+        _ => {}
     }
     store.errors().track(result)
 }
 
 /// The positions file: `None` before the first sync, an error when it cannot be read.
-fn positions_file(store: &dyn CloudStore, access: &str) -> Result<Option<HashMap<String, RemoteRecord>>, String> {
+fn positions_file(store: &dyn CloudStore, access: &str) -> Result<Option<HashMap<String, RemoteRecord>>, SyncError> {
     let Some(body) = store.get(access, POSITIONS_FILE)? else { return Ok(None) };
-    let file: SyncFile = serde_json::from_slice(&body).map_err(|e| format!("{} file is not ours: {e}", store.label()))?;
+    let file: SyncFile = serde_json::from_slice(&body).map_err(|e| SyncError::data(format!("{} file is not ours: {e}", store.label())))?;
     Ok(Some(file.positions))
 }
 
@@ -155,7 +162,7 @@ pub fn push(
     fraction: f64,
     device: &str,
     device_id: &str,
-) -> Result<(), String> {
+) -> Result<(), SyncError> {
     let pushed = (|| {
         let access = store.access_token()?;
         let remote = positions_file(store, &access)?.unwrap_or_default();
@@ -166,7 +173,7 @@ pub fn push(
         if merged == remote {
             return Ok(());
         }
-        let body = serde_json::to_vec(&SyncFile { version: POSITIONS_VERSION, positions: merged }).map_err(|e| e.to_string())?;
+        let body = serde_json::to_vec(&SyncFile { version: POSITIONS_VERSION, positions: merged }).map_err(|e| SyncError::data(e.to_string()))?;
         store.put(&access, POSITIONS_FILE, &body)
     })();
     settle(store, pushed)
@@ -174,14 +181,14 @@ pub fn push(
 
 /// The cloud's book manifest: `None` when no book was ever uploaded, an
 /// error when it could not be read (never mistaken for an empty one).
-pub fn manifest(store: &dyn CloudStore) -> Result<Option<HashMap<String, BookRecord>>, String> {
+pub fn manifest(store: &dyn CloudStore) -> Result<Option<HashMap<String, BookRecord>>, SyncError> {
     manifest_file(store, &store.access_token()?)
 }
 
 /// The manifest read with a token in hand (see `manifest`).
-fn manifest_file(store: &dyn CloudStore, access: &str) -> Result<Option<HashMap<String, BookRecord>>, String> {
+fn manifest_file(store: &dyn CloudStore, access: &str) -> Result<Option<HashMap<String, BookRecord>>, SyncError> {
     let Some(body) = store.get(access, MANIFEST_FILE)? else { return Ok(None) };
-    parse_manifest(&body).map(Some)
+    parse_manifest(&body).map(Some).map_err(SyncError::data)
 }
 
 /// The cloud's book manifest, if the app ever synced books; a failure goes
@@ -191,13 +198,13 @@ pub fn book_manifest(store: &dyn CloudStore) -> Option<HashMap<String, BookRecor
 }
 
 /// A book file by its cloud name; `None` when the cloud never saw it.
-pub fn download_book(store: &dyn CloudStore, remote_name: &str) -> Result<Option<Vec<u8>>, String> {
+pub fn download_book(store: &dyn CloudStore, remote_name: &str) -> Result<Option<Vec<u8>>, SyncError> {
     settle(store, store.access_token().and_then(|access| store.get(&access, remote_name)))
 }
 
 /// Uploads a book file the cloud lacks and records it in the manifest; true
 /// when the cloud gained the book.
-pub fn push_book(store: &dyn CloudStore, fingerprint: &str, record: &BookRecord, bytes: &[u8]) -> Result<bool, String> {
+pub fn push_book(store: &dyn CloudStore, fingerprint: &str, record: &BookRecord, bytes: &[u8]) -> Result<bool, SyncError> {
     let pushed = store.access_token().and_then(|access| {
         push_book_missing(
             fingerprint,
@@ -205,7 +212,7 @@ pub fn push_book(store: &dyn CloudStore, fingerprint: &str, record: &BookRecord,
             bytes,
             || manifest_file(store, &access),
             |name, bytes| store.put(&access, name, bytes),
-            |books| store.put(&access, MANIFEST_FILE, &render_manifest(books)?),
+            |books| store.put(&access, MANIFEST_FILE, &render_manifest(books).map_err(SyncError::data)?),
         )
     });
     settle(store, pushed)
@@ -321,10 +328,10 @@ pub fn push_book_missing(
     fingerprint: &str,
     record: &BookRecord,
     bytes: &[u8],
-    manifest: impl Fn() -> Result<Option<HashMap<String, BookRecord>>, String>,
-    upload: impl Fn(&str, &[u8]) -> Result<(), String>,
-    store: impl Fn(&HashMap<String, BookRecord>) -> Result<(), String>,
-) -> Result<bool, String> {
+    manifest: impl Fn() -> Result<Option<HashMap<String, BookRecord>>, SyncError>,
+    upload: impl Fn(&str, &[u8]) -> Result<(), SyncError>,
+    store: impl Fn(&HashMap<String, BookRecord>) -> Result<(), SyncError>,
+) -> Result<bool, SyncError> {
     if manifest()?.is_some_and(|books| books.contains_key(fingerprint)) {
         return Ok(false);
     }
@@ -335,20 +342,17 @@ pub fn push_book_missing(
     Ok(true)
 }
 
-/// The error for an HTTP answer that isn't a success: what failed, the
-/// status and what the server said.
-pub fn http_error(what: &str, reply: &crate::net::Reply) -> String {
-    format!("{what} failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body))
-}
-
 /// Posts a form to an OAuth token endpoint and returns the answer's body;
-/// a refusal reads "<service> login failed (status): …".
-pub fn token_post(url: &str, form: &str, service: &str) -> Result<Vec<u8>, String> {
-    let reply = crate::net::post(url, &[("Content-Type", "application/x-www-form-urlencoded")], form.as_bytes())?;
-    if reply.status != 200 {
-        return Err(http_error(&format!("{service} login"), &reply));
+/// a refusal reads "<service> login failed (status): …". A 400 there means
+/// the refresh token was revoked or expired (`invalid_grant`), so it counts
+/// as a rejected login like 401.
+pub fn token_post(url: &str, form: &str, service: &str) -> Result<Vec<u8>, SyncError> {
+    let reply = crate::net::post(url, &[("Content-Type", "application/x-www-form-urlencoded")], form.as_bytes()).map_err(SyncError::offline)?;
+    match reply.status {
+        200 => Ok(reply.body),
+        400 => Err(SyncError { kind: Kind::Rejected, ..SyncError::from_reply(&format!("{service} login"), &reply) }),
+        _ => Err(SyncError::from_reply(&format!("{service} login"), &reply)),
     }
-    Ok(reply.body)
 }
 
 /// Parses a token endpoint answer.
@@ -401,8 +405,8 @@ impl ErrorSlot {
 
     /// Remembers the outcome for the settings: failures stay visible there,
     /// successes clear them.
-    pub fn track<T>(&self, result: Result<T, String>) -> Result<T, String> {
-        *self.0.lock().unwrap() = result.as_ref().err().cloned();
+    pub fn track<T, E: std::fmt::Display>(&self, result: Result<T, E>) -> Result<T, E> {
+        *self.0.lock().unwrap() = result.as_ref().err().map(E::to_string);
         result
     }
 
@@ -415,6 +419,7 @@ impl ErrorSlot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sync_error::Kind;
 
     fn record(cfi: &str, time: u64) -> RemoteRecord {
         RemoteRecord { cfi: cfi.into(), fraction: 0.5, time, device: "phone".into(), device_id: "phone".into() }
@@ -502,13 +507,80 @@ mod tests {
         assert_eq!(access_with_life(br#"{"access_token":"a"}"#, "X").unwrap(), ("a".into(), 3600));
     }
 
+    /// A cloud whose every file call fails with `kind`.
+    struct Failing {
+        kind: Kind,
+        errors: ErrorSlot,
+        tokens: TokenCache,
+    }
+
+    impl CloudStore for Failing {
+        fn id(&self) -> &'static str {
+            "failing"
+        }
+        fn module(&self) -> &'static str {
+            "capability:failing"
+        }
+        fn token_id(&self) -> &'static str {
+            "failing"
+        }
+        fn label(&self) -> &'static str {
+            "Failing"
+        }
+        fn refresh(&self, _refresh_token: &str) -> Result<(String, u64), SyncError> {
+            Ok(("token".into(), 3600))
+        }
+        fn access_token(&self) -> Result<String, SyncError> {
+            if self.kind == Kind::NotConnected {
+                return Err(SyncError::new(Kind::NotConnected, "Failing is not connected."));
+            }
+            Ok("token".into())
+        }
+        fn get(&self, _access: &str, _name: &str) -> Result<Option<Vec<u8>>, SyncError> {
+            Err(SyncError::new(self.kind, "nope"))
+        }
+        fn put(&self, _access: &str, _name: &str, _bytes: &[u8]) -> Result<(), SyncError> {
+            Err(SyncError::new(self.kind, "nope"))
+        }
+        fn errors(&self) -> &ErrorSlot {
+            &self.errors
+        }
+        fn tokens(&self) -> &TokenCache {
+            &self.tokens
+        }
+    }
+
+    fn failing(kind: Kind) -> Failing {
+        let store = Failing { kind, errors: ErrorSlot::new(), tokens: TokenCache::new() };
+        store.tokens.keep("kept", 3600);
+        store
+    }
+
+    #[test]
+    fn each_kind_of_failure_is_handled_its_own_way() {
+        // No login: nothing to report, nothing to retry.
+        let store = failing(Kind::NotConnected);
+        assert_eq!(push(&store, &HashMap::new(), "fp", "a", 0.5, "pc", "pc").unwrap_err().kind, Kind::NotConnected);
+        assert_eq!(store.errors.last(), None);
+        // A turned-down login drops the kept token, so the next call logs in again.
+        let store = failing(Kind::Rejected);
+        assert!(remote_positions(&store).is_none());
+        assert_eq!(store.tokens.fresh(), None);
+        assert_eq!(store.errors.last().as_deref(), Some("nope"));
+        // No network: the token stays, the failure shows.
+        let store = failing(Kind::Offline);
+        assert!(download_book(&store, "book").is_err());
+        assert_eq!(store.tokens.fresh().as_deref(), Some("kept"));
+        assert_eq!(store.errors.last().as_deref(), Some("nope"));
+    }
+
     #[test]
     fn failures_are_remembered_until_a_success() {
         let slot = ErrorSlot::new();
         assert_eq!(slot.last(), None);
-        let _ = slot.track::<()>(Err("gone".into()));
+        let _ = slot.track::<(), String>(Err("gone".into()));
         assert_eq!(slot.last().as_deref(), Some("gone"));
-        let _ = slot.track::<()>(Ok(()));
+        let _ = slot.track::<(), String>(Ok(()));
         assert_eq!(slot.last(), None);
     }
 
