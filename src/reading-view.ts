@@ -6,7 +6,7 @@ import { setReading } from './platform'
 import { createSyncManager, type SyncManager } from './sync-manager'
 import { SAVE_DELAY_MS, type Settings } from './settings'
 import { FINISHED_AT } from './library'
-import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
+import { bookmarkLabel, hasBookmark, toggleBookmark, upgradeBookmarks, type Bookmark } from './bookmarks'
 import { $ } from './dom'
 
 export interface Position {
@@ -174,7 +174,12 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
       console.error(e)
       return []
     })
-    renderBookmarks()
+    // Bookmarks made before reader-core cut this book's long chapters move
+    // once. reader-core's Book type doesn't list FB2's upgradeCFI yet.
+    const parsed = book.view.book as { upgradeCFI?: (cfi: string) => string } | undefined
+    const upgraded = upgradeBookmarks(bookmarks, parsed?.upgradeCFI)
+    if (upgraded) setBookmarks(upgraded)
+    else renderBookmarks()
     setReading(true, deps.getSettings().volumeKeys)
     void sync.pull()
   }

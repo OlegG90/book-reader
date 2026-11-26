@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bookmarkLabel, hasBookmark, toggleBookmark, type Page } from './bookmarks'
+import { bookmarkLabel, hasBookmark, toggleBookmark, upgradeBookmarks, type Page } from './bookmarks'
 
 /** A page of section 2 from paragraph `from` to paragraph `to`. */
 const page = (from: number, to: number, fraction: number): Page => ({
@@ -30,5 +30,26 @@ describe('bookmarks', () => {
   it('labels with the chapter when there is one', () => {
     expect(bookmarkLabel({ cfi: 'x', fraction: 0.424, chapter: 'Chapter 3' })).toBe('Chapter 3 · 42%')
     expect(bookmarkLabel({ cfi: 'x', fraction: 0.07, chapter: '' })).toBe('7%')
+  })
+
+  describe('upgradeBookmarks', () => {
+    // section 2 of the old layout became part 5 (section index 4) of the cut book
+    const upgrade = (cfi: string) => cfi.replace('/6/4!/4/40', '/6/10[fb2-parts-80000]!/4/2')
+    const old = toggleBookmark([], page(40, 50, 0.5))
+
+    it('moves bookmarks made before the cut, so the new pages find them', () => {
+      const moved = upgradeBookmarks(old, upgrade)
+      expect(moved?.[0].cfi).toBe('epubcfi(/6/10[fb2-parts-80000]!/4/2/1:0)')
+      expect(moved?.[0].fraction).toBe(0.5)
+      const newPage = 'epubcfi(/6/10[fb2-parts-80000]!/4,/2/1:0,/12/1:0)'
+      expect(hasBookmark(old, newPage)).toBe(false)
+      expect(hasBookmark(moved!, newPage)).toBe(true)
+    })
+
+    it('reports nothing to save when no bookmark moves or the book has no upgrade', () => {
+      expect(upgradeBookmarks(old, cfi => cfi)).toBeNull()
+      expect(upgradeBookmarks(old, undefined)).toBeNull()
+      expect(upgradeBookmarks([], upgrade)).toBeNull()
+    })
   })
 })
