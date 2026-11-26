@@ -335,10 +335,25 @@ describe('settings page', () => {
     // OneDrive waits for its transport.
     expect(cloudRow(host, 'OneDrive').button.disabled).toBe(true)
     expect(cloudRow(host, 'OneDrive').hint).toContain('Coming soon')
-    panel.setCloudVisible(false)
+  })
+
+  it('hides a cloud turned off in Modules unless it still has a login to forget', () => {
+    const { host, panel } = page()
+    panel.show({ ...initial, disabledModules: ['capability:dropbox'] })
     expect(cloudRow(host, 'Dropbox').row.hidden).toBe(true)
-    panel.setCloudVisible(true)
+    panel.setClouds([{ id: 'dropbox', connected: true, lastError: 'Dropbox upload failed (401)' }])
     expect(cloudRow(host, 'Dropbox').row.hidden).toBe(false)
+    expect(cloudRow(host, 'Dropbox').hint).toBe('Turned off in Modules; disconnect to forget the login.')
+  })
+
+  it('waits for the browser after Connect, until the state comes back', () => {
+    const { host, panel, actions } = page()
+    cloudRow(host, 'Dropbox').button.click()
+    expect(actions.connectCloud).toHaveBeenCalledWith('dropbox')
+    expect(cloudRow(host, 'Dropbox').hint).toBe('Waiting for the browser…')
+    expect(cloudRow(host, 'Dropbox').button.disabled).toBe(true)
+    panel.setClouds([{ id: 'dropbox', connected: true, lastError: null }])
+    expect(cloudRow(host, 'Dropbox').button.textContent).toBe('Disconnect')
   })
 
   it('shows the file-type registration state', () => {

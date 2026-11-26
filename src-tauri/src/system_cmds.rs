@@ -6,6 +6,7 @@ use crate::dropbox;
 use crate::google;
 use crate::formats;
 use crate::modules;
+use crate::oauth::PendingLogin;
 use crate::platform::{Active, Platform};
 use crate::store::Store;
 use crate::register;
@@ -65,6 +66,9 @@ fn cloud_by_id(id: &str) -> CmdResult<&'static dyn CloudStore> {
     crate::cloud::stores().into_iter().find(|cloud| cloud.id() == id).ok_or_else(|| format!("Unknown cloud: {id}."))
 }
 
+/// A cloud's way to finish a login the browser came back from.
+type LoginFinish = fn(PendingLogin) -> CmdResult<()>;
+
 /// Connects a cloud on the desktop: opens its login in the browser, waits
 /// for the answer and keeps the refresh token like a catalog password. (A
 /// phone's Google login comes back on the app's scheme instead, see
@@ -73,13 +77,15 @@ fn cloud_by_id(id: &str) -> CmdResult<&'static dyn CloudStore> {
 pub(crate) fn cloud_connect(app: AppHandle, store: State<Store>, id: String) -> CmdResult<()> {
     let cloud = cloud_by_id(&id)?;
     store.read(|s| modules::require(s, cloud.module()))?;
-    let pending = if cloud.id() == google::STORE.id() { google::begin()? } else { dropbox::begin()? };
+    // Each cloud has its own login; a cloud without one here can't connect.
+    let (begin, finish): (fn() -> CmdResult<PendingLogin>, LoginFinish) = match cloud.id() {
+        id if id == dropbox::STORE.id() => (dropbox::begin, dropbox::finish),
+        id if id == google::STORE.id() => (google::begin, google::finish),
+        id => return Err(format!("{id} has no login yet.")),
+    };
+    let pending = begin()?;
     app.opener().open_url(&pending.url, None::<&str>).map_err(|e| e.to_string())?;
-    if cloud.id() == google::STORE.id() {
-        google::finish(pending)
-    } else {
-        dropbox::finish(pending)
-    }
+    finish(pending)
 }
 
 /// Forgets a cloud's login; connecting again starts over. Works with the
@@ -87,6 +93,7 @@ pub(crate) fn cloud_connect(app: AppHandle, store: State<Store>, id: String) -> 
 #[tauri::command(async)]
 pub(crate) fn cloud_disconnect(id: String) -> CmdResult<()> {
     let cloud = cloud_by_id(&id)?;
+    // Google also forgets a phone login still waiting for the browser.
     if cloud.id() == google::STORE.id() {
         google::disconnect();
     } else {
@@ -97,7 +104,7 @@ pub(crate) fn cloud_disconnect(id: String) -> CmdResult<()> {
 
 /// Starts the phone's Google login: opens its page in the browser, and the
 /// answer comes back through the app's intent filter (`google_finish`).
-/// The desktop waits on a loopback address instead (`google_connect`).
+/// The desktop waits on a loopback address instead (`cloud_connect`).
 #[tauri::command(async)]
 pub(crate) fn google_connect_android(app: AppHandle, store: State<Store>) -> CmdResult<String> {
     store.read(|s| modules::require(s, modules::id::GOOGLE_DRIVE))?;
@@ -214,4 +221,17 @@ pub(crate) fn show_library(window: Window) -> CmdResult<()> {
 #[tauri::command(async)]
 pub(crate) fn leave_app(app: AppHandle) -> CmdResult<()> {
     Active::leave(&app)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cloud_by_id;
+
+    #[test]
+    fn clouds_are_found_by_id_and_others_refused() {
+        assert_eq!(cloud_by_id("dropbox").unwrap().label(), "Dropbox");
+        assert_eq!(cloud_by_id("google").unwrap().label(), "Google Drive");
+        assert!(cloud_by_id("onedrive").is_err(), "not there yet");
+        assert!(cloud_by_id("../etc").is_err());
+    }
 }

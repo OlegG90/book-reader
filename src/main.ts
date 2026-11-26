@@ -367,7 +367,7 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
     void invoke(command).then(refreshFileTypesStatus, console.error)
   },
   connectCloud: provider => {
-    // The picker never sends an unavailable cloud; a disabled module refuses.
+    // The rows never send an unavailable cloud; a disabled module refuses.
     // A phone's answer comes back on the app's scheme: the push event is
     // unreliable there, so a Google connect polls the stash instead; the
     // desktop waits on a loopback address instead.
@@ -382,16 +382,21 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
         void sourcesPanel.refresh()
       },
       e => {
-        stopOauthPoll?.()
-        stopOauthPoll = null
+        // Only Google's own failure ends its phone poll.
+        if (phoneGoogle) {
+          stopOauthPoll?.()
+          stopOauthPoll = null
+        }
         showError(undefined, e)
         void refreshCloudStatus()
       },
     )
   },
   disconnectCloud: provider => {
-    stopOauthPoll?.()
-    stopOauthPoll = null
+    if (provider === 'google') {
+      stopOauthPoll?.()
+      stopOauthPoll = null
+    }
     void invoke('cloud_disconnect', { id: provider }).then(
       () => {
         void refreshCloudStatus()
@@ -584,7 +589,6 @@ function applyCapabilities() {
   settingsPage.setOrganizeVisible(!off.has(MODULE.organize))
   settingsPage.setFileTypesVisible(!isAndroid && !off.has(MODULE.fileTypes))
   const cloudsOn = !off.has(MODULE.dropbox) || !off.has(MODULE.googleDrive)
-  settingsPage.setCloudVisible(cloudsOn)
   // The desktop counts every network as unmetered, so the rule means nothing there.
   settingsPage.setBooksWifiVisible(cloudsOn && isAndroid)
   settingsPage.setUpdatesVisible(!off.has(MODULE.updateCheck))

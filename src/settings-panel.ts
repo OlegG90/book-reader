@@ -251,24 +251,37 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     return { provider, hint, button, row: row(provider.label, hint, button) }
   })
   let cloudStates: CloudConnection[] = []
+  // Clouds whose login is open in the browser, until their state comes back.
+  const waiting = new Set<string>()
   // The modules switched off; a cloud whose module is off cannot connect.
   let modulesOff = [...initial.disabledModules]
-  /** Shows each cloud's state: connected (with its last failure), off, or ready to connect. */
+  /** Shows each cloud's state: connected (with its last failure), waiting for
+  the browser, off, or ready to connect. A cloud whose module is off shows
+  only while it still has a login to forget. */
   const refreshClouds = () => {
-    for (const { provider, hint, button } of cloudRows) {
+    for (const { provider, hint, button, row } of cloudRows) {
       const state = cloudStates.find(c => c.id === provider.id)
       const off = modulesOff.includes(cloudModuleId(provider.id))
+      row.hidden = off && !state?.connected
       hint.title = state?.lastError ?? ''
       if (state?.connected) {
-        hint.textContent = state.lastError ?? (off ? 'Turned off in Modules; disconnect to forget the login.' : 'Reading positions and books sync through it.')
+        hint.textContent = off ? 'Turned off in Modules; disconnect to forget the login.' : (state.lastError ?? 'Reading positions and books sync through it.')
         button.textContent = 'Disconnect'
         button.disabled = false
         button.onclick = () => actions.disconnectCloud(provider.id)
+      } else if (waiting.has(provider.id)) {
+        hint.textContent = 'Waiting for the browser…'
+        button.textContent = 'Connect'
+        button.disabled = true
       } else {
         hint.textContent = !provider.available ? 'Coming soon — not available yet.' : off ? `Turn on ${provider.label} in Modules to connect.` : 'Not connected'
         button.textContent = 'Connect'
         button.disabled = !provider.available || off
-        button.onclick = () => actions.connectCloud(provider.id)
+        button.onclick = () => {
+          waiting.add(provider.id)
+          refreshClouds()
+          actions.connectCloud(provider.id)
+        }
       }
     }
   }
@@ -492,19 +505,16 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     fileTypesButton.textContent = registered ? 'Unregister' : 'Register'
   }
 
-  /** Hides the cloud rows (every cloud module is off). */
-  function setCloudVisible(visible: boolean) {
-    for (const c of cloudRows) c.row.hidden = !visible
-  }
-
   /** Shows the Wi-Fi rule for book files: only on a phone, where networks can be metered. */
   function setBooksWifiVisible(visible: boolean) {
     booksWifiRow.hidden = !visible
   }
 
-  /** Shows every cloud's connection. Sync stays quiet; only the settings say what went wrong. */
+  /** Shows every cloud's connection (a login that was waiting has come back
+  either way). Sync stays quiet; only the settings say what went wrong. */
   function setClouds(states: CloudConnection[]) {
     cloudStates = states
+    waiting.clear()
     refreshClouds()
   }
 
@@ -524,7 +534,6 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     setFileTypesVisible,
     setLibraryFolder,
     setClouds,
-    setCloudVisible,
     setBooksWifiVisible,
     setOrganizeVisible,
     setSectionVisible,
