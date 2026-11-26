@@ -57,6 +57,17 @@ pub(crate) struct SavedSource {
     warning: Option<String>,
 }
 
+/// The id a saved source keeps: an edit names an existing source, a new one
+/// gets a fresh id. Ids are never taken from the page for a new source, as
+/// the credential store keyed by them also keeps the clouds' tokens.
+fn source_id(store: &Store, requested: Option<String>) -> CmdResult<String> {
+    match requested.filter(|id| !id.is_empty()) {
+        None => Ok(format!("{:x}", clock::now_nanos())),
+        Some(id) if store.read(|s| s.sources.iter().any(|source| source.id == id)) => Ok(id),
+        Some(_) => Err("This catalog source no longer exists.".into()),
+    }
+}
+
 /// Adds or changes a catalog source, after finding its OPDS catalog (which
 /// also checks the login). One source at most syncs progress.
 #[tauri::command(async)]
@@ -68,7 +79,7 @@ pub(crate) fn save_catalog_source(
 ) -> CmdResult<SavedSource> {
     store.read(|s| modules::require(s, "capability:catalogs"))?;
     let url = catalog::check_url(&input.url)?;
-    let id = input.id.filter(|id| !id.is_empty()).unwrap_or_else(|| format!("{:x}", clock::now_nanos()));
+    let id = source_id(&store, input.id)?;
     let name = match input.name.trim() {
         "" => url.host_str().unwrap_or("Catalog").to_string(),
         name => name.to_string(),
@@ -101,8 +112,19 @@ pub(crate) fn save_catalog_source(
 #[tauri::command(async)]
 pub(crate) fn delete_catalog_source(app: AppHandle, store: State<Store>, id: String) -> CmdResult<()> {
     store.read(|s| modules::require(s, "capability:catalogs"))?;
-    store.update(|s| s.sources.retain(|source| source.id != id)).map_err(|e| e.to_string())?;
-    Active::forget_password(&id);
+    let mut removed = false;
+    store
+        .update(|s| {
+            let before = s.sources.len();
+            s.sources.retain(|source| source.id != id);
+            removed = s.sources.len() != before;
+        })
+        .map_err(|e| e.to_string())?;
+    // Only a real source's password: the credential store also keeps the
+    // clouds' tokens, which no catalog id may reach.
+    if removed {
+        Active::forget_password(&id);
+    }
     let _ = app.emit("catalogs-changed", ());
     Ok(())
 }
@@ -171,4 +193,32 @@ pub(crate) fn catalog_download(
     }
     let _ = app.emit("library-updated", ());
     Ok(added)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::source_id;
+    use crate::store::Store;
+
+    #[test]
+    fn source_ids_never_come_from_the_page_for_new_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::load(dir.path().join("breader.json"));
+        store
+            .update(|s| {
+                s.sources.push(crate::catalog::Source {
+                    id: "1a".into(),
+                    name: "CWA".into(),
+                    url: "https://books.example/opds".into(),
+                    user: String::new(),
+                    sync: false,
+                })
+            })
+            .unwrap();
+        assert_eq!(source_id(&store, Some("1a".into())).unwrap(), "1a", "an edit keeps its id");
+        assert!(source_id(&store, Some("dropbox".into())).is_err(), "a cloud token's id is refused");
+        let fresh = source_id(&store, None).unwrap();
+        assert!(fresh.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(source_id(&store, Some(String::new())).unwrap().len(), fresh.len());
+    }
 }
