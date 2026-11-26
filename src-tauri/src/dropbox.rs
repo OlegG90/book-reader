@@ -193,16 +193,6 @@ mod tests {
     }
 
     #[test]
-    fn failures_are_remembered_until_a_success() {
-        let slot = ErrorSlot::new();
-        assert_eq!(slot.last(), None);
-        let _ = slot.track::<()>(Err("gone".into()));
-        assert_eq!(slot.last().as_deref(), Some("gone"));
-        let _ = slot.track::<()>(Ok(()));
-        assert_eq!(slot.last(), None);
-    }
-
-    #[test]
     fn refresh_answer_carries_no_refresh_token() {
         // What /oauth2/token answers to a refresh grant: access only.
         let body = br#"{"access_token": "sl.XXXX", "token_type": "bearer", "expires_in": 14400}"#;

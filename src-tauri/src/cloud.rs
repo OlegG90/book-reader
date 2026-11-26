@@ -98,11 +98,23 @@ pub fn disconnect(store: &dyn CloudStore) {
     store.tokens().clear();
 }
 
-/// Keeps the refresh token of a new login; an access token of an earlier
-/// account is dropped with it.
+/// Keeps the refresh token of a new login, then drops an access token of an
+/// earlier account (in this order, so a sync running meanwhile can't cache
+/// the old account's token after the drop).
 pub fn keep_login(store: &dyn CloudStore, refresh: &str) -> Result<(), String> {
+    Active::save_password(store.token_id(), refresh)?;
     store.tokens().clear();
-    Active::save_password(store.token_id(), refresh)
+    Ok(())
+}
+
+/// Records a cloud call's outcome for the settings. A failure also drops the
+/// kept access token, so a revoked or rejected one is not reused until it
+/// expires: the next call logs in again and says what is wrong.
+fn settle<T>(store: &dyn CloudStore, result: Result<T, String>) -> Result<T, String> {
+    if result.is_err() {
+        store.tokens().clear();
+    }
+    store.errors().track(result)
 }
 
 /// The positions file: `None` before the first sync, an error when it cannot be read.
@@ -115,7 +127,7 @@ fn positions_file(store: &dyn CloudStore, access: &str) -> Result<Option<HashMap
 /// The cloud's whole positions file, if the app ever synced; a dead cloud
 /// reports nothing (its failure goes to the settings).
 pub fn remote_positions(store: &dyn CloudStore) -> Option<HashMap<String, RemoteRecord>> {
-    store.errors().track(store.access_token().and_then(|access| positions_file(store, &access))).ok().flatten()
+    settle(store, store.access_token().and_then(|access| positions_file(store, &access))).ok().flatten()
 }
 
 /// The open book's position in the cloud, in KOSync's shape (time in
@@ -137,7 +149,8 @@ pub fn push(
     store: &dyn CloudStore,
     local: &HashMap<String, Position>,
     fingerprint: &str,
-    place: (&str, f64),
+    cfi: &str,
+    fraction: f64,
     device: &str,
     device_id: &str,
 ) -> Result<(), String> {
@@ -145,7 +158,7 @@ pub fn push(
         let access = store.access_token()?;
         let remote = positions_file(store, &access)?.unwrap_or_default();
         let mut local = local.clone();
-        local.insert(fingerprint.into(), Position { cfi: place.0.into(), fraction: place.1, time: crate::clock::now_ms() });
+        local.insert(fingerprint.into(), Position { cfi: cfi.into(), fraction, time: crate::clock::now_ms() });
         let merged = merge_for_upload(&local, &remote, device, device_id);
         if !should_upload(&merged, &remote) {
             return Ok(());
@@ -153,7 +166,7 @@ pub fn push(
         let body = serde_json::to_vec(&SyncFile { version: POSITIONS_VERSION, positions: merged }).map_err(|e| e.to_string())?;
         store.put(&access, POSITIONS_FILE, &body)
     })();
-    store.errors().track(pushed)
+    settle(store, pushed)
 }
 
 /// The cloud's book manifest: `None` when no book was ever uploaded, an
@@ -167,12 +180,12 @@ pub fn manifest(store: &dyn CloudStore) -> Result<Option<HashMap<String, BookRec
 /// The cloud's book manifest, if the app ever synced books; a failure goes
 /// to the settings.
 pub fn book_manifest(store: &dyn CloudStore) -> Option<HashMap<String, BookRecord>> {
-    store.errors().track(manifest(store)).ok().flatten()
+    settle(store, manifest(store)).ok().flatten()
 }
 
 /// A book file by its cloud name; `None` when the cloud never saw it.
 pub fn download_book(store: &dyn CloudStore, remote_name: &str) -> Result<Option<Vec<u8>>, String> {
-    store.errors().track(store.access_token().and_then(|access| store.get(&access, remote_name)))
+    settle(store, store.access_token().and_then(|access| store.get(&access, remote_name)))
 }
 
 /// Uploads a book file the cloud lacks and records it in the manifest; true
@@ -188,7 +201,7 @@ pub fn push_book(store: &dyn CloudStore, fingerprint: &str, record: &BookRecord,
             |books| store.put(&access, MANIFEST_FILE, &render_manifest(books)?),
         )
     });
-    store.errors().track(pushed)
+    settle(store, pushed)
 }
 
 /// One book's synced position as a cloud file keeps it: the local shape
@@ -477,6 +490,16 @@ mod tests {
         // A refresh answer says how long the token lives, or an hour.
         assert_eq!(access_with_life(br#"{"access_token":"a","expires_in":14400}"#, "X").unwrap(), ("a".into(), 14400));
         assert_eq!(access_with_life(br#"{"access_token":"a"}"#, "X").unwrap(), ("a".into(), 3600));
+    }
+
+    #[test]
+    fn failures_are_remembered_until_a_success() {
+        let slot = ErrorSlot::new();
+        assert_eq!(slot.last(), None);
+        let _ = slot.track::<()>(Err("gone".into()));
+        assert_eq!(slot.last().as_deref(), Some("gone"));
+        let _ = slot.track::<()>(Ok(()));
+        assert_eq!(slot.last(), None);
     }
 
     #[test]

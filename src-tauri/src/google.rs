@@ -274,6 +274,7 @@ fn upload_bytes(access: &str, file_id: Option<&str>, name: &str, data: &[u8]) ->
         Some(_) => serde_json::json!({}),
         None => serde_json::json!({ "name": name, "parents": ["appDataFolder"] }),
     };
+    // The positions file and the manifest are JSON; book files are opaque.
     let content_type = if name.ends_with(".json") { "application/json" } else { "application/octet-stream" };
     store_bytes(access, file_id, metadata, data.to_vec(), content_type)
 }

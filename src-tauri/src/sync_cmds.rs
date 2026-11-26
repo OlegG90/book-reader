@@ -130,7 +130,7 @@ impl Transport for CloudTransport<'_> {
     fn push(&self, store: &Store, book: &BookKey, cfi: &str, fraction: f64) -> Result<(), String> {
         let local = store.read(|s| s.positions.clone());
         let device_id = device_id(store)?;
-        cloud::push(self.0, &local, book.fingerprint, (cfi, fraction), DEVICE_NAME, &device_id)
+        cloud::push(self.0, &local, book.fingerprint, cfi, fraction, DEVICE_NAME, &device_id)
     }
 
     fn remote(&self, _store: &Store) -> Option<HashMap<String, RemoteRecord>> {
@@ -1141,13 +1141,13 @@ mod tests {
     fn positions_round_trip_through_a_cloud() {
         let cloud = MemCloud::new(false);
         let local = HashMap::new();
-        crate::cloud::push(&cloud, &local, "fp", ("epubcfi(/6/4)", 0.4), "Phone", "phone-id").unwrap();
+        crate::cloud::push(&cloud, &local, "fp", "epubcfi(/6/4)", 0.4, "Phone", "phone-id").unwrap();
         let progress = crate::cloud::pull(&cloud, "fp").unwrap();
         assert_eq!((progress.progress.as_str(), progress.device_id.as_str()), ("epubcfi(/6/4)", "phone-id"));
         // The startup pull gives a library book never opened here the cloud's place.
         let (_dir, store, books, _root) = library_with(&[("Book.epub", "bytes")]);
         let fp = books.snapshot(&store, &library_root(&store).unwrap()).into_iter().next().unwrap().fingerprint;
-        crate::cloud::push(&cloud, &local, &fp, ("epubcfi(/6/8)", 0.7), "Phone", "phone-id").unwrap();
+        crate::cloud::push(&cloud, &local, &fp, "epubcfi(/6/8)", 0.7, "Phone", "phone-id").unwrap();
         assert_eq!(pull_all_clouds(&store, &books, &[&CloudTransport(&cloud)]).unwrap(), 1);
         assert_eq!(store.read(|s| s.positions[&fp].cfi.clone()), "epubcfi(/6/8)");
     }
