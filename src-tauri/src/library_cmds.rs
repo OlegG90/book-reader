@@ -353,13 +353,6 @@ fn book_details_for(store: &Store, books: &LibraryBooks, fingerprint: &str) -> C
     })
 }
 
-/// A cloud manifest fetch, for the details dialog.
-type ManifestFetch = fn() -> Result<Option<HashMap<String, crate::cloud::BookRecord>>, String>;
-
-/// One cloud transport for the details dialog: its module, connection check
-/// and manifest fetch.
-type CloudTransport = (&'static str, fn() -> bool, ManifestFetch);
-
 /// The cloud verdicts for one fingerprint, for the details dialog: one per
 /// cloud that syncs (its module and progress sync on, a login kept). Slow when
 /// the login is stale (the manifest fetch has the network timeout); the
@@ -372,20 +365,17 @@ pub(crate) fn book_cloud(store: State<Store>, fingerprint: String) -> CmdResult<
 /// The cloud verdicts for one fingerprint (see `book_cloud`).
 fn book_cloud_for(store: &Store, fingerprint: &str) -> CmdResult<Vec<CloudStatus>> {
     let labels: HashMap<&str, &str> = store.read(modules::list).into_iter().map(|m| (m.id, m.label)).collect();
-    let clouds: [CloudTransport; 2] = [
-        ("capability:dropbox", crate::dropbox::is_connected, crate::dropbox::manifest_checked),
-        ("capability:googledrive", crate::google::is_connected, crate::google::manifest_checked),
-    ];
     let mut out = Vec::new();
-    for (module, connected, manifest) in clouds {
+    for cloud in crate::cloud::stores() {
+        let module = cloud.module();
         let off = store.read(|s| modules::is_off(s, module) || modules::is_off(s, "capability:progress-sync"));
-        if off || !connected() {
+        if off || !cloud.connected() {
             continue;
         }
         out.push(CloudStatus {
             id: module,
             label: labels.get(module).copied().unwrap_or(module).into(),
-            state: cloud_state(manifest(), fingerprint),
+            state: cloud_state(crate::cloud::manifest(cloud), fingerprint),
         });
     }
     Ok(out)

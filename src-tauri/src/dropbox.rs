@@ -1,24 +1,23 @@
-//! Reading-progress sync through Dropbox: OAuth (PKCE over a loopback
-//! address), one fingerprint-keyed positions file, newest-wins merge.
+//! Dropbox as a cloud store: OAuth (PKCE over a loopback address) and the
+//! files of the app's own Dropbox folder (see cloud.rs for what they hold).
 //!
-//! The file lives in the app's own Dropbox folder (`/sync-state.json`), so
-//! the app never sees the rest of the Dropbox. Secrets stay out of the
+//! The app never sees the rest of the Dropbox. Secrets stay out of the
 //! config: the refresh token is kept like catalog passwords (the OS
 //! credential store, the Android Keystore).
 
-use crate::cloud::{parse_manifest, render_manifest, BookRecord, ErrorSlot, RemoteRecord, SyncFile, access_from, merge_for_upload, should_upload, token_json, tokens};
+use crate::cloud::{self, access_with_life, http_error, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
 use crate::platform::{Active, Platform};
-use crate::{kosync, net, oauth};
+use crate::{net, oauth};
 use oauth::PendingLogin;
-use std::collections::HashMap;
 
-/// The last Dropbox sync failure, for the settings.
-static LAST_ERROR: ErrorSlot = ErrorSlot::new();
-
-/// The last sync failure, if any.
-pub fn last_error() -> Option<String> {
-    LAST_ERROR.last()
+/// Dropbox, for the sync code.
+pub struct Dropbox {
+    errors: ErrorSlot,
+    tokens: TokenCache,
 }
+
+/// The one Dropbox store.
+pub static STORE: Dropbox = Dropbox { errors: ErrorSlot::new(), tokens: TokenCache::new() };
 
 /// The Dropbox app key: the "BookReader Sync" scoped app in the App Console
 /// with app-folder access (files.content.read + files.content.write).
@@ -27,10 +26,8 @@ pub const APP_KEY: &str = "hq54wf951whc1jv";
 /// Where the refresh token is kept, like catalog passwords.
 pub(crate) const TOKEN_ID: &str = "dropbox";
 
-/// The positions file in the app's Dropbox folder; the envelope leaves room
-/// for bookmarks and settings later.
-const FILE_PATH: &str = "/sync-state.json";
-const FILE_VERSION: u32 = 1;
+/// Dropbox's OAuth token endpoint.
+const TOKEN_URL: &str = "https://api.dropboxapi.com/oauth2/token";
 
 /// The OAuth callback: register exactly this URI in the App Console
 /// (Dropbox requires an exact match; "Allow public clients" must be on,
@@ -76,17 +73,7 @@ pub fn begin() -> Result<PendingLogin, String> {
 pub fn finish(login: PendingLogin) -> Result<(), String> {
     let code = oauth::wait_for_code(login.listener, &login.state, "Dropbox")?;
     let (_access, refresh) = exchange(app_key()?, &code, &login.verifier, Active::password(TOKEN_ID))?;
-    Active::save_password(TOKEN_ID, &refresh)
-}
-
-/// Whether Dropbox is connected (a refresh token is kept).
-pub fn is_connected() -> bool {
-    Active::has_password(TOKEN_ID)
-}
-
-/// Forgets the refresh token; connecting again starts over.
-pub fn disconnect() {
-    Active::forget_password(TOKEN_ID);
+    cloud::keep_login(&STORE, &refresh)
 }
 
 /// Trades an auth code (or a refresh token) for tokens.
@@ -98,218 +85,80 @@ fn exchange(app_key: &str, code: &str, verifier: &str, stored: Option<String>) -
         .append_pair("code_verifier", verifier)
         .append_pair("redirect_uri", REDIRECT_URI)
         .finish();
-    let reply = net::post(
-        "https://api.dropboxapi.com/oauth2/token",
-        &[("Content-Type", "application/x-www-form-urlencoded")],
-        body.as_bytes(),
-    )?;
-    if reply.status != 200 {
-        return Err(format!("Dropbox login failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
+    tokens(&token_post(TOKEN_URL, &body, "Dropbox")?, stored, "Dropbox")
+}
+
+impl CloudStore for Dropbox {
+    fn id(&self) -> &'static str {
+        "dropbox"
     }
-    tokens(&reply.body, stored, "Dropbox")
-}
 
-/// Trades the kept refresh token for an access token.
-fn access_token() -> Result<String, String> {
-    let refresh = Active::password(TOKEN_ID).ok_or_else(|| "Dropbox is not connected.".to_string())?;
-    let app_key = app_key()?;
-    let body = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("grant_type", "refresh_token")
-        .append_pair("refresh_token", &refresh)
-        .append_pair("client_id", app_key)
-        .finish();
-    let reply = net::post(
-        "https://api.dropboxapi.com/oauth2/token",
-        &[("Content-Type", "application/x-www-form-urlencoded")],
-        body.as_bytes(),
-    )?;
-    if reply.status != 200 {
-        return Err(format!("Dropbox login failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
+    fn module(&self) -> &'static str {
+        "capability:dropbox"
     }
-    // A refresh answer carries no refresh token (only the code exchange does).
-    access_from(&token_json(&reply.body)?, "Dropbox")
-}
 
-/// The book manifest in the app's Dropbox folder; the envelope leaves room
-/// for more book-keeping later.
-const BOOKS_MANIFEST: &str = "/sync-books.json";
-
-/// Downloads an opaque cloud file (`None` when there is none yet).
-fn download_bytes(access: &str, path: &str) -> Result<Option<Vec<u8>>, String> {
-    let arg = serde_json::json!({ "path": path }).to_string();
-    let reply = net::post(
-        "https://content.dropboxapi.com/2/files/download",
-        &[("Authorization", &format!("Bearer {access}")), ("Dropbox-API-Arg", &arg)],
-        &[],
-    )?;
-    if reply.status == 200 {
-        return Ok(Some(reply.body));
+    fn token_id(&self) -> &'static str {
+        TOKEN_ID
     }
-    if reply.status == 409 && String::from_utf8_lossy(&reply.body).contains("not_found") {
-        return Ok(None);
+
+    fn label(&self) -> &'static str {
+        "Dropbox"
     }
-    Err(format!("Dropbox download failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)))
-}
 
-/// Downloads the positions file; `None` when there is none yet.
-fn download(access: &str) -> Result<Option<HashMap<String, RemoteRecord>>, String> {
-    let Some(body) = download_bytes(access, FILE_PATH)? else { return Ok(None) };
-    let file: SyncFile = serde_json::from_slice(&body).map_err(|e| format!("Dropbox file is not ours: {e}"))?;
-    Ok(Some(file.positions))
-}
-
-/// Uploads an opaque cloud file, replacing what is there.
-fn upload_bytes(access: &str, path: &str, body: &[u8]) -> Result<(), String> {
-    let arg = serde_json::json!({ "path": path, "mode": "overwrite", "autorename": false, "mute": true }).to_string();
-    let reply = net::post(
-        "https://content.dropboxapi.com/2/files/upload",
-        &[("Authorization", &format!("Bearer {access}")), ("Content-Type", "application/octet-stream"), ("Dropbox-API-Arg", &arg)],
-        body,
-    )?;
-    if reply.status == 200 {
-        Ok(())
-    } else {
-        Err(format!("Dropbox upload failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)))
+    fn refresh(&self, refresh_token: &str) -> Result<(String, u64), String> {
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("grant_type", "refresh_token")
+            .append_pair("refresh_token", refresh_token)
+            .append_pair("client_id", app_key()?)
+            .finish();
+        // A refresh answer carries no refresh token (only the code exchange does).
+        access_with_life(&token_post(TOKEN_URL, &body, "Dropbox")?, "Dropbox")
     }
-}
 
-/// Uploads the merged positions file.
-fn upload(access: &str, positions: &HashMap<String, RemoteRecord>) -> Result<(), String> {
-    let file = SyncFile { version: FILE_VERSION, positions: positions.clone() };
-    let body = serde_json::to_vec(&file).map_err(|e| e.to_string())?;
-    upload_bytes(access, FILE_PATH, &body)
-}
-
-/// The cloud's book manifest, distinguishing "not there yet" from failure.
-pub fn manifest_checked() -> Result<Option<HashMap<String, BookRecord>>, String> {
-    manifest_map()
-}
-
-/// The cloud's book manifest, if the app ever synced books.
-pub fn book_manifest() -> Option<HashMap<String, BookRecord>> {
-    LAST_ERROR.track(manifest_map()).ok().flatten()
-}
-
-/// The cloud's book manifest: `None` when no book was ever uploaded, an
-/// error when it could not be read (never mistaken for an empty one).
-fn manifest_map() -> Result<Option<HashMap<String, BookRecord>>, String> {
-    let access = access_token()?;
-    let Some(body) = download_bytes(&access, BOOKS_MANIFEST)? else { return Ok(None) };
-    parse_manifest(&body).map(Some)
-}
-
-/// Stores the cloud book manifest.
-fn store_manifest(books: &HashMap<String, BookRecord>) -> Result<(), String> {
-    let access = access_token()?;
-    upload_bytes(&access, BOOKS_MANIFEST, &render_manifest(books)?)
-}
-
-/// Uploads a book file under its fingerprint name.
-fn upload_book_file(remote_name: &str, bytes: &[u8]) -> Result<(), String> {
-    let access = access_token()?;
-    upload_bytes(&access, &format!("/{remote_name}"), bytes)
-}
-
-/// Downloads a book file by its cloud name (`None` when the cloud never saw it).
-pub fn download_book(remote_name: &str) -> Result<Option<Vec<u8>>, String> {
-    LAST_ERROR.track(download_book_inner(remote_name))
-}
-
-/// A book file's bytes by its cloud name; `None` when the cloud doesn't have it.
-fn download_book_inner(remote_name: &str) -> Result<Option<Vec<u8>>, String> {
-    let access = access_token()?;
-    download_bytes(&access, &format!("/{remote_name}"))
-}
-
-/// Uploads a book file the cloud lacks, and records it in the manifest.
-pub fn push_book(fingerprint: &str, record: &BookRecord, bytes: &[u8]) -> Result<bool, String> {
-    LAST_ERROR.track(crate::cloud::push_book_missing(
-        fingerprint,
-        record,
-        bytes,
-        manifest_map,
-        upload_book_file,
-        store_manifest,
-    ))
-}
-
-/// The open book's remote position, if any: a dead transport reports
-/// nothing instead of failing the pull.
-pub fn pull(fingerprint: &str) -> Option<kosync::Progress> {
-    LAST_ERROR.track(pull_inner(fingerprint)).ok().flatten()
-}
-
-/// The cloud's whole positions file, if the app ever synced.
-pub fn remote_positions() -> Option<HashMap<String, RemoteRecord>> {
-    LAST_ERROR.track(remote_map()).ok().flatten()
-}
-
-/// The positions file, or `None` before the first sync; an error when it cannot be read.
-fn remote_map() -> Result<Option<HashMap<String, RemoteRecord>>, String> {
-    let access = access_token()?;
-    download(&access)
-}
-
-/// One book's position from the positions file, in KOSync's shape (time in
-/// seconds), so it merges with the other transports' answers.
-fn pull_inner(fingerprint: &str) -> Result<Option<kosync::Progress>, String> {
-    let remote = remote_map()?;
-    // `time` is ms here like locally; KOSync counts seconds.
-    Ok(remote.as_ref().and_then(|positions| positions.get(fingerprint)).map(|r| kosync::Progress {
-        progress: r.cfi.clone(),
-        percentage: r.fraction,
-        device: r.device.clone(),
-        device_id: r.device_id.clone(),
-        timestamp: r.time / 1000,
-    }))
-}
-
-/// Merges the local positions (with the open book's fresh one) over the
-/// cloud file and uploads it when anything changed.
-pub fn push(
-    local: &HashMap<String, crate::store::Position>,
-    fingerprint: &str,
-    cfi: &str,
-    fraction: f64,
-    device: &str,
-    device_id: &str,
-) -> Result<(), String> {
-    LAST_ERROR.track(push_inner(local, fingerprint, cfi, fraction, device, device_id))
-}
-
-/// Adds this book's new position to the local ones, merges them with the
-/// cloud file, and uploads it when anything changed.
-fn push_inner(
-    local: &HashMap<String, crate::store::Position>,
-    fingerprint: &str,
-    cfi: &str,
-    fraction: f64,
-    device: &str,
-    device_id: &str,
-) -> Result<(), String> {
-    let access = access_token()?;
-    let remote = download(&access)?.unwrap_or_default();
-    let mut local = local.clone();
-    local.insert(
-        fingerprint.into(),
-        crate::store::Position { cfi: cfi.into(), fraction, time: crate::clock::now_ms() },
-    );
-    let merged = merge_for_upload(&local, &remote, device, device_id);
-    if !should_upload(&merged, &remote) {
-        return Ok(());
+    fn get(&self, access: &str, name: &str) -> Result<Option<Vec<u8>>, String> {
+        let arg = serde_json::json!({ "path": format!("/{name}") }).to_string();
+        let reply = net::post(
+            "https://content.dropboxapi.com/2/files/download",
+            &[("Authorization", &format!("Bearer {access}")), ("Dropbox-API-Arg", &arg)],
+            &[],
+        )?;
+        if reply.status == 200 {
+            return Ok(Some(reply.body));
+        }
+        if reply.status == 409 && String::from_utf8_lossy(&reply.body).contains("not_found") {
+            return Ok(None);
+        }
+        Err(http_error("Dropbox download", &reply))
     }
-    upload(&access, &merged)
+
+    fn put(&self, access: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
+        let arg = serde_json::json!({ "path": format!("/{name}"), "mode": "overwrite", "autorename": false, "mute": true }).to_string();
+        let reply = net::post(
+            "https://content.dropboxapi.com/2/files/upload",
+            &[("Authorization", &format!("Bearer {access}")), ("Content-Type", "application/octet-stream"), ("Dropbox-API-Arg", &arg)],
+            bytes,
+        )?;
+        if reply.status == 200 {
+            Ok(())
+        } else {
+            Err(http_error("Dropbox upload", &reply))
+        }
+    }
+
+    fn errors(&self) -> &ErrorSlot {
+        &self.errors
+    }
+
+    fn tokens(&self) -> &TokenCache {
+        &self.tokens
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cloud::pick_refresh;
+    use crate::cloud::{access_from, pick_refresh, token_json};
     use crate::oauth::challenge;
-
-    fn record(cfi: &str, time: u64) -> RemoteRecord {
-        RemoteRecord { cfi: cfi.into(), fraction: 0.5, time, device: "phone".into(), device_id: "phone".into() }
-    }
 
     #[test]
     fn pkce_challenge_matches_the_rfc_vector() {
@@ -328,15 +177,6 @@ mod tests {
         assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A51943%2Fdropbox"));
         assert!(url.contains("state=state"));
         assert!(url.contains("token_access_type=offline"));
-    }
-
-    #[test]
-    fn failures_are_remembered_until_a_success() {
-        assert_eq!(last_error(), None);
-        let _ = LAST_ERROR.track::<()>(Err("gone".into()));
-        assert_eq!(last_error().as_deref(), Some("gone"));
-        let _ = LAST_ERROR.track::<()>(Ok(()));
-        assert_eq!(last_error(), None);
     }
 
     #[test]
@@ -362,20 +202,4 @@ mod tests {
         assert!(auth_url(APP_KEY, "challenge", "state").contains(&format!("client_id={APP_KEY}")));
     }
 
-    #[test]
-    fn file_round_trips_with_unknown_fields_tolerated() {
-        let mut positions = HashMap::new();
-        positions.insert("fp".into(), record("a", 100));
-        let file = SyncFile { version: FILE_VERSION, positions };
-        let json = serde_json::to_string(&file).unwrap();
-        let back: SyncFile = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.positions["fp"], record("a", 100));
-        let future: SyncFile = serde_json::from_value(serde_json::json!({
-            "version": 2,
-            "positions": { "fp": { "cfi": "a", "fraction": 0.5, "time": 100, "device": "phone", "deviceId": "phone" } },
-            "future": true,
-        }))
-        .unwrap();
-        assert_eq!(future.positions["fp"].cfi, "a");
-    }
 }

@@ -1,24 +1,24 @@
-//! Reading-progress sync through Google Drive: OAuth (PKCE over a loopback
-//! address), one fingerprint-keyed positions file, newest-wins merge.
+//! Google Drive as a cloud store: OAuth (PKCE; loopback on the desktop, the
+//! app's scheme on the phone) and the files of the app's hidden Drive folder
+//! (`appDataFolder`; see cloud.rs for what they hold).
 //!
-//! The file lives in the app's hidden Drive folder (`appDataFolder`), so the
-//! app never sees the rest of the Drive (the narrow `drive.appdata` scope).
-//! Secrets stay out of the config: the refresh token is kept like catalog
-//! passwords (the OS credential store, the Android Keystore).
+//! The narrow `drive.appdata` scope keeps the rest of the Drive out of
+//! reach. Secrets stay out of the config: the refresh token is kept like
+//! catalog passwords (the OS credential store, the Android Keystore).
 
-use crate::cloud::{parse_manifest, render_manifest, BookRecord, ErrorSlot, RemoteRecord, SyncFile, access_from, merge_for_upload, should_upload, token_json, tokens};
+use crate::cloud::{self, access_with_life, http_error, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
 use crate::platform::{Active, Platform};
-use crate::{kosync, net, oauth};
+use crate::{net, oauth};
 use oauth::PendingLogin;
-use std::collections::HashMap;
 
-/// The last Google Drive sync failure, for the settings.
-static LAST_ERROR: ErrorSlot = ErrorSlot::new();
-
-/// The last sync failure, if any.
-pub fn last_error() -> Option<String> {
-    LAST_ERROR.last()
+/// Google Drive, for the sync code.
+pub struct Google {
+    errors: ErrorSlot,
+    tokens: TokenCache,
 }
+
+/// The one Google Drive store.
+pub static STORE: Google = Google { errors: ErrorSlot::new(), tokens: TokenCache::new() };
 
 /// The Google Cloud OAuth client ID. Desktop: a Desktop client with the
 /// `drive.appdata` scope. Phone: an Android client for the app's package and
@@ -50,10 +50,8 @@ pub const CLIENT_SECRET: &str = "";
 /// Where the refresh token is kept, like catalog passwords.
 pub(crate) const TOKEN_ID: &str = "google";
 
-/// The positions file in the app folder; the envelope leaves room for
-/// bookmarks and settings later (the same shape as the Dropbox one).
-const FILE_NAME: &str = "sync-state.json";
-const FILE_VERSION: u32 = 1;
+/// Google's OAuth token endpoint.
+const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 
 /// The narrow Drive scope: the app's own hidden folder, nothing else.
 const SCOPE: &str = "https://www.googleapis.com/auth/drive.appdata";
@@ -110,7 +108,7 @@ pub fn begin() -> Result<PendingLogin, String> {
 pub fn finish(login: PendingLogin) -> Result<(), String> {
     let code = oauth::wait_for_code(login.listener, &login.state, "Google")?;
     let (_access, refresh) = exchange(&code, &login.verifier, Active::password(TOKEN_ID))?;
-    Active::save_password(TOKEN_ID, &refresh)
+    cloud::keep_login(&STORE, &refresh)
 }
 
 /// Where the phone keeps a login waiting for the browser (its state and
@@ -160,17 +158,12 @@ pub fn finish_answer(answer: &str) -> Result<(), String> {
     let (state, verifier) = read_pending_login(&kept, crate::clock::now_ms())?;
     let code = oauth::code_in_answer(answer, &state, "Google")?;
     let (_access, refresh) = exchange(&code, &verifier, Active::password(TOKEN_ID))?;
-    Active::save_password(TOKEN_ID, &refresh)
+    cloud::keep_login(&STORE, &refresh)
 }
 
-/// Whether Google Drive is connected (a refresh token is kept).
-pub fn is_connected() -> bool {
-    Active::has_password(TOKEN_ID)
-}
-
-/// Forgets the refresh token; connecting again starts over.
+/// Forgets the login, and a phone login still waiting for the browser.
 pub fn disconnect() {
-    Active::forget_password(TOKEN_ID);
+    cloud::disconnect(&STORE);
     Active::forget_password(LOGIN_ID);
 }
 
@@ -187,44 +180,8 @@ fn exchange(code: &str, verifier: &str, stored: Option<String>) -> Result<(Strin
     if !client_secret.is_empty() {
         form.append_pair("client_secret", client_secret);
     }
-    let body = form.finish();
-    let reply = net::post(
-        "https://oauth2.googleapis.com/token",
-        &[("Content-Type", "application/x-www-form-urlencoded")],
-        body.as_bytes(),
-    )?;
-    if reply.status != 200 {
-        return Err(format!("Google login failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
-    }
-    tokens(&reply.body, stored, "Google")
+    tokens(&token_post(TOKEN_URL, &form.finish(), "Google")?, stored, "Google")
 }
-
-/// Trades the kept refresh token for an access token.
-fn access_token() -> Result<String, String> {
-    let refresh = Active::password(TOKEN_ID).ok_or_else(|| "Google Drive is not connected.".to_string())?;
-    let (client_id, client_secret) = credentials()?;
-    let mut form = url::form_urlencoded::Serializer::new(String::new());
-    form.append_pair("refresh_token", &refresh)
-        .append_pair("client_id", client_id)
-        .append_pair("grant_type", "refresh_token");
-    if !client_secret.is_empty() {
-        form.append_pair("client_secret", client_secret);
-    }
-    let body = form.finish();
-    let reply = net::post(
-        "https://oauth2.googleapis.com/token",
-        &[("Content-Type", "application/x-www-form-urlencoded")],
-        body.as_bytes(),
-    )?;
-    if reply.status != 200 {
-        return Err(format!("Google login failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
-    }
-    // A refresh answer carries no refresh token (only the code exchange does).
-    access_from(&token_json(&reply.body)?, "Google")
-}
-
-/// The book manifest's name in the app folder.
-const MANIFEST_NAME: &str = "sync-books.json";
 
 /// A file's id in the app folder by its name, if there is one. Drive allows
 /// two files with one name (two devices creating it at once); every device
@@ -239,7 +196,7 @@ fn find_file(access: &str, name: &str) -> Result<Option<String>, String> {
         .finish();
     let reply = net::bearer_get(&format!("https://www.googleapis.com/drive/v3/files?{query}"), access)?;
     if reply.status != 200 {
-        return Err(format!("Google Drive list failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
+        return Err(http_error("Google Drive list", &reply));
     }
     let list: serde_json::Value = serde_json::from_slice(&reply.body).map_err(|e| format!("Google Drive list is not ours: {e}"))?;
     Ok(list["files"].as_array().and_then(|files| files.first()).and_then(|file| file["id"].as_str()).map(str::to_string))
@@ -256,16 +213,9 @@ fn name_query(name: &str) -> String {
 fn download_bytes(access: &str, file_id: &str) -> Result<Vec<u8>, String> {
     let reply = net::bearer_get(&format!("https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"), access)?;
     if reply.status != 200 {
-        return Err(format!("Google Drive download failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)));
+        return Err(http_error("Google Drive download", &reply));
     }
     Ok(reply.body)
-}
-
-/// Downloads the positions file.
-fn download(access: &str, file_id: &str) -> Result<HashMap<String, RemoteRecord>, String> {
-    let body = download_bytes(access, file_id)?;
-    let file: SyncFile = serde_json::from_slice(&body).map_err(|e| format!("Google Drive file is not ours: {e}"))?;
-    Ok(file.positions)
 }
 
 /// The multipart body for creating or replacing a file: its metadata (the
@@ -307,19 +257,8 @@ fn store_bytes(
     if reply.status == 200 {
         Ok(())
     } else {
-        Err(format!("Google Drive upload failed ({}): {}", reply.status, String::from_utf8_lossy(&reply.body)))
+        Err(http_error("Google Drive upload", &reply))
     }
-}
-
-/// Uploads the merged positions file: created in the app folder the first
-/// time, replaced afterwards.
-fn upload(access: &str, file_id: Option<&str>, positions: &HashMap<String, RemoteRecord>) -> Result<(), String> {
-    let metadata = match file_id {
-        Some(_) => serde_json::json!({}),
-        None => serde_json::json!({ "name": FILE_NAME, "parents": ["appDataFolder"] }),
-    };
-    let data = serde_json::to_vec(&SyncFile { version: FILE_VERSION, positions: positions.clone() }).map_err(|e| e.to_string())?;
-    store_bytes(access, file_id, metadata, data, "application/json")
 }
 
 /// Uploads an opaque cloud file: created in the app folder the first time,
@@ -329,145 +268,64 @@ fn upload_bytes(access: &str, file_id: Option<&str>, name: &str, data: &[u8]) ->
         Some(_) => serde_json::json!({}),
         None => serde_json::json!({ "name": name, "parents": ["appDataFolder"] }),
     };
-    store_bytes(access, file_id, metadata, data.to_vec(), "application/octet-stream")
+    // The positions file and the manifest are JSON; book files are opaque.
+    let content_type = if name.ends_with(".json") { "application/json" } else { "application/octet-stream" };
+    store_bytes(access, file_id, metadata, data.to_vec(), content_type)
 }
 
-/// The cloud's book manifest, distinguishing "not there yet" from failure.
-pub fn manifest_checked() -> Result<Option<HashMap<String, BookRecord>>, String> {
-    manifest_map()
-}
-
-/// The cloud's book manifest, if the app ever synced books.
-pub fn book_manifest() -> Option<HashMap<String, BookRecord>> {
-    LAST_ERROR.track(manifest_map()).ok().flatten()
-}
-
-/// The cloud's book manifest: `None` when no book was ever uploaded, an
-/// error when it could not be read (never mistaken for an empty one).
-fn manifest_map() -> Result<Option<HashMap<String, BookRecord>>, String> {
-    let access = access_token()?;
-    let Some(id) = find_file(&access, MANIFEST_NAME)? else { return Ok(None) };
-    let body = download_bytes(&access, &id)?;
-    parse_manifest(&body).map(Some)
-}
-
-/// Stores the cloud book manifest.
-fn store_manifest(books: &HashMap<String, BookRecord>) -> Result<(), String> {
-    let access = access_token()?;
-    let file_id = find_file(&access, MANIFEST_NAME)?;
-    upload_bytes(&access, file_id.as_deref(), MANIFEST_NAME, &render_manifest(books)?)
-}
-
-/// Uploads a book file under its fingerprint name.
-fn upload_book_file(remote_name: &str, bytes: &[u8]) -> Result<(), String> {
-    let access = access_token()?;
-    let file_id = find_file(&access, remote_name)?;
-    upload_bytes(&access, file_id.as_deref(), remote_name, bytes)
-}
-
-/// Downloads a book file by its cloud name (`None` when the cloud never saw it).
-pub fn download_book(remote_name: &str) -> Result<Option<Vec<u8>>, String> {
-    LAST_ERROR.track(download_book_inner(remote_name))
-}
-
-/// A book file's bytes by its cloud name; `None` when the cloud doesn't have it.
-fn download_book_inner(remote_name: &str) -> Result<Option<Vec<u8>>, String> {
-    let access = access_token()?;
-    let Some(id) = find_file(&access, remote_name)? else { return Ok(None) };
-    download_bytes(&access, &id).map(Some)
-}
-
-/// Uploads a book file the cloud lacks, and records it in the manifest.
-pub fn push_book(fingerprint: &str, record: &BookRecord, bytes: &[u8]) -> Result<bool, String> {
-    LAST_ERROR.track(crate::cloud::push_book_missing(
-        fingerprint,
-        record,
-        bytes,
-        manifest_map,
-        upload_book_file,
-        store_manifest,
-    ))
-}
-
-/// The open book's remote position, if any: a dead transport reports
-/// nothing instead of failing the pull.
-pub fn pull(fingerprint: &str) -> Option<kosync::Progress> {
-    LAST_ERROR.track(pull_inner(fingerprint)).ok().flatten()
-}
-
-/// The cloud's whole positions file, if the app ever synced.
-pub fn remote_positions() -> Option<HashMap<String, RemoteRecord>> {
-    LAST_ERROR.track(remote_map()).ok().flatten()
-}
-
-/// The positions file, or `None` before the first sync; an error when it cannot be read.
-fn remote_map() -> Result<Option<HashMap<String, RemoteRecord>>, String> {
-    let access = access_token()?;
-    match find_file(&access, FILE_NAME)? {
-        Some(id) => Ok(Some(download(&access, &id)?)),
-        None => Ok(None),
+impl CloudStore for Google {
+    fn id(&self) -> &'static str {
+        "google"
     }
-}
 
-/// One book's position from the positions file, in KOSync's shape (time in
-/// seconds), so it merges with the other transports' answers.
-fn pull_inner(fingerprint: &str) -> Result<Option<kosync::Progress>, String> {
-    let remote = remote_map()?;
-    // `time` is ms here like locally; KOSync counts seconds.
-    Ok(remote.as_ref().and_then(|positions| positions.get(fingerprint)).map(|r| kosync::Progress {
-        progress: r.cfi.clone(),
-        percentage: r.fraction,
-        device: r.device.clone(),
-        device_id: r.device_id.clone(),
-        timestamp: r.time / 1000,
-    }))
-}
-
-/// Merges the local positions (with the open book's fresh one) over the
-/// cloud file and uploads it when anything changed.
-pub fn push(
-    local: &HashMap<String, crate::store::Position>,
-    fingerprint: &str,
-    cfi: &str,
-    fraction: f64,
-    device: &str,
-    device_id: &str,
-) -> Result<(), String> {
-    LAST_ERROR.track(push_inner(local, fingerprint, cfi, fraction, device, device_id))
-}
-
-/// Adds this book's new position to the local ones, merges them with the
-/// cloud file, and uploads it when anything changed.
-fn push_inner(
-    local: &HashMap<String, crate::store::Position>,
-    fingerprint: &str,
-    cfi: &str,
-    fraction: f64,
-    device: &str,
-    device_id: &str,
-) -> Result<(), String> {
-    let access = access_token()?;
-    let file_id = find_file(&access, FILE_NAME)?;
-    let remote = match &file_id {
-        Some(id) => download(&access, id)?,
-        None => HashMap::new(),
-    };
-    let mut local = local.clone();
-    local.insert(
-        fingerprint.into(),
-        crate::store::Position { cfi: cfi.into(), fraction, time: crate::clock::now_ms() },
-    );
-    let merged = merge_for_upload(&local, &remote, device, device_id);
-    if !should_upload(&merged, &remote) {
-        return Ok(());
+    fn module(&self) -> &'static str {
+        "capability:googledrive"
     }
-    upload(&access, file_id.as_deref(), &merged)
+
+    fn token_id(&self) -> &'static str {
+        TOKEN_ID
+    }
+
+    fn label(&self) -> &'static str {
+        "Google Drive"
+    }
+
+    fn refresh(&self, refresh_token: &str) -> Result<(String, u64), String> {
+        let (client_id, client_secret) = credentials()?;
+        let mut form = url::form_urlencoded::Serializer::new(String::new());
+        form.append_pair("refresh_token", refresh_token)
+            .append_pair("client_id", client_id)
+            .append_pair("grant_type", "refresh_token");
+        if !client_secret.is_empty() {
+            form.append_pair("client_secret", client_secret);
+        }
+        // A refresh answer carries no refresh token (only the code exchange does).
+        access_with_life(&token_post(TOKEN_URL, &form.finish(), "Google")?, "Google")
+    }
+
+    fn get(&self, access: &str, name: &str) -> Result<Option<Vec<u8>>, String> {
+        let Some(id) = find_file(access, name)? else { return Ok(None) };
+        download_bytes(access, &id).map(Some)
+    }
+
+    fn put(&self, access: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
+        let file_id = find_file(access, name)?;
+        upload_bytes(access, file_id.as_deref(), name, bytes)
+    }
+
+    fn errors(&self) -> &ErrorSlot {
+        &self.errors
+    }
+
+    fn tokens(&self) -> &TokenCache {
+        &self.tokens
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cloud::pick_refresh;
+    use crate::cloud::{access_from, pick_refresh, token_json};
 
     #[test]
     fn a_kept_phone_login_survives_until_it_is_too_old() {
@@ -482,10 +340,6 @@ mod tests {
         assert_eq!(name_query("sync-books.json"), "name = 'sync-books.json' and trashed = false");
         assert_eq!(name_query("book-fp-O'Brien.epub"), r"name = 'book-fp-O\'Brien.epub' and trashed = false");
         assert_eq!(name_query(r"a\b"), r"name = 'a\\b' and trashed = false");
-    }
-
-    fn record(cfi: &str, time: u64) -> RemoteRecord {
-        RemoteRecord { cfi: cfi.into(), fraction: 0.5, time, device: "phone".into(), device_id: "phone".into() }
     }
 
     #[test]
@@ -528,23 +382,6 @@ mod tests {
         assert_eq!(pick_refresh(Some("new".into()), Some("old".into()), "Google"), Ok("new".into()));
         assert_eq!(pick_refresh(None, Some("old".into()), "Google"), Ok("old".into()));
         assert!(pick_refresh(None, None, "Google").is_err());
-    }
-
-    #[test]
-    fn file_round_trips_with_unknown_fields_tolerated() {
-        let mut positions = HashMap::new();
-        positions.insert("fp".into(), record("a", 100));
-        let file = SyncFile { version: FILE_VERSION, positions };
-        let json = serde_json::to_string(&file).unwrap();
-        let back: SyncFile = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.positions["fp"], record("a", 100));
-        let future: SyncFile = serde_json::from_value(serde_json::json!({
-            "version": 2,
-            "positions": { "fp": { "cfi": "a", "fraction": 0.5, "time": 100, "device": "phone", "deviceId": "phone" } },
-            "future": true,
-        }))
-        .unwrap();
-        assert_eq!(future.positions["fp"].cfi, "a");
     }
 
     #[test]

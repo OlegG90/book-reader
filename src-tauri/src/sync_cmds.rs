@@ -2,7 +2,7 @@
 
 use crate::catalog;
 use crate::clock::now_ms;
-use crate::cloud::RemoteRecord;
+use crate::cloud::{self, CloudStore, RemoteRecord};
 use crate::fingerprint;
 use crate::formats;
 use crate::kosync;
@@ -110,103 +110,57 @@ impl Transport for Kosync {
     }
 }
 
-/// Progress sync through the reader's Dropbox (see dropbox.rs).
-struct Dropbox;
+/// Progress and book files through a cloud store (Dropbox, Google Drive):
+/// the same for every cloud, see cloud.rs.
+struct CloudTransport<'a>(&'a dyn CloudStore);
 
-impl Transport for Dropbox {
+impl Transport for CloudTransport<'_> {
     fn id(&self) -> &'static str {
-        "dropbox"
+        self.0.id()
     }
 
     fn enabled(&self, state: &store::State) -> bool {
-        !modules::is_off(state, "capability:progress-sync") && !modules::is_off(state, "capability:dropbox")
+        !modules::is_off(state, "capability:progress-sync") && !modules::is_off(state, self.0.module())
     }
 
     fn pull(&self, _store: &Store, book: &BookKey) -> Result<Option<kosync::Progress>, String> {
-        Ok(crate::dropbox::pull(book.fingerprint))
+        Ok(cloud::pull(self.0, book.fingerprint))
     }
 
     fn push(&self, store: &Store, book: &BookKey, cfi: &str, fraction: f64) -> Result<(), String> {
         let local = store.read(|s| s.positions.clone());
         let device_id = device_id(store)?;
-        crate::dropbox::push(&local, book.fingerprint, cfi, fraction, DEVICE_NAME, &device_id)
+        cloud::push(self.0, &local, book.fingerprint, cfi, fraction, DEVICE_NAME, &device_id)
     }
 
     fn remote(&self, _store: &Store) -> Option<HashMap<String, RemoteRecord>> {
-        crate::dropbox::remote_positions()
+        cloud::remote_positions(self.0)
     }
 
     fn connected(&self) -> bool {
-        crate::dropbox::is_connected()
+        self.0.connected()
     }
 
     fn keeps_books(&self) -> bool {
         true
     }
 
-    fn books(&self) -> Option<HashMap<String, crate::cloud::BookRecord>> {
-        crate::dropbox::book_manifest()
+    fn books(&self) -> Option<HashMap<String, cloud::BookRecord>> {
+        cloud::book_manifest(self.0)
     }
 
     fn pull_book(&self, remote_name: &str) -> Result<Option<Vec<u8>>, String> {
-        crate::dropbox::download_book(remote_name)
+        cloud::download_book(self.0, remote_name)
     }
 
-    fn push_book(&self, fingerprint: &str, record: &crate::cloud::BookRecord, bytes: &[u8]) -> Result<bool, String> {
-        crate::dropbox::push_book(fingerprint, record, bytes)
-    }
-}
-
-/// Progress sync through the reader's Google Drive (see google.rs).
-struct Google;
-
-impl Transport for Google {
-    fn id(&self) -> &'static str {
-        "google"
-    }
-
-    fn enabled(&self, state: &store::State) -> bool {
-        !modules::is_off(state, "capability:progress-sync") && !modules::is_off(state, "capability:googledrive")
-    }
-
-    fn pull(&self, _store: &Store, book: &BookKey) -> Result<Option<kosync::Progress>, String> {
-        Ok(crate::google::pull(book.fingerprint))
-    }
-
-    fn push(&self, store: &Store, book: &BookKey, cfi: &str, fraction: f64) -> Result<(), String> {
-        let local = store.read(|s| s.positions.clone());
-        let device_id = device_id(store)?;
-        crate::google::push(&local, book.fingerprint, cfi, fraction, DEVICE_NAME, &device_id)
-    }
-
-    fn remote(&self, _store: &Store) -> Option<HashMap<String, RemoteRecord>> {
-        crate::google::remote_positions()
-    }
-
-    fn connected(&self) -> bool {
-        crate::google::is_connected()
-    }
-
-    fn keeps_books(&self) -> bool {
-        true
-    }
-
-    fn books(&self) -> Option<HashMap<String, crate::cloud::BookRecord>> {
-        crate::google::book_manifest()
-    }
-
-    fn pull_book(&self, remote_name: &str) -> Result<Option<Vec<u8>>, String> {
-        crate::google::download_book(remote_name)
-    }
-
-    fn push_book(&self, fingerprint: &str, record: &crate::cloud::BookRecord, bytes: &[u8]) -> Result<bool, String> {
-        crate::google::push_book(fingerprint, record, bytes)
+    fn push_book(&self, fingerprint: &str, record: &cloud::BookRecord, bytes: &[u8]) -> Result<bool, String> {
+        cloud::push_book(self.0, fingerprint, record, bytes)
     }
 }
 
 static KOSYNC: Kosync = Kosync;
-static DROPBOX: Dropbox = Dropbox;
-static GOOGLE: Google = Google;
+static DROPBOX: CloudTransport<'static> = CloudTransport(&crate::dropbox::STORE);
+static GOOGLE: CloudTransport<'static> = CloudTransport(&crate::google::STORE);
 
 /// Every transport, in merge order (first wins timestamp ties).
 fn transports() -> [&'static dyn Transport; 3] {
@@ -219,9 +173,9 @@ fn usable(store: &Store, t: &dyn Transport) -> bool {
     store.read(|s| t.enabled(s)) && t.connected()
 }
 
-/// The usable transports that keep book files.
-fn book_stores(store: &Store) -> Vec<&'static dyn Transport> {
-    transports().into_iter().filter(|t| t.keeps_books() && usable(store, *t)).collect()
+/// The usable transports among `transports` that keep book files.
+fn book_stores<'a>(store: &Store, transports: &[&'a dyn Transport]) -> Vec<&'a dyn Transport> {
+    transports.iter().copied().filter(|t| t.keeps_books() && usable(store, *t)).collect()
 }
 
 /// The newest remote position across the transports. A transport that fails
@@ -290,15 +244,15 @@ pub(crate) fn sync_pull_all(store: State<Store>, books: State<LibraryBooks>) -> 
     if DONE.swap(true, Ordering::SeqCst) {
         return Ok(0);
     }
-    pull_all_clouds(&store, &books)
+    pull_all_clouds(&store, &books, &transports())
 }
 
 /// Merges every usable cloud's positions file into the local positions, for
 /// the whole library; returns how many books changed.
-fn pull_all_clouds(store: &Store, books: &LibraryBooks) -> CmdResult<usize> {
+fn pull_all_clouds(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport]) -> CmdResult<usize> {
     let library: BTreeSet<String> =
         library_root(store).map(|root| books.snapshot(store, &root).into_iter().map(|b| b.fingerprint).collect()).unwrap_or_default();
-    let usable_now: Vec<_> = transports().into_iter().filter(|t| usable(store, *t)).collect();
+    let usable_now: Vec<_> = transports.iter().copied().filter(|t| usable(store, *t)).collect();
     merge_cloud_positions(store, &usable_now, &library)
 }
 
@@ -326,17 +280,17 @@ fn merge_cloud_positions(store: &Store, clouds: &[&dyn Transport], library: &BTr
 /// cloud gained the book.
 #[tauri::command(async)]
 pub(crate) fn sync_push_book(store: State<Store>, books: State<LibraryBooks>, fingerprint: String) -> CmdResult<bool> {
-    push_book_to_cloud(&store, &books, &fingerprint)
+    push_book_to_cloud(&store, &books, &transports(), &fingerprint)
 }
 
 /// Uploads a library book's file to every cloud that keeps books and lacks it;
 /// true when one gained it. A cloud's failure is reported only when no cloud
 /// gained the book.
-fn push_book_to_cloud(store: &Store, books: &LibraryBooks, fingerprint: &str) -> CmdResult<bool> {
+fn push_book_to_cloud(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport], fingerprint: &str) -> CmdResult<bool> {
     if !book_transfer_allowed(store) {
         return Ok(false);
     }
-    let clouds = book_stores(store);
+    let clouds = book_stores(store, transports);
     if clouds.is_empty() {
         return Ok(false);
     }
@@ -414,16 +368,16 @@ fn collect_missing(manifests: &[&HashMap<String, crate::cloud::BookRecord>], loc
 /// pull: transports that are off or disconnected report nothing.
 #[tauri::command(async)]
 pub(crate) fn sync_missing_books(store: State<Store>, books: State<LibraryBooks>) -> CmdResult<Vec<MissingBook>> {
-    missing_cloud_books(&store, &books)
+    missing_cloud_books(&store, &books, &transports())
 }
 
 /// The books the clouds hold and the library lacks, leaving out names this
 /// device wouldn't open.
-fn missing_cloud_books(store: &Store, books: &LibraryBooks) -> CmdResult<Vec<MissingBook>> {
+fn missing_cloud_books(store: &Store, books: &LibraryBooks, transports: &[&dyn Transport]) -> CmdResult<Vec<MissingBook>> {
     let root = library_root(store)?;
     let local: BTreeSet<String> = books.snapshot(store, &root).into_iter().map(|b| b.fingerprint).collect();
     let mut manifests = Vec::new();
-    for t in book_stores(store) {
+    for t in book_stores(store, transports) {
         if let Some(mut books) = t.books() {
             // Only books this device would open: a book file, its format on.
             books.retain(|_, record| book_format_allowed(store, &record.name).is_ok());
@@ -484,19 +438,19 @@ fn book_format_allowed(store: &Store, name: &str) -> CmdResult<()> {
 /// an upload.
 #[tauri::command(async)]
 pub(crate) fn sync_pull_book(store: State<Store>, fingerprint: String) -> CmdResult<bool> {
-    pull_book_from_cloud(&store, &fingerprint)
+    pull_book_from_cloud(&store, &transports(), &fingerprint)
 }
 
 /// Downloads one book from the first cloud with a good copy and lands it in the
 /// library; true when it landed.
-fn pull_book_from_cloud(store: &Store, fingerprint: &str) -> CmdResult<bool> {
+fn pull_book_from_cloud(store: &Store, transports: &[&dyn Transport], fingerprint: &str) -> CmdResult<bool> {
     if !book_transfer_allowed(store) {
         return Ok(false);
     }
     let root = library_root(store)?;
     let mut failed = None;
     // A cloud that fails, or sends a copy that fails its hash, hands over to the next.
-    for t in book_stores(store) {
+    for t in book_stores(store, transports) {
         let Some(manifest) = t.books() else { continue };
         let Some(record) = manifest.get(fingerprint) else { continue };
         if let Err(e) = book_format_allowed(store, &record.name) {
@@ -662,7 +616,9 @@ pub(crate) fn sync_push(
 
 #[cfg(test)]
 mod tests {
-    use super::{book_format_allowed, book_transfer_allowed, book_transfer_gate, collect_missing, compare_positions, land_book, merge_remote, missing_cloud_books, place_book, pull_all_clouds, pull_book_from_cloud, pull_merged, push_all, push_book_to_cloud, safe_relative, sync_source, BookKey, Dropbox, Google, Kosync, Transport};
+    use super::{book_format_allowed, book_transfer_allowed, book_transfer_gate, collect_missing, compare_positions, land_book, merge_remote, missing_cloud_books, place_book, pull_all_clouds, pull_book_from_cloud, pull_merged, push_all, push_book_to_cloud, safe_relative, sync_source, transports, BookKey, CloudTransport, Kosync, Transport, DROPBOX, GOOGLE};
+    use crate::cloud::CloudStore;
+    use crate::library_cmds::library_root;
     use crate::library_cmds::LibraryBooks;
     use crate::cloud::push_book_missing;
     use crate::kosync::Progress;
@@ -768,11 +724,11 @@ mod tests {
     #[test]
     fn dropbox_needs_its_module_and_the_intent() {
         let (_dir, store) = synced_store(&[]);
-        assert!(store.read(|s| Dropbox.enabled(s)));
+        assert!(store.read(|s| DROPBOX.enabled(s)));
         let (_dir, store) = synced_store(&["capability:dropbox"]);
-        assert!(!store.read(|s| Dropbox.enabled(s)));
+        assert!(!store.read(|s| DROPBOX.enabled(s)));
         let (_dir, store) = synced_store(&["capability:progress-sync"]);
-        assert!(!store.read(|s| Dropbox.enabled(s)), "the intent switch gates every transport");
+        assert!(!store.read(|s| DROPBOX.enabled(s)), "the intent switch gates every transport");
         // KOSync additionally needs catalogs (its own transport rule).
         let (_dir, store) = synced_store(&["capability:catalogs"]);
         assert!(!store.read(|s| Kosync.enabled(s)));
@@ -785,8 +741,8 @@ mod tests {
         // Turning catalogs off takes its sources with it (the write guard
         // refuses it while any exist); the intent stays on.
         store.update(|s| s.sources.clear()).unwrap();
-        assert!(store.read(|s| Dropbox.enabled(s)));
-        assert!(store.read(|s| Google.enabled(s)));
+        assert!(store.read(|s| DROPBOX.enabled(s)));
+        assert!(store.read(|s| GOOGLE.enabled(s)));
         assert!(!store.read(|s| Kosync.enabled(s)));
     }
 
@@ -1078,36 +1034,138 @@ mod tests {
         // No logins anywhere: nothing can be missing, and nothing touches
         // the network (the credential check fails first).
         let (_dir, store, books, _root) = library_with(&[("A.epub", "aaa")]);
-        assert!(missing_cloud_books(&store, &books).unwrap().is_empty());
+        assert!(missing_cloud_books(&store, &books, &transports()).unwrap().is_empty());
     }
 
     #[test]
     fn push_book_stays_quiet_without_a_cloud() {
         let (_dir, store, books, root) = library_with(&[("A.epub", "aaa")]);
         let fp = books.snapshot(&store, &root).into_iter().next().unwrap().fingerprint;
-        assert_eq!(push_book_to_cloud(&store, &books, &fp).unwrap(), false);
+        assert_eq!(push_book_to_cloud(&store, &books, &transports(), &fp).unwrap(), false);
     }
 
     #[test]
     fn pull_all_stays_quiet_without_a_cloud() {
         let (_dir, store, books, _root) = library_with(&[]);
-        assert_eq!(pull_all_clouds(&store, &books).unwrap(), 0);
+        assert_eq!(pull_all_clouds(&store, &books, &transports()).unwrap(), 0);
+    }
+
+    /// A cloud in memory: always connected, its files in a map, or down.
+    struct MemCloud {
+        files: std::sync::Mutex<HashMap<String, Vec<u8>>>,
+        down: bool,
+        errors: crate::cloud::ErrorSlot,
+        tokens: crate::cloud::TokenCache,
+    }
+
+    impl MemCloud {
+        fn new(down: bool) -> Self {
+            MemCloud { files: Default::default(), down, errors: crate::cloud::ErrorSlot::new(), tokens: crate::cloud::TokenCache::new() }
+        }
+
+        fn names(&self) -> Vec<String> {
+            let mut names: Vec<_> = self.files.lock().unwrap().keys().cloned().collect();
+            names.sort();
+            names
+        }
+    }
+
+    impl CloudStore for MemCloud {
+        fn id(&self) -> &'static str {
+            "mem"
+        }
+        fn module(&self) -> &'static str {
+            "capability:mem"
+        }
+        fn token_id(&self) -> &'static str {
+            "mem"
+        }
+        fn label(&self) -> &'static str {
+            "Mem"
+        }
+        fn refresh(&self, _refresh_token: &str) -> Result<(String, u64), String> {
+            Ok(("token".into(), 3600))
+        }
+        fn connected(&self) -> bool {
+            true
+        }
+        fn access_token(&self) -> Result<String, String> {
+            if self.down { Err("Mem is down".into()) } else { Ok("token".into()) }
+        }
+        fn get(&self, _access: &str, name: &str) -> Result<Option<Vec<u8>>, String> {
+            Ok(self.files.lock().unwrap().get(name).cloned())
+        }
+        fn put(&self, _access: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
+            self.files.lock().unwrap().insert(name.into(), bytes.to_vec());
+            Ok(())
+        }
+        fn errors(&self) -> &crate::cloud::ErrorSlot {
+            &self.errors
+        }
+        fn tokens(&self) -> &crate::cloud::TokenCache {
+            &self.tokens
+        }
+    }
+
+    #[test]
+    fn a_book_travels_through_a_cloud_to_another_library() {
+        let cloud = MemCloud::new(false);
+        let via = CloudTransport(&cloud);
+        let (_dir, store, books, _root) = library_with(&[("A/Book.epub", "the book")]);
+        let fp = books.snapshot(&store, &library_root(&store).unwrap()).into_iter().next().unwrap().fingerprint;
+        assert!(push_book_to_cloud(&store, &books, &[&via], &fp).unwrap());
+        assert_eq!(cloud.names(), [format!("book-{fp}-A_Book.epub"), "sync-books.json".to_string()]);
+        assert!(!push_book_to_cloud(&store, &books, &[&via], &fp).unwrap(), "already there");
+        // Another device: offered, then downloaded under its name, same bytes.
+        let (_dir2, other, other_books, other_root) = library_with(&[]);
+        let missing = missing_cloud_books(&other, &other_books, &[&via]).unwrap();
+        assert_eq!((missing.len(), missing[0].name.as_str()), (1, "A/Book.epub"));
+        assert!(pull_book_from_cloud(&other, &[&via], &fp).unwrap());
+        assert_eq!(std::fs::read(other_root.join("A/Book.epub")).unwrap(), b"the book");
+    }
+
+    #[test]
+    fn a_cloud_that_is_down_never_keeps_a_book_from_the_others() {
+        let down = MemCloud::new(true);
+        let up = MemCloud::new(false);
+        let (_dir, store, books, _root) = library_with(&[("Book.epub", "bytes")]);
+        let fp = books.snapshot(&store, &library_root(&store).unwrap()).into_iter().next().unwrap().fingerprint;
+        assert!(push_book_to_cloud(&store, &books, &[&CloudTransport(&down), &CloudTransport(&up)], &fp).unwrap());
+        assert_eq!(up.names().len(), 2);
+        assert_eq!(down.errors.last().as_deref(), Some("Mem is down"), "the settings show why");
+        // Only the down cloud: its failure is the answer.
+        assert!(push_book_to_cloud(&store, &books, &[&CloudTransport(&down)], &fp).is_err());
+    }
+
+    #[test]
+    fn positions_round_trip_through_a_cloud() {
+        let cloud = MemCloud::new(false);
+        let local = HashMap::new();
+        crate::cloud::push(&cloud, &local, "fp", "epubcfi(/6/4)", 0.4, "Phone", "phone-id").unwrap();
+        let progress = crate::cloud::pull(&cloud, "fp").unwrap();
+        assert_eq!((progress.progress.as_str(), progress.device_id.as_str()), ("epubcfi(/6/4)", "phone-id"));
+        // The startup pull gives a library book never opened here the cloud's place.
+        let (_dir, store, books, _root) = library_with(&[("Book.epub", "bytes")]);
+        let fp = books.snapshot(&store, &library_root(&store).unwrap()).into_iter().next().unwrap().fingerprint;
+        crate::cloud::push(&cloud, &local, &fp, "epubcfi(/6/8)", 0.7, "Phone", "phone-id").unwrap();
+        assert_eq!(pull_all_clouds(&store, &books, &[&CloudTransport(&cloud)]).unwrap(), 1);
+        assert_eq!(store.read(|s| s.positions[&fp].cfi.clone()), "epubcfi(/6/8)");
     }
 
     #[test]
     fn pull_book_stays_quiet_without_a_cloud() {
         let (_dir, store, _books, _root) = library_with(&[]);
-        assert_eq!(pull_book_from_cloud(&store, "fp").unwrap(), false);
+        assert_eq!(pull_book_from_cloud(&store, &transports(), "fp").unwrap(), false);
     }
 
     #[test]
     fn google_needs_its_module_and_the_intent() {
         let (_dir, store) = synced_store(&[]);
-        assert!(store.read(|s| Google.enabled(s)));
+        assert!(store.read(|s| GOOGLE.enabled(s)));
         let (_dir, store) = synced_store(&["capability:googledrive"]);
-        assert!(!store.read(|s| Google.enabled(s)));
+        assert!(!store.read(|s| GOOGLE.enabled(s)));
         let (_dir, store) = synced_store(&["capability:progress-sync"]);
-        assert!(!store.read(|s| Google.enabled(s)), "the intent switch gates every transport");
+        assert!(!store.read(|s| GOOGLE.enabled(s)), "the intent switch gates every transport");
     }
 
     #[test]
