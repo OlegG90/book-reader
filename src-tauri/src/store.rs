@@ -117,6 +117,19 @@ pub struct Position {
     /// server's; 0 for positions saved before sync existed.
     #[serde(default)]
     pub time: u64,
+    /// The device that saved it, when it came from another one through a
+    /// cloud; `None` when this device saved it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<Writer>,
+}
+
+/// Another device that saved a position, so this one passes it on under
+/// that device's name instead of claiming it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Writer {
+    pub device: String,
+    pub device_id: String,
 }
 
 /// Window placement in logical pixels.
@@ -179,7 +192,7 @@ mod tests {
     use super::*;
 
     fn position(cfi: &str) -> Position {
-        Position { cfi: cfi.into(), fraction: 0.5, time: 0 }
+        Position { cfi: cfi.into(), fraction: 0.5, time: 0, by: None }
     }
 
     #[test]

@@ -316,6 +316,39 @@ impl CloudStore for Google {
         upload_bytes(access, file_id.as_deref(), name, bytes)
     }
 
+    fn list(&self, access: &str, prefix: &str) -> Result<Vec<String>, SyncError> {
+        let mut names = Vec::new();
+        let mut page_token: Option<String> = None;
+        loop {
+            let mut query = url::form_urlencoded::Serializer::new(String::new());
+            query
+                .append_pair("spaces", "appDataFolder")
+                // The whole app folder, filtered here: how Drive's "contains"
+                // splits a name with dashes into words isn't documented.
+                .append_pair("q", "trashed = false")
+                .append_pair("fields", "nextPageToken,files(name)")
+                .append_pair("pageSize", "1000");
+            if let Some(token) = &page_token {
+                query.append_pair("pageToken", token);
+            }
+            let reply = net::bearer_get(&format!("https://www.googleapis.com/drive/v3/files?{}", query.finish()), access).map_err(SyncError::offline)?;
+            if reply.status != 200 {
+                return Err(SyncError::from_reply("Google Drive list", &reply));
+            }
+            let page: serde_json::Value =
+                serde_json::from_slice(&reply.body).map_err(|e| SyncError::data(format!("Google Drive list is not ours: {e}")))?;
+            for file in page["files"].as_array().into_iter().flatten() {
+                if let Some(name) = file["name"].as_str().filter(|n| n.starts_with(prefix)) {
+                    names.push(name.to_string());
+                }
+            }
+            match page["nextPageToken"].as_str() {
+                Some(token) => page_token = Some(token.to_string()),
+                None => return Ok(names),
+            }
+        }
+    }
+
     fn errors(&self) -> &ErrorSlot {
         &self.errors
     }

@@ -75,10 +75,10 @@ trait Transport {
         let _ = remote_name;
         Ok(None)
     }
-    /// Uploads a book file the cloud lacks, and records it in the cloud
-    /// manifest; true when the cloud gained the book.
-    fn push_book(&self, fingerprint: &str, record: &crate::cloud::BookRecord, bytes: &[u8]) -> Result<bool, SyncError> {
-        let _ = (fingerprint, record, bytes);
+    /// Uploads a book file the cloud lacks, and records it in this device's
+    /// manifest there; true when the cloud gained the book.
+    fn push_book(&self, store: &Store, fingerprint: &str, record: &crate::cloud::BookRecord, bytes: &[u8]) -> Result<bool, SyncError> {
+        let _ = (store, fingerprint, record, bytes);
         Ok(false)
     }
 }
@@ -158,8 +158,8 @@ impl Transport for CloudTransport<'_> {
         cloud::download_book(self.0, remote_name)
     }
 
-    fn push_book(&self, fingerprint: &str, record: &cloud::BookRecord, bytes: &[u8]) -> Result<bool, SyncError> {
-        cloud::push_book(self.0, fingerprint, record, bytes)
+    fn push_book(&self, store: &Store, fingerprint: &str, record: &cloud::BookRecord, bytes: &[u8]) -> Result<bool, SyncError> {
+        cloud::push_book(self.0, &device_id(store)?, fingerprint, record, bytes)
     }
 }
 
@@ -230,7 +230,8 @@ fn merge_remote(
             None => library.contains(fingerprint) && record.time > 0,
         };
         if newer && record.device_id != own_device {
-            local.insert(fingerprint.clone(), Position { cfi: record.cfi.clone(), fraction: record.fraction, time: record.time });
+            let by = Some(crate::store::Writer { device: record.device.clone(), device_id: record.device_id.clone() });
+            local.insert(fingerprint.clone(), Position { cfi: record.cfi.clone(), fraction: record.fraction, time: record.time, by });
             changed += 1;
         }
     }
@@ -292,7 +293,7 @@ fn push_book_to_cloud(store: &Store, books: &LibraryBooks, transports: &[&dyn Tr
     let mut failed = None;
     // One cloud down never keeps the book from the others.
     for t in clouds {
-        match t.push_book(fingerprint, &record, &bytes) {
+        match t.push_book(store, fingerprint, &record, &bytes) {
             Ok(gained) => pushed |= gained,
             Err(e) => failed = Some(e.message),
         }
@@ -685,7 +686,7 @@ mod tests {
 
 
     fn here(cfi: &str, time: u64) -> Position {
-        Position { cfi: cfi.into(), fraction: 0.5, time }
+        Position { cfi: cfi.into(), fraction: 0.5, time, by: None }
     }
 
     fn server(cfi: &str, device_id: &str, timestamp: u64) -> Progress {
@@ -892,11 +893,13 @@ mod tests {
         assert_eq!(std::fs::read(root.join("A/D.epub")).unwrap(), b"ours");
     }
 
+    /// What a `push_book_missing` run did: the books it stored as its own manifest.
+    type Stored = std::cell::RefCell<Vec<HashMap<String, crate::cloud::BookRecord>>>;
+
     #[test]
     fn push_book_missing_uploads_and_records() {
-        use std::cell::RefCell;
-        let uploaded: RefCell<Vec<Vec<u8>>> = RefCell::new(Vec::new());
-        let stored: RefCell<Vec<HashMap<String, crate::cloud::BookRecord>>> = RefCell::new(Vec::new());
+        let uploaded: std::cell::RefCell<Vec<Vec<u8>>> = Default::default();
+        let stored: Stored = Default::default();
         let record = book_record("A.epub", 10);
         let ok = push_book_missing(
             "fp",
@@ -905,100 +908,125 @@ mod tests {
             || Ok(None),
             |_, bytes| {
                 uploaded.borrow_mut().push(bytes.to_vec());
-                Ok::<(), SyncError>(())
+                Ok(())
             },
+            || Ok(None),
             |books| {
                 stored.borrow_mut().push(books.clone());
-                Ok::<(), SyncError>(())
+                Ok(())
             },
         )
         .unwrap();
         assert!(ok);
         assert_eq!(uploaded.borrow().as_slice(), [b"bytes".to_vec()]);
-        assert_eq!(stored.borrow().len(), 1);
         assert_eq!(stored.borrow()[0]["fp"], record);
     }
 
     #[test]
-    fn push_book_missing_merges_with_a_fresh_manifest() {
-        use std::cell::{Cell, RefCell};
-        let mut other = HashMap::new();
-        other.insert("old".into(), book_record("O.epub", 1));
-        let calls = Cell::new(0);
-        let stored: RefCell<Vec<HashMap<String, crate::cloud::BookRecord>>> = RefCell::new(Vec::new());
-        let ok = push_book_missing(
+    fn push_book_missing_keeps_this_devices_earlier_books() {
+        let mut mine = HashMap::new();
+        mine.insert("old".into(), book_record("O.epub", 1));
+        let stored: Stored = Default::default();
+        push_book_missing(
             "new",
             &book_record("N.epub", 2),
             b"bytes",
-            || {
-                calls.set(calls.get() + 1);
-                if calls.get() == 1 {
-                    Ok(Some(HashMap::new()))
-                } else {
-                    Ok(Some(other.clone()))
-                }
-            },
-            |_, _| Ok::<(), SyncError>(()),
+            || Ok(Some(mine.clone())),
+            |_, _| Ok(()),
+            || Ok(Some(mine.clone())),
             |books| {
                 stored.borrow_mut().push(books.clone());
-                Ok::<(), SyncError>(())
+                Ok(())
             },
         )
         .unwrap();
-        assert!(ok);
         let stored = stored.borrow();
-        assert_eq!(stored.len(), 1);
-        assert!(stored[0].contains_key("new") && stored[0].contains_key("old"), "both uploads survive");
+        assert!(stored[0].contains_key("new") && stored[0].contains_key("old"));
     }
 
     #[test]
-    fn push_book_missing_skips_recorded_books() {
-        use std::cell::RefCell;
-        let mut manifest = HashMap::new();
-        manifest.insert("fp".into(), book_record("A.epub", 10));
-        let uploaded: RefCell<Vec<Vec<u8>>> = RefCell::new(Vec::new());
+    fn push_book_missing_skips_books_any_device_recorded() {
+        let mut theirs = HashMap::new();
+        theirs.insert("fp".into(), book_record("A.epub", 10));
+        let uploaded = std::cell::Cell::new(false);
         let ok = push_book_missing(
             "fp",
             &book_record("A.epub", 10),
             b"bytes",
-            || Ok(Some(manifest.clone())),
-            |_, bytes| {
-                uploaded.borrow_mut().push(bytes.to_vec());
-                Ok::<(), SyncError>(())
+            || Ok(Some(theirs.clone())),
+            |_, _| {
+                uploaded.set(true);
+                Ok(())
             },
-            |_| Ok::<(), SyncError>(()),
+            || Ok(None),
+            |_| Ok(()),
         )
         .unwrap();
-        assert!(!ok);
-        assert!(uploaded.borrow().is_empty());
+        assert!(!ok && !uploaded.get());
     }
 
     #[test]
-    fn push_book_missing_never_overwrites_an_unreadable_manifest() {
-        use std::cell::{Cell, RefCell};
-        let calls = Cell::new(0);
-        let stored: RefCell<Vec<HashMap<String, crate::cloud::BookRecord>>> = RefCell::new(Vec::new());
-        // The first read finds nothing, the re-read before writing fails.
+    fn push_book_missing_never_overwrites_its_own_unreadable_manifest() {
+        let uploaded = std::cell::Cell::new(false);
+        let stored: Stored = Default::default();
         let result = push_book_missing(
             "fp",
             &book_record("A.epub", 10),
             b"bytes",
-            || {
-                calls.set(calls.get() + 1);
-                if calls.get() == 1 {
-                    Ok(None)
-                } else {
-                    Err("offline".into())
-                }
+            || Ok(None),
+            |_, _| {
+                uploaded.set(true);
+                Ok(())
             },
-            |_, _| Ok::<(), SyncError>(()),
+            || Err("offline".into()),
             |books| {
                 stored.borrow_mut().push(books.clone());
-                Ok::<(), SyncError>(())
+                Ok(())
             },
         );
         assert!(result.is_err());
-        assert!(stored.borrow().is_empty(), "the manifest is left alone");
+        assert!(!uploaded.get() && stored.borrow().is_empty(), "nothing moves, nothing is overwritten");
+    }
+
+    /// A positions file as a device writes it: (fingerprint, cfi, time, writer).
+    fn positions_file(records: &[(&str, &str, u64, &str)]) -> Vec<u8> {
+        let positions: serde_json::Map<String, serde_json::Value> = records
+            .iter()
+            .map(|(fp, cfi, time, by)| {
+                (fp.to_string(), serde_json::json!({ "cfi": cfi, "fraction": 0.5, "time": time, "device": by, "deviceId": by }))
+            })
+            .collect();
+        serde_json::json!({ "version": 1, "positions": positions }).to_string().into_bytes()
+    }
+
+    #[test]
+    fn two_devices_keep_their_own_files_and_see_each_others() {
+        let cloud = MemCloud::new(false);
+        crate::cloud::push(&cloud, &HashMap::new(), "fp", "epubcfi(/6/2)", 0.2, "PC", "pc").unwrap();
+        assert_eq!(cloud.names(), ["positions-pc.json"], "only its own file");
+        // The phone read on later.
+        cloud.files.lock().unwrap().insert("positions-phone.json".into(), positions_file(&[("fp", "epubcfi(/6/9)", u64::MAX, "phone")]));
+        assert_eq!(crate::cloud::pull(&cloud, "fp").unwrap().progress, "epubcfi(/6/9)");
+    }
+
+    #[test]
+    fn the_device_that_read_there_names_a_shared_place() {
+        let cloud = MemCloud::new(false);
+        // The PC took the phone's place at startup and passes it on under the phone's name.
+        cloud.files.lock().unwrap().insert("positions-a-pc.json".into(), positions_file(&[("fp", "x", 100, "phone")]));
+        cloud.files.lock().unwrap().insert("positions-phone.json".into(), positions_file(&[("fp", "x", 100, "phone")]));
+        assert_eq!(crate::cloud::pull(&cloud, "fp").unwrap().device_id, "phone");
+    }
+
+    #[test]
+    fn a_broken_or_old_file_never_hides_the_rest() {
+        let cloud = MemCloud::new(false);
+        cloud.files.lock().unwrap().insert("positions-broken.json".into(), b"not json".to_vec());
+        cloud.files.lock().unwrap().insert("positions-phone.json".into(), positions_file(&[("fp", "new", 200, "phone")]));
+        // The shared file of an earlier version: read, but it loses a tie.
+        cloud.files.lock().unwrap().insert("sync-state.json".into(), positions_file(&[("fp", "old", 200, "tab"), ("only-old", "o", 5, "tab")]));
+        assert_eq!(crate::cloud::pull(&cloud, "fp").unwrap().progress, "new");
+        assert_eq!(crate::cloud::pull(&cloud, "only-old").unwrap().progress, "o");
     }
 
     /// A library with real files on disk and a matching scan.
@@ -1107,6 +1135,9 @@ mod tests {
             self.files.lock().unwrap().insert(name.into(), bytes.to_vec());
             Ok(())
         }
+        fn list(&self, _access: &str, prefix: &str) -> Result<Vec<String>, SyncError> {
+            Ok(self.names().into_iter().filter(|n| n.starts_with(prefix)).collect())
+        }
         fn errors(&self) -> &crate::cloud::ErrorSlot {
             &self.errors
         }
@@ -1122,7 +1153,9 @@ mod tests {
         let (_dir, store, books, _root) = library_with(&[("A/Book.epub", "the book")]);
         let fp = books.snapshot(&store, &library_root(&store).unwrap()).into_iter().next().unwrap().fingerprint;
         assert!(push_book_to_cloud(&store, &books, &[&via], &fp).unwrap());
-        assert_eq!(cloud.names(), [format!("book-{fp}-A_Book.epub"), "sync-books.json".to_string()]);
+        let names = cloud.names();
+        assert_eq!(names[0], format!("book-{fp}-A_Book.epub"));
+        assert!(names[1].starts_with("books-") && names.len() == 2, "{names:?}");
         assert!(!push_book_to_cloud(&store, &books, &[&via], &fp).unwrap(), "already there");
         // Another device: offered, then downloaded under its name, same bytes.
         let (_dir2, other, other_books, other_root) = library_with(&[]);

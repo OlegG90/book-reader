@@ -148,6 +148,40 @@ impl CloudStore for Dropbox {
         }
     }
 
+    fn list(&self, access: &str, prefix: &str) -> Result<Vec<String>, SyncError> {
+        let mut names = Vec::new();
+        let mut url = "https://api.dropboxapi.com/2/files/list_folder";
+        let mut body = serde_json::json!({ "path": "" });
+        loop {
+            let reply = net::post(
+                url,
+                &[("Authorization", &format!("Bearer {access}")), ("Content-Type", "application/json")],
+                body.to_string().as_bytes(),
+            )
+            .map_err(SyncError::offline)?;
+            // An app folder nothing was ever written to doesn't exist yet.
+            if reply.status == 409 && String::from_utf8_lossy(&reply.body).contains("not_found") {
+                return Ok(names);
+            }
+            if reply.status != 200 {
+                return Err(SyncError::from_reply("Dropbox list", &reply));
+            }
+            let page: serde_json::Value =
+                serde_json::from_slice(&reply.body).map_err(|e| SyncError::data(format!("Dropbox list is not ours: {e}")))?;
+            for entry in page["entries"].as_array().into_iter().flatten() {
+                if let Some(name) = entry["name"].as_str().filter(|n| entry[".tag"] == "file" && n.starts_with(prefix)) {
+                    names.push(name.to_string());
+                }
+            }
+            if page["has_more"] != true {
+                return Ok(names);
+            }
+            // The rest of a long folder (book files share it) comes page by page.
+            url = "https://api.dropboxapi.com/2/files/list_folder/continue";
+            body = serde_json::json!({ "cursor": page["cursor"] });
+        }
+    }
+
     fn errors(&self) -> &ErrorSlot {
         &self.errors
     }

@@ -32,6 +32,9 @@ pub trait CloudStore: Sync {
     fn get(&self, access: &str, name: &str) -> Result<Option<Vec<u8>>, SyncError>;
     /// Writes a file by name, creating it or replacing what is there.
     fn put(&self, access: &str, name: &str, bytes: &[u8]) -> Result<(), SyncError>;
+    /// The names of the files whose name starts with `prefix` ("" lists
+    /// every file); an app folder not made yet lists nothing.
+    fn list(&self, access: &str, prefix: &str) -> Result<Vec<String>, SyncError>;
     /// The cloud's last failure, for the settings.
     fn errors(&self) -> &ErrorSlot;
     /// The access token while it lives, so one sync round asks for it once.
@@ -82,14 +85,38 @@ impl TokenCache {
     }
 }
 
-/// The positions file in every cloud's app folder.
-const POSITIONS_FILE: &str = "sync-state.json";
+/// Each device writes only its own files in a cloud's app folder, so two
+/// devices never overwrite each other: `positions-<device id>.json` and
+/// `books-<device id>.json`. Readers merge every device's file.
+const POSITIONS_PREFIX: &str = "positions-";
+const BOOKS_PREFIX: &str = "books-";
+/// The shared files earlier versions wrote; still read, so nothing they
+/// hold is lost, and never written again.
+const LEGACY_POSITIONS: &str = "sync-state.json";
+const LEGACY_BOOKS: &str = "sync-books.json";
 /// The positions file's envelope version.
 const POSITIONS_VERSION: u32 = 1;
-/// The book manifest in every cloud's app folder.
-const MANIFEST_FILE: &str = "sync-books.json";
 /// The book manifest's envelope version.
 const BOOKS_VERSION: u32 = 1;
+
+/// A device's own file of a kind.
+fn device_file(prefix: &str, device_id: &str) -> String {
+    format!("{prefix}{device_id}.json")
+}
+
+/// Every file of a kind in the cloud, from one listing: each device's (in
+/// name order), then the legacy one when it is there.
+fn files_of(store: &dyn CloudStore, access: &str, prefix: &str, legacy: &str) -> Result<Vec<String>, SyncError> {
+    let listed = store.list(access, "")?;
+    let mut names: Vec<String> = listed.iter().filter(|n| n.starts_with(prefix) && n.ends_with(".json")).cloned().collect();
+    names.sort();
+    names.dedup();
+    if listed.iter().any(|n| n == legacy) {
+        names.push(legacy.into());
+    }
+    Ok(names)
+}
+
 
 /// Every cloud, in merge order.
 pub fn stores() -> [&'static dyn CloudStore; 2] {
@@ -126,17 +153,35 @@ fn settle<T>(store: &dyn CloudStore, result: Result<T, SyncError>) -> Result<T, 
     store.errors().track(result)
 }
 
-/// The positions file: `None` before the first sync, an error when it cannot be read.
-fn positions_file(store: &dyn CloudStore, access: &str) -> Result<Option<HashMap<String, RemoteRecord>>, SyncError> {
-    let Some(body) = store.get(access, POSITIONS_FILE)? else { return Ok(None) };
-    let file: SyncFile = serde_json::from_slice(&body).map_err(|e| SyncError::data(format!("{} file is not ours: {e}", store.label())))?;
-    Ok(Some(file.positions))
+/// One positions file's records.
+fn parse_positions(store: &dyn CloudStore, body: &[u8]) -> Result<HashMap<String, RemoteRecord>, SyncError> {
+    let file: SyncFile = serde_json::from_slice(body).map_err(|e| SyncError::data(format!("{} file is not ours: {e}", store.label())))?;
+    Ok(file.positions)
 }
 
-/// The cloud's whole positions file, if the app ever synced; a dead cloud
-/// reports nothing (its failure goes to the settings).
+/// Every device's positions, merged newest per book: `None` when no device
+/// ever wrote one. A device's file also holds positions it took from others,
+/// still under their writer, so a tie is the same record. Another device's
+/// broken file is passed over, so it never stops the rest.
+fn all_positions(store: &dyn CloudStore, access: &str) -> Result<Option<HashMap<String, RemoteRecord>>, SyncError> {
+    let mut merged: Option<HashMap<String, RemoteRecord>> = None;
+    for name in files_of(store, access, POSITIONS_PREFIX, LEGACY_POSITIONS)? {
+        let Some(body) = store.get(access, &name)? else { continue };
+        let Ok(records) = parse_positions(store, &body) else { continue };
+        let all = merged.get_or_insert_with(HashMap::new);
+        for (fingerprint, record) in records {
+            if all.get(&fingerprint).is_none_or(|have| record.time > have.time) {
+                all.insert(fingerprint, record);
+            }
+        }
+    }
+    Ok(merged)
+}
+
+/// The cloud's positions from every device, if any device ever synced; a
+/// dead cloud reports nothing (its failure goes to the settings).
 pub fn remote_positions(store: &dyn CloudStore) -> Option<HashMap<String, RemoteRecord>> {
-    settle(store, store.access_token().and_then(|access| positions_file(store, &access))).ok().flatten()
+    settle(store, store.access_token().and_then(|access| all_positions(store, &access))).ok().flatten()
 }
 
 /// The open book's position in the cloud, in KOSync's shape (time in
@@ -152,8 +197,9 @@ pub fn pull(store: &dyn CloudStore, fingerprint: &str) -> Option<kosync::Progres
     })
 }
 
-/// Adds the open book's new position to the local ones, merges them over
-/// the cloud file (newest per book wins) and uploads it when anything changed.
+/// Writes this device's positions file: every local position, with the open
+/// book's new one, stamped with this device. Only this device writes it, so
+/// nothing needs reading first.
 pub fn push(
     store: &dyn CloudStore,
     local: &HashMap<String, Position>,
@@ -165,34 +211,43 @@ pub fn push(
 ) -> Result<(), SyncError> {
     let pushed = (|| {
         let access = store.access_token()?;
-        let remote = positions_file(store, &access)?.unwrap_or_default();
         let mut local = local.clone();
-        local.insert(fingerprint.into(), Position { cfi: cfi.into(), fraction, time: crate::clock::now_ms() });
-        let merged = merge_for_upload(&local, &remote, device, device_id);
-        // Nothing new: leave the cloud file alone.
-        if merged == remote {
-            return Ok(());
-        }
-        let body = serde_json::to_vec(&SyncFile { version: POSITIONS_VERSION, positions: merged }).map_err(|e| SyncError::data(e.to_string()))?;
-        store.put(&access, POSITIONS_FILE, &body)
+        local.insert(fingerprint.into(), Position { cfi: cfi.into(), fraction, time: crate::clock::now_ms(), by: None });
+        let mine = own_records(&local, device, device_id);
+        let body = serde_json::to_vec(&SyncFile { version: POSITIONS_VERSION, positions: mine }).map_err(|e| SyncError::data(e.to_string()))?;
+        store.put(&access, &device_file(POSITIONS_PREFIX, device_id), &body)
     })();
     settle(store, pushed)
 }
 
-/// The cloud's book manifest: `None` when no book was ever uploaded, an
-/// error when it could not be read (never mistaken for an empty one).
+/// One manifest file's books.
+fn manifest_books(body: &[u8]) -> Result<HashMap<String, BookRecord>, SyncError> {
+    parse_manifest(body).map_err(SyncError::data)
+}
+
+/// The books every device recorded: `None` when no device ever uploaded
+/// one. Another device's broken manifest is passed over.
+fn all_books(store: &dyn CloudStore, access: &str) -> Result<Option<HashMap<String, BookRecord>>, SyncError> {
+    let mut union: Option<HashMap<String, BookRecord>> = None;
+    for name in files_of(store, access, BOOKS_PREFIX, LEGACY_BOOKS)? {
+        let Some(body) = store.get(access, &name)? else { continue };
+        let Ok(books) = manifest_books(&body) else { continue };
+        let all = union.get_or_insert_with(HashMap::new);
+        for (fingerprint, record) in books {
+            all.entry(fingerprint).or_insert(record);
+        }
+    }
+    Ok(union)
+}
+
+/// The cloud's books from every device: `None` when no book was ever
+/// uploaded, an error when the cloud could not be read (never mistaken for
+/// an empty one).
 pub fn manifest(store: &dyn CloudStore) -> Result<Option<HashMap<String, BookRecord>>, SyncError> {
-    manifest_file(store, &store.access_token()?)
+    all_books(store, &store.access_token()?)
 }
 
-/// The manifest read with a token in hand (see `manifest`).
-fn manifest_file(store: &dyn CloudStore, access: &str) -> Result<Option<HashMap<String, BookRecord>>, SyncError> {
-    let Some(body) = store.get(access, MANIFEST_FILE)? else { return Ok(None) };
-    parse_manifest(&body).map(Some).map_err(SyncError::data)
-}
-
-/// The cloud's book manifest, if the app ever synced books; a failure goes
-/// to the settings.
+/// The cloud's books, if the app ever synced books; a failure goes to the settings.
 pub fn book_manifest(store: &dyn CloudStore) -> Option<HashMap<String, BookRecord>> {
     settle(store, manifest(store)).ok().flatten()
 }
@@ -202,17 +257,21 @@ pub fn download_book(store: &dyn CloudStore, remote_name: &str) -> Result<Option
     settle(store, store.access_token().and_then(|access| store.get(&access, remote_name)))
 }
 
-/// Uploads a book file the cloud lacks and records it in the manifest; true
-/// when the cloud gained the book.
-pub fn push_book(store: &dyn CloudStore, fingerprint: &str, record: &BookRecord, bytes: &[u8]) -> Result<bool, SyncError> {
+/// Uploads a book file the cloud lacks and records it in this device's
+/// manifest; true when the cloud gained the book.
+pub fn push_book(store: &dyn CloudStore, device_id: &str, fingerprint: &str, record: &BookRecord, bytes: &[u8]) -> Result<bool, SyncError> {
+    let own = device_file(BOOKS_PREFIX, device_id);
     let pushed = store.access_token().and_then(|access| {
         push_book_missing(
             fingerprint,
             record,
             bytes,
-            || manifest_file(store, &access),
+            || all_books(store, &access),
             |name, bytes| store.put(&access, name, bytes),
-            |books| store.put(&access, MANIFEST_FILE, &render_manifest(books).map_err(SyncError::data)?),
+            // A broken own manifest starts over: the books it named are
+            // uploaded again under the same names. A failed read stops.
+            || Ok(store.get(&access, &own)?.and_then(|body| manifest_books(&body).ok())),
+            |books| store.put(&access, &own, &render_manifest(books).map_err(SyncError::data)?),
         )
     });
     settle(store, pushed)
@@ -240,32 +299,20 @@ struct SyncFile {
     pub positions: HashMap<String, RemoteRecord>,
 }
 
-/// Merges remote records into the local positions for the upload: newest per
-/// book wins; ties and local-only books keep the local position, stamped
-/// with this install (the echo check needs a writer).
-fn merge_for_upload(
-    local: &HashMap<String, crate::store::Position>,
-    remote: &HashMap<String, RemoteRecord>,
-    device: &str,
-    device_id: &str,
-) -> HashMap<String, RemoteRecord> {
-    let mut merged = remote.clone();
-    for (fingerprint, pos) in local {
-        let newer_remote = remote.get(fingerprint).is_some_and(|r| r.time > pos.time);
-        if !newer_remote {
-            merged.insert(
-                fingerprint.clone(),
-                RemoteRecord {
-                    cfi: pos.cfi.clone(),
-                    fraction: pos.fraction,
-                    time: pos.time,
-                    device: device.into(),
-                    device_id: device_id.into(),
-                },
-            );
-        }
-    }
-    merged
+/// This device's records for its positions file: every local position,
+/// stamped with the device that saved it — this one, or the device it came
+/// from (the echo check and the jump offer need the real writer).
+fn own_records(local: &HashMap<String, Position>, device: &str, device_id: &str) -> HashMap<String, RemoteRecord> {
+    local
+        .iter()
+        .map(|(fingerprint, pos)| {
+            let (device, device_id) = match &pos.by {
+                Some(writer) => (writer.device.clone(), writer.device_id.clone()),
+                None => (device.to_string(), device_id.to_string()),
+            };
+            (fingerprint.clone(), RemoteRecord { cfi: pos.cfi.clone(), fraction: pos.fraction, time: pos.time, device, device_id })
+        })
+        .collect()
 }
 
 /// One book file the cloud keeps, keyed by fingerprint in `BookManifest`.
@@ -319,26 +366,28 @@ pub fn is_token_id(id: &str) -> bool {
     id == crate::google::LOGIN_ID || stores().iter().any(|store| store.token_id() == id)
 }
 
-/// Uploads a book file the cloud manifest lacks, then records it: the
-/// fingerprint means same bytes, so an entry already there means nothing to
-/// do. The manifest is re-read before writing, so two devices uploading at
-/// once keep both books. A manifest that fails to load stops the upload: an
-/// empty one would overwrite every book recorded so far.
+/// Uploads a book file no device recorded yet, then adds it to this
+/// device's own manifest: the fingerprint means same bytes, so an entry
+/// already there means nothing to do. Only this device writes its manifest,
+/// so two devices uploading at once never lose each other's books. Its own
+/// manifest failing to load stops the upload: an empty one would drop every
+/// book it recorded so far.
 pub fn push_book_missing(
     fingerprint: &str,
     record: &BookRecord,
     bytes: &[u8],
-    manifest: impl Fn() -> Result<Option<HashMap<String, BookRecord>>, SyncError>,
+    recorded: impl Fn() -> Result<Option<HashMap<String, BookRecord>>, SyncError>,
     upload: impl Fn(&str, &[u8]) -> Result<(), SyncError>,
-    store: impl Fn(&HashMap<String, BookRecord>) -> Result<(), SyncError>,
+    own: impl Fn() -> Result<Option<HashMap<String, BookRecord>>, SyncError>,
+    store_own: impl Fn(&HashMap<String, BookRecord>) -> Result<(), SyncError>,
 ) -> Result<bool, SyncError> {
-    if manifest()?.is_some_and(|books| books.contains_key(fingerprint)) {
+    if recorded()?.is_some_and(|books| books.contains_key(fingerprint)) {
         return Ok(false);
     }
+    let mut mine = own()?.unwrap_or_default();
     upload(&remote_book_name(fingerprint, &record.name), bytes)?;
-    let mut fresh = manifest()?.unwrap_or_default();
-    fresh.entry(fingerprint.into()).or_insert_with(|| record.clone());
-    store(&fresh)?;
+    mine.insert(fingerprint.into(), record.clone());
+    store_own(&mine)?;
     Ok(true)
 }
 
@@ -426,34 +475,19 @@ mod tests {
     }
 
     fn position(cfi: &str, time: u64) -> crate::store::Position {
-        crate::store::Position { cfi: cfi.into(), fraction: 0.5, time }
+        crate::store::Position { cfi: cfi.into(), fraction: 0.5, time, by: None }
     }
 
     #[test]
-    fn merge_newest_wins_and_ties_keep_local() {
+    fn a_device_passes_on_positions_under_their_writer() {
         let mut local = HashMap::new();
-        local.insert("new-remote".into(), position("a", 100));
-        local.insert("new-local".into(), position("a", 300));
-        local.insert("tie".into(), position("a", 200));
-        local.insert("local-only".into(), position("a", 50));
-        let mut remote = HashMap::new();
-        remote.insert("new-remote".into(), record("b", 200));
-        remote.insert("new-local".into(), record("b", 100));
-        remote.insert("tie".into(), record("b", 200));
-        remote.insert("remote-only".into(), record("c", 400));
-        let merged = merge_for_upload(&local, &remote, "pc", "pc");
-        // Remote newer: taken as is, writer kept for the echo check.
-        assert_eq!(merged["new-remote"].cfi, "b");
-        assert_eq!(merged["new-remote"].device_id, "phone");
-        // Local newer or tied: stamped with this install.
-        assert_eq!(merged["new-local"].cfi, "a");
-        assert_eq!(merged["new-local"].device_id, "pc");
-        assert_eq!(merged["tie"].cfi, "a");
-        assert_eq!(merged["local-only"].cfi, "a");
-        assert_eq!(merged["remote-only"].cfi, "c");
-        assert_eq!(merged.len(), 5, "union of both sides");
-        // Nothing local: the merged file is the cloud one, so no upload.
-        assert_eq!(merge_for_upload(&HashMap::new(), &remote, "pc", "pc"), remote);
+        local.insert("mine".into(), position("a", 100));
+        let mut taken = position("b", 200);
+        taken.by = Some(crate::store::Writer { device: "Phone".into(), device_id: "phone".into() });
+        local.insert("taken".into(), taken);
+        let records = own_records(&local, "PC", "pc");
+        assert_eq!(records["mine"].device_id, "pc");
+        assert_eq!((records["taken"].device.as_str(), records["taken"].device_id.as_str()), ("Phone", "phone"));
     }
 
     fn book_record(name: &str) -> BookRecord {
@@ -540,6 +574,9 @@ mod tests {
             Err(SyncError::new(self.kind, "nope"))
         }
         fn put(&self, _access: &str, _name: &str, _bytes: &[u8]) -> Result<(), SyncError> {
+            Err(SyncError::new(self.kind, "nope"))
+        }
+        fn list(&self, _access: &str, _prefix: &str) -> Result<Vec<String>, SyncError> {
             Err(SyncError::new(self.kind, "nope"))
         }
         fn errors(&self) -> &ErrorSlot {
