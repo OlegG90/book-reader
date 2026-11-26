@@ -170,16 +170,23 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
     $('bottombar').hidden = false
     deps.updateTopbarButtons()
     if (info.offer && deps.getSettings().offerLibrary) deps.showOffer(info.offer)
-    bookmarks = await invoke<Bookmark[]>('get_bookmarks', { fingerprint }).catch((e): Bookmark[] => {
+    const opened = book
+    const stored = await invoke<Bookmark[]>('get_bookmarks', { fingerprint }).catch((e): Bookmark[] => {
       console.error(e)
       return []
     })
-    // Bookmarks made before reader-core cut this book's long chapters move
-    // once. reader-core's Book type doesn't list FB2's upgradeCFI yet.
-    const parsed = book.view.book as { upgradeCFI?: (cfi: string) => string } | undefined
-    const upgraded = upgradeBookmarks(bookmarks, parsed?.upgradeCFI)
-    if (upgraded) setBookmarks(upgraded)
-    else renderBookmarks()
+    // Another book opened meanwhile: its own open() shows its bookmarks.
+    if (book !== opened) return
+    // Bookmarks made before reader-core cut this book's long chapters move,
+    // and are saved moved where the window saves. reader-core's Book type
+    // doesn't list FB2's upgradeCFI yet.
+    const parsed = opened.view.book as { upgradeCFI?: (cfi: string) => string } | undefined
+    const upgraded = upgradeBookmarks(stored, parsed?.upgradeCFI)
+    if (upgraded && !noSave) setBookmarks(upgraded)
+    else {
+      bookmarks = upgraded ?? stored
+      renderBookmarks()
+    }
     setReading(true, deps.getSettings().volumeKeys)
     void sync.pull()
   }

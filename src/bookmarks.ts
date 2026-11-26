@@ -29,9 +29,9 @@ export function toggleBookmark(list: Bookmark[], page: Page): Bookmark[] {
 
 /**
  * The bookmarks with their CFIs moved to the book's current sections, or null
- * when none moved. An FB2 book whose long chapters reader-core now cuts into
- * parts numbers its sections anew; `upgrade` is its `upgradeCFI`, and books
- * that have none keep their CFIs.
+ * when none moved. An FB2 book whose long chapters reader-core cuts into parts
+ * (from 0.4) numbers its sections anew; `upgrade` is its `upgradeCFI`, and
+ * books that have none keep their CFIs.
  */
 export function upgradeBookmarks(list: Bookmark[], upgrade?: (cfi: string) => string): Bookmark[] | null {
   if (!upgrade) return null
