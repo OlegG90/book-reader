@@ -4,15 +4,17 @@ use crate::catalog;
 use crate::clock::now_ms;
 use crate::cloud::RemoteRecord;
 use crate::fingerprint;
+use crate::formats;
 use crate::kosync;
 use crate::library_cmds::{library_root, LibraryBooks};
 use crate::modules;
+use crate::naming;
 use crate::platform::{Active, Platform};
 use crate::store::{self, Position, Store};
 use crate::windows::ReaderWindows;
 use crate::CmdResult;
 use serde::Serialize;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use tauri::{Manager, State, Window};
 
@@ -251,20 +253,24 @@ fn newest(current: Option<kosync::Progress>, next: Option<kosync::Progress>) -> 
 
 /// Refreshes local positions from one cloud file: the cloud wins per book
 /// when it is newer and from another device (this install's own echoes are
-/// skipped); books the cloud never saw keep their place. Returns how many
-/// books changed.
+/// skipped); books the cloud never saw keep their place. A library book never
+/// opened here (say, one just downloaded) takes the cloud's place too, so it
+/// opens there without a jump offer. Returns how many books changed.
 fn merge_remote(
     local: &mut HashMap<String, Position>,
     remote: &HashMap<String, RemoteRecord>,
     own_device: &str,
+    library: &BTreeSet<String>,
 ) -> usize {
     let mut changed = 0;
     for (fingerprint, record) in remote {
-        let Some(here) = local.get_mut(fingerprint) else { continue };
-        if record.device_id != own_device && record.time > here.time {
-            here.cfi = record.cfi.clone();
-            here.fraction = record.fraction;
-            here.time = record.time;
+        // A book with no position here takes one only when it is in the library.
+        let newer = match local.get(fingerprint) {
+            Some(here) => record.time > here.time,
+            None => library.contains(fingerprint) && record.time > 0,
+        };
+        if newer && record.device_id != own_device {
+            local.insert(fingerprint.clone(), Position { cfi: record.cfi.clone(), fraction: record.fraction, time: record.time });
             changed += 1;
         }
     }
@@ -275,23 +281,38 @@ fn merge_remote(
 /// positions where the cloud is newer (newest-wins, the same rule as pull on
 /// open): Continue reading shows the fresh percent, and opening such a book
 /// goes straight to it. Silent: no offers, no pushes, a dead transport is
-/// skipped like in a pull.
+/// skipped like in a pull. Once per start of the app, however many windows
+/// ask: later calls report nothing changed.
 #[tauri::command(async)]
-pub(crate) fn sync_pull_all(store: State<Store>) -> CmdResult<usize> {
-    pull_all_clouds(&store)
+pub(crate) fn sync_pull_all(store: State<Store>, books: State<LibraryBooks>) -> CmdResult<usize> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static DONE: AtomicBool = AtomicBool::new(false);
+    if DONE.swap(true, Ordering::SeqCst) {
+        return Ok(0);
+    }
+    pull_all_clouds(&store, &books)
 }
 
-fn pull_all_clouds(store: &Store) -> CmdResult<usize> {
+/// Merges every usable cloud's positions file into the local positions, for
+/// the whole library; returns how many books changed.
+fn pull_all_clouds(store: &Store, books: &LibraryBooks) -> CmdResult<usize> {
+    let library: BTreeSet<String> =
+        library_root(store).map(|root| books.snapshot(store, &root).into_iter().map(|b| b.fingerprint).collect()).unwrap_or_default();
+    let usable_now: Vec<_> = transports().into_iter().filter(|t| usable(store, *t)).collect();
+    merge_cloud_positions(store, &usable_now, &library)
+}
+
+/// Merges these clouds' positions files into the local positions; books in
+/// `library` never opened here take the cloud's place too. Returns how many
+/// books changed.
+fn merge_cloud_positions(store: &Store, clouds: &[&dyn Transport], library: &BTreeSet<String>) -> CmdResult<usize> {
     let device = device_id(store)?;
     let mut updated = 0;
-    for t in transports() {
-        if !usable(store, t) {
-            continue;
-        }
+    for t in clouds {
         if let Some(remote) = t.remote(store) {
             store
                 .update(|s| {
-                    updated += merge_remote(&mut s.positions, &remote, &device);
+                    updated += merge_remote(&mut s.positions, &remote, &device, library);
                 })
                 .map_err(|e| e.to_string())?;
         }
@@ -398,7 +419,9 @@ fn missing_cloud_books(store: &Store, books: &LibraryBooks) -> CmdResult<Vec<Mis
     let local: BTreeSet<String> = books.snapshot(store, &root).into_iter().map(|b| b.fingerprint).collect();
     let mut manifests = Vec::new();
     for t in book_stores(store) {
-        if let Some(books) = t.books() {
+        if let Some(mut books) = t.books() {
+            // Only books this device would open: a book file, its format on.
+            books.retain(|_, record| book_format_allowed(store, &record.name).is_ok());
             manifests.push(books);
         }
     }
@@ -417,26 +440,38 @@ fn safe_relative(name: &str) -> Result<PathBuf, String> {
 }
 
 /// Where a downloaded book lands: its manifest name, unless a different
-/// book already holds it — then ` (2)`, like Organize.
+/// book already holds it — then ` (2)`, like Organize (`naming::place`).
+/// `None` when the library already has this very book there. Names that
+/// aren't book files the app opens never land, whatever the cloud claims.
 fn place_book(root: &Path, name: &str, fingerprint: &str) -> CmdResult<Option<PathBuf>> {
-    let rel = safe_relative(name)?;
-    let dest = root.join(&rel);
-    if !dest.exists() {
-        return Ok(Some(dest));
-    }
-    if fingerprint::fingerprint(&dest).map_err(|e| e.to_string())? == fingerprint {
-        return Ok(None);
-    }
-    let stem = rel.file_stem().and_then(|s| s.to_str()).unwrap_or("book");
-    let parent = rel.parent().unwrap_or_else(|| Path::new(""));
-    let ext = rel.extension().and_then(|s| s.to_str()).map(|s| format!(".{s}")).unwrap_or_default();
-    for n in 2..1000 {
-        let candidate = root.join(parent).join(format!("{stem} ({n}){ext}"));
-        if !candidate.exists() {
-            return Ok(Some(candidate));
+    safe_relative(name)?;
+    formats::split(name).ok_or("The cloud name is not a book file.")?;
+    Ok(match naming::place(root, name, fingerprint, &HashSet::new()).map_err(|e| e.to_string())? {
+        naming::Placement::Free(rel) => Some(root.join(rel)),
+        naming::Placement::Exists(_) => None,
+    })
+}
+
+/// Places a verified download in the library: picks its name and writes it,
+/// trying the next free name when another file appears there meanwhile.
+/// False when the library already holds the book.
+fn land_book(root: &Path, name: &str, fingerprint: &str, bytes: &[u8]) -> CmdResult<bool> {
+    for _ in 0..3 {
+        let Some(dest) = place_book(root, name, fingerprint)? else { return Ok(false) };
+        match naming::write_new(&dest, bytes) {
+            Ok(()) => return Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.to_string()),
         }
     }
     Err("No free name for the downloaded book.".into())
+}
+
+/// Whether a cloud name is a book file in a format turned on in Modules; the
+/// refusal says why, as a catalog download does.
+fn book_format_allowed(store: &Store, name: &str) -> CmdResult<()> {
+    let (_, reader) = formats::split(name).ok_or("The cloud name is not a book file.")?;
+    store.read(|s| formats::check(s, reader))
 }
 
 /// Downloads a book file the library lacks, verifying it against the
@@ -457,6 +492,10 @@ fn pull_book_from_cloud(store: &Store, fingerprint: &str) -> CmdResult<bool> {
     for t in book_stores(store) {
         let Some(manifest) = t.books() else { continue };
         let Some(record) = manifest.get(fingerprint) else { continue };
+        if let Err(e) = book_format_allowed(store, &record.name) {
+            failed = Some(e);
+            continue;
+        }
         let remote_name = crate::cloud::remote_book_name(fingerprint, &record.name);
         let bytes = match t.pull_book(&remote_name) {
             Ok(Some(bytes)) => bytes,
@@ -471,12 +510,13 @@ fn pull_book_from_cloud(store: &Store, fingerprint: &str) -> CmdResult<bool> {
             failed = Some("The cloud copy failed its hash check.".into());
             continue;
         }
-        let Some(dest) = place_book(&root, &record.name, fingerprint)? else { return Ok(false) };
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        let landed = land_book(&root, &record.name, fingerprint, &bytes)?;
+        if landed {
+            // The new book opens where the other device is, not with a jump
+            // offer: its position comes from the cloud that sent it.
+            let _ = merge_cloud_positions(store, &[t], &[fingerprint.to_string()].into_iter().collect());
         }
-        std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
-        return Ok(true);
+        return Ok(landed);
     }
     failed.map_or(Ok(false), Err)
 }
@@ -614,7 +654,7 @@ pub(crate) fn sync_push(
 
 #[cfg(test)]
 mod tests {
-    use super::{book_transfer_allowed, book_transfer_gate, collect_missing, compare_positions, merge_remote, missing_cloud_books, place_book, pull_all_clouds, pull_book_from_cloud, pull_merged, push_all, push_book_to_cloud, safe_relative, sync_source, BookKey, Dropbox, Google, Kosync, Transport};
+    use super::{book_format_allowed, book_transfer_allowed, book_transfer_gate, collect_missing, compare_positions, land_book, merge_remote, missing_cloud_books, place_book, pull_all_clouds, pull_book_from_cloud, pull_merged, push_all, push_book_to_cloud, safe_relative, sync_source, BookKey, Dropbox, Google, Kosync, Transport};
     use crate::library_cmds::LibraryBooks;
     use crate::cloud::push_book_missing;
     use crate::kosync::Progress;
@@ -764,14 +804,17 @@ mod tests {
         remote.insert("newer-local".into(), cloud_record("b", 100));
         remote.insert("same".into(), cloud_record("a", 200));
         remote.insert("elsewhere".into(), cloud_record("c", 400));
-        assert_eq!(merge_remote(&mut local, &remote, "pc"), 1);
+        remote.insert("downloaded".into(), cloud_record("d", 400));
+        let library = ["downloaded".to_string()].into_iter().collect();
+        assert_eq!(merge_remote(&mut local, &remote, "pc", &library), 2);
+        assert_eq!(local["downloaded"].cfi, "d", "a library book never opened here takes the cloud's place");
         assert_eq!(local["newer-remote"].cfi, "b");
         assert_eq!(local["newer-remote"].time, 200);
         assert_eq!(local["newer-local"].cfi, "a");
         assert_eq!(local["same"].time, 200);
         assert!(
             !local.contains_key("elsewhere"),
-            "books never opened here gain nothing"
+            "books outside the library gain nothing"
         );
     }
 
@@ -783,7 +826,7 @@ mod tests {
         let mut echo = cloud_record("b", 500);
         echo.device_id = "pc".into();
         remote.insert("fp".into(), echo);
-        assert_eq!(merge_remote(&mut local, &remote, "pc"), 0);
+        assert_eq!(merge_remote(&mut local, &remote, "pc", &["fp".to_string()].into_iter().collect()), 0);
         assert_eq!(local["fp"].cfi, "a");
     }
 
@@ -849,6 +892,32 @@ mod tests {
         // Another book under the same name: " (2)", like Organize.
         let dest2 = place_book(root, "Author/Book.epub", "other").unwrap().unwrap();
         assert_eq!(dest2, root.join("Author/Book (2).epub"));
+    }
+
+    #[test]
+    fn cloud_books_need_a_book_name_in_a_format_that_is_on() {
+        let (_dir, store) = synced_store(&["format:fb2"]);
+        assert!(book_format_allowed(&store, "A/B.epub").is_ok());
+        assert!(book_format_allowed(&store, "A/B.fb2").is_err(), "its module is off");
+        assert!(book_format_allowed(&store, "A/run.exe").is_err());
+    }
+
+    #[test]
+    fn only_book_files_land_and_never_over_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert!(place_book(root, "Author/run.exe", "fp").is_err(), "not a book file");
+        assert!(place_book(root, "Author/link.lnk", "fp").is_err());
+        // A double ending keeps both parts after the counter.
+        std::fs::create_dir_all(root.join("A")).unwrap();
+        std::fs::write(root.join("A/B.fb2.zip"), b"one").unwrap();
+        assert_eq!(place_book(root, "A/B.fb2.zip", "other").unwrap().unwrap(), root.join("A/B (2).fb2.zip"));
+        // A file that appears between choosing the name and writing is kept.
+        std::fs::write(root.join("A/C.epub"), b"theirs").unwrap();
+        assert_eq!(crate::naming::write_new(&root.join("A/C.epub"), b"ours").unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(root.join("A/C.epub")).unwrap(), b"theirs");
+        assert!(land_book(root, "A/D.epub", "fp", b"ours").unwrap());
+        assert_eq!(std::fs::read(root.join("A/D.epub")).unwrap(), b"ours");
     }
 
     #[test]
@@ -1013,8 +1082,8 @@ mod tests {
 
     #[test]
     fn pull_all_stays_quiet_without_a_cloud() {
-        let (_dir, store, _books, _root) = library_with(&[]);
-        assert_eq!(pull_all_clouds(&store).unwrap(), 0);
+        let (_dir, store, books, _root) = library_with(&[]);
+        assert_eq!(pull_all_clouds(&store, &books).unwrap(), 0);
     }
 
     #[test]

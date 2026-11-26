@@ -14,6 +14,8 @@ export interface LibraryBook {
   /** When the book came into the library (ms). */
   added: number
   hasCover: boolean
+  /** Its format is turned off in Settings › Modules: listed, but it won't open. */
+  disabled: boolean
 }
 
 export const STATUSES = ['all', 'new', 'reading', 'finished'] as const

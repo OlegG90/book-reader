@@ -13,6 +13,7 @@ const book = (overrides: Partial<LibraryBook>): LibraryBook => ({
   fraction: null,
   added: 0,
   hasCover: false,
+  disabled: false,
   ...overrides,
 })
 

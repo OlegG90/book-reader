@@ -125,6 +125,20 @@ pub fn move_file(from: &Path, to: &Path) -> io::Result<()> {
     })
 }
 
+/// Writes a new file with `bytes`, creating its folders. A file already
+/// there is never overwritten (the check and the creation are one step), and
+/// a write that fails leaves no half file behind.
+pub fn write_new(to: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+    if let Some(dir) = to.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(to)?;
+    file.write_all(bytes).inspect_err(|_| {
+        let _ = std::fs::remove_file(to);
+    })
+}
+
 pub fn copy_file(from: &Path, to: &Path) -> io::Result<()> {
     prepare_target(to)?;
     std::fs::copy(from, to).map(|_| ())

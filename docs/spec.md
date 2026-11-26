@@ -23,7 +23,7 @@ Guiding principles: **no installation step on the desktop, small size, fast star
 - `.fb2`, `.fb2.zip` and `.fbz` — encoding taken from the XML declaration (UTF-8, windows-1251 and others)
 - `.epub` — EPUB 2 and EPUB 3, reflowable
 
-Both are layer-1 modules (`format:epub`, `format:fb2`) and can be turned off in Settings › Modules. A disabled format is skipped by the scan, refused by picking, opening and catalog downloads with a sentence, and left out of the file dialog; books already in the library stay visible but refuse to open.
+Both are layer-1 modules (`format:epub`, `format:fb2`) and can be turned off in Settings › Modules. A disabled format is refused by picking, opening, catalog and cloud downloads with a sentence, and left out of the file dialog; books in the library stay visible (dimmed, `turned off` in place of their progress, keeping their added date) but refuse to open.
 
 ### Out of scope
 
@@ -160,7 +160,7 @@ Opening a file that is not inside the library folder shows an unobtrusive bar: *
 - **Payload:** `progress` holds the foliate-js position (EPUB CFI); `percentage` is filled in truthfully, so other clients could at least jump by percent.
 - **Push:** when a book is closed, when the app goes to the background, and once a minute while reading if the position changed. Closing the window waits 3 s at most for it. `--no-save` windows don't sync.
 - **Pull:** when a book is opened. If the server has a different, newer position, a bar offers to jump to it, e.g. "Jump to 63% (Android, 2 h ago)?" — never a silent jump.
-- **Startup pull:** once per start the app downloads each cloud's positions file and refreshes the local positions where the cloud is newer (the same newest-wins as pull on open, but silent: no offers, no pushes). Continue reading shows the fresh percent; opening such a book goes straight to it.
+- **Startup pull:** once per start the app downloads each cloud's positions file and refreshes the local positions where the cloud is newer (the same newest-wins as pull on open, but silent: no offers, no pushes). Continue reading shows the fresh percent; opening such a book goes straight to it. A library book never opened on this device takes the cloud's place too (so it counts as being read), and so does a book just downloaded from a cloud.
 - **Offline:** failures are silent; pending pushes are retried later.
 - **Book files:** positions sync for every book; the files themselves travel by the library, see [Library sync](#library-sync).
 

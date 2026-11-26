@@ -108,9 +108,10 @@ pub fn remote_book_name(fingerprint: &str, name: &str) -> String {
     format!("book-{fingerprint}-{safe}")
 }
 
-/// The ids the clouds keep their refresh tokens under, in the same
-/// credential store as catalog passwords.
-const TOKEN_IDS: [&str; 2] = [crate::dropbox::TOKEN_ID, crate::google::TOKEN_ID];
+/// The ids the clouds keep their secrets under (refresh tokens, a phone
+/// login waiting for the browser), in the same credential store as catalog
+/// passwords.
+const TOKEN_IDS: [&str; 3] = [crate::dropbox::TOKEN_ID, crate::google::TOKEN_ID, crate::google::LOGIN_ID];
 
 /// Whether an id belongs to a cloud's token: no catalog source may use one,
 /// even one hand-written into the config.
