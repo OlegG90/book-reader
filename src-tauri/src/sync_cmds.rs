@@ -48,9 +48,14 @@ trait Transport {
     fn remote(&self, _store: &Store) -> Option<HashMap<String, RemoteRecord>> {
         None
     }
-    /// Whether the transport is connected (a refresh token is kept).
-    /// A disconnected cloud is skipped silently, like a dead one.
+    /// Whether the transport can reach its store: a cloud needs a login (a
+    /// refresh token is kept); KOSync needs nothing more than being enabled.
+    /// A disconnected cloud is skipped silently, never reported as failed.
     fn connected(&self) -> bool {
+        true
+    }
+    /// Whether the transport keeps book files (the clouds do, KOSync doesn't).
+    fn keeps_books(&self) -> bool {
         false
     }
     /// The cloud's book manifest, if the transport keeps books.
@@ -133,6 +138,10 @@ impl Transport for Dropbox {
         crate::dropbox::is_connected()
     }
 
+    fn keeps_books(&self) -> bool {
+        true
+    }
+
     fn books(&self) -> Option<HashMap<String, crate::cloud::BookRecord>> {
         crate::dropbox::book_manifest()
     }
@@ -176,6 +185,10 @@ impl Transport for Google {
         crate::google::is_connected()
     }
 
+    fn keeps_books(&self) -> bool {
+        true
+    }
+
     fn books(&self) -> Option<HashMap<String, crate::cloud::BookRecord>> {
         crate::google::book_manifest()
     }
@@ -198,13 +211,24 @@ fn transports() -> [&'static dyn Transport; 3] {
     [&KOSYNC, &DROPBOX, &GOOGLE]
 }
 
+/// Whether a transport takes part right now: its modules are on and it is
+/// connected. Anything else is skipped silently, not counted as a failure.
+fn usable(store: &Store, t: &dyn Transport) -> bool {
+    store.read(|s| t.enabled(s)) && t.connected()
+}
+
+/// The usable transports that keep book files.
+fn book_stores(store: &Store) -> Vec<&'static dyn Transport> {
+    transports().into_iter().filter(|t| t.keeps_books() && usable(store, *t)).collect()
+}
+
 /// The newest remote position across the transports. A transport that fails
 /// reports nothing instead of failing the pull, so a dead transport never
 /// blocks a live one.
 fn pull_merged(store: &Store, transports: &[&dyn Transport], book: &BookKey) -> Option<kosync::Progress> {
     let mut remote = None;
     for t in transports {
-        if !store.read(|s| t.enabled(s)) {
+        if !usable(store, *t) {
             continue;
         }
         if let Ok(found) = t.pull(store, book) {
@@ -261,7 +285,7 @@ fn pull_all_clouds(store: &Store) -> CmdResult<usize> {
     let device = device_id(store)?;
     let mut updated = 0;
     for t in transports() {
-        if !store.read(|s| t.enabled(s)) {
+        if !usable(store, t) {
             continue;
         }
         if let Some(remote) = t.remote(store) {
@@ -288,6 +312,10 @@ fn push_book_to_cloud(store: &Store, books: &LibraryBooks, fingerprint: &str) ->
     if !book_transfer_allowed(store) {
         return Ok(false);
     }
+    let clouds = book_stores(store);
+    if clouds.is_empty() {
+        return Ok(false);
+    }
     let root = library_root(store)?;
     let entry = books.snapshot(store, &root).into_iter().find(|b| b.fingerprint == fingerprint);
     let Some(entry) = entry else { return Ok(false) };
@@ -302,18 +330,19 @@ fn push_book_to_cloud(store: &Store, books: &LibraryBooks, fingerprint: &str) ->
         size: bytes.len() as u64,
         sha256: fingerprint::full_sha256(&path).map_err(|e| e.to_string())?,
     };
-    let enabled: Vec<_> = transports().into_iter().filter(|t| store.read(|s| t.enabled(s))).collect();
-    if !enabled.iter().any(|t| t.connected()) {
-        return Ok(false);
-    }
     let mut pushed = false;
-    for t in enabled {
-        if !t.connected() {
-            continue;
+    let mut failed = None;
+    // One cloud down never keeps the book from the others.
+    for t in clouds {
+        match t.push_book(fingerprint, &record, &bytes) {
+            Ok(gained) => pushed |= gained,
+            Err(e) => failed = Some(e),
         }
-        pushed |= t.push_book(fingerprint, &record, &bytes).map_err(|e| e.to_string())?;
     }
-    Ok(pushed)
+    match failed {
+        Some(e) if !pushed => Err(e),
+        _ => Ok(pushed),
+    }
 }
 
 /// Book files travel only on unmetered networks when the setting says so
@@ -368,10 +397,7 @@ fn missing_cloud_books(store: &Store, books: &LibraryBooks) -> CmdResult<Vec<Mis
     let root = library_root(store)?;
     let local: BTreeSet<String> = books.snapshot(store, &root).into_iter().map(|b| b.fingerprint).collect();
     let mut manifests = Vec::new();
-    for t in transports() {
-        if !store.read(|s| t.enabled(s)) || !t.connected() {
-            continue;
-        }
+    for t in book_stores(store) {
         if let Some(books) = t.books() {
             manifests.push(books);
         }
@@ -426,17 +452,24 @@ fn pull_book_from_cloud(store: &Store, fingerprint: &str) -> CmdResult<bool> {
         return Ok(false);
     }
     let root = library_root(store)?;
-    for t in transports() {
-        if !store.read(|s| t.enabled(s)) || !t.connected() {
-            continue;
-        }
+    let mut failed = None;
+    // A cloud that fails, or sends a copy that fails its hash, hands over to the next.
+    for t in book_stores(store) {
         let Some(manifest) = t.books() else { continue };
         let Some(record) = manifest.get(fingerprint) else { continue };
         let remote_name = crate::cloud::remote_book_name(fingerprint, &record.name);
-        let Some(bytes) = t.pull_book(&remote_name).map_err(|e| e.to_string())? else { continue };
+        let bytes = match t.pull_book(&remote_name) {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => continue,
+            Err(e) => {
+                failed = Some(e);
+                continue;
+            }
+        };
         // Same bytes as recorded, or nothing lands in the library.
         if fingerprint::sha256_bytes(&bytes) != record.sha256 {
-            return Err("The cloud copy failed its hash check.".into());
+            failed = Some("The cloud copy failed its hash check.".into());
+            continue;
         }
         let Some(dest) = place_book(&root, &record.name, fingerprint)? else { return Ok(false) };
         if let Some(parent) = dest.parent() {
@@ -445,7 +478,7 @@ fn pull_book_from_cloud(store: &Store, fingerprint: &str) -> CmdResult<bool> {
         std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
         return Ok(true);
     }
-    Ok(false)
+    failed.map_or(Ok(false), Err)
 }
 
 /// What one push round achieved, per transport: the frontend retries only
@@ -468,7 +501,7 @@ fn push_all(
 ) -> Vec<PushReport> {
     transports
         .iter()
-        .filter(|t| store.read(|s| t.enabled(s)))
+        .filter(|t| usable(store, **t))
         .filter(|t| only.as_ref().is_none_or(|ids| ids.contains(t.id())))
         .map(|t| PushReport { transport: t.id().into(), error: t.push(store, book, cfi, fraction).err() })
         .collect()
@@ -592,6 +625,7 @@ mod tests {
     struct Fake {
         id: &'static str,
         on: bool,
+        linked: bool,
         pull: Result<Option<Progress>, String>,
         push: Result<(), String>,
         calls: std::cell::RefCell<Vec<&'static str>>,
@@ -599,11 +633,16 @@ mod tests {
 
     impl Fake {
         fn of(id: &'static str, pull: Result<Option<Progress>, String>, push: Result<(), String>) -> Self {
-            Fake { id, on: true, pull, push, calls: std::cell::RefCell::new(Vec::new()) }
+            Fake { id, on: true, linked: true, pull, push, calls: std::cell::RefCell::new(Vec::new()) }
         }
 
         fn off(mut self) -> Self {
             self.on = false;
+            self
+        }
+
+        fn disconnected(mut self) -> Self {
+            self.linked = false;
             self
         }
     }
@@ -615,6 +654,10 @@ mod tests {
 
         fn enabled(&self, _state: &store::State) -> bool {
             self.on
+        }
+
+        fn connected(&self) -> bool {
+            self.linked
         }
 
         fn pull(&self, _store: &Store, _book: &BookKey) -> Result<Option<Progress>, String> {
@@ -818,7 +861,7 @@ mod tests {
             "fp",
             &record,
             b"bytes",
-            || None,
+            || Ok(None),
             |_, bytes| {
                 uploaded.borrow_mut().push(bytes.to_vec());
                 Ok::<(), String>(())
@@ -849,9 +892,9 @@ mod tests {
             || {
                 calls.set(calls.get() + 1);
                 if calls.get() == 1 {
-                    Some(HashMap::new())
+                    Ok(Some(HashMap::new()))
                 } else {
-                    Some(other.clone())
+                    Ok(Some(other.clone()))
                 }
             },
             |_, _| Ok::<(), String>(()),
@@ -877,7 +920,7 @@ mod tests {
             "fp",
             &book_record("A.epub", 10),
             b"bytes",
-            || Some(manifest.clone()),
+            || Ok(Some(manifest.clone())),
             |_, bytes| {
                 uploaded.borrow_mut().push(bytes.to_vec());
                 Ok::<(), String>(())
@@ -887,6 +930,34 @@ mod tests {
         .unwrap();
         assert!(!ok);
         assert!(uploaded.borrow().is_empty());
+    }
+
+    #[test]
+    fn push_book_missing_never_overwrites_an_unreadable_manifest() {
+        use std::cell::{Cell, RefCell};
+        let calls = Cell::new(0);
+        let stored: RefCell<Vec<HashMap<String, crate::cloud::BookRecord>>> = RefCell::new(Vec::new());
+        // The first read finds nothing, the re-read before writing fails.
+        let result = push_book_missing(
+            "fp",
+            &book_record("A.epub", 10),
+            b"bytes",
+            || {
+                calls.set(calls.get() + 1);
+                if calls.get() == 1 {
+                    Ok(None)
+                } else {
+                    Err("offline".into())
+                }
+            },
+            |_, _| Ok::<(), String>(()),
+            |books| {
+                stored.borrow_mut().push(books.clone());
+                Ok::<(), String>(())
+            },
+        );
+        assert!(result.is_err());
+        assert!(stored.borrow().is_empty(), "the manifest is left alone");
     }
 
     /// A library with real files on disk and a matching scan.
@@ -1039,6 +1110,18 @@ mod tests {
         let reports = push_all(&store, &as_transports(&[&off]), &None, &book(), "a", 0.5);
         assert!(reports.is_empty());
         assert!(off.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn disconnected_transports_are_skipped_not_failed() {
+        let (_dir, store) = synced_store(&[]);
+        let kosync = Fake::of("kosync", Ok(None), Ok(()));
+        let cloud = Fake::of("dropbox", Ok(Some(server("b", "phone", 2))), Err("not connected".into())).disconnected();
+        assert!(pull_merged(&store, &as_transports(&[&kosync, &cloud]), &book()).is_none());
+        let reports = push_all(&store, &as_transports(&[&kosync, &cloud]), &None, &book(), "a", 0.5);
+        assert_eq!(reports.len(), 1, "no report means no retry for the cloud");
+        assert_eq!((reports[0].transport.as_str(), reports[0].error.as_deref()), ("kosync", None));
+        assert!(cloud.calls.borrow().is_empty());
     }
 
     #[test]

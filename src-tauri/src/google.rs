@@ -348,7 +348,7 @@ pub fn push_book(fingerprint: &str, record: &BookRecord, bytes: &[u8]) -> Result
         fingerprint,
         record,
         bytes,
-        book_manifest,
+        manifest_map,
         upload_book_file,
         store_manifest,
     ))

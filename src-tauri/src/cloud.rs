@@ -111,20 +111,21 @@ pub fn remote_book_name(fingerprint: &str, name: &str) -> String {
 /// Uploads a book file the cloud manifest lacks, then records it: the
 /// fingerprint means same bytes, so an entry already there means nothing to
 /// do. The manifest is re-read before writing, so two devices uploading at
-/// once keep both books.
+/// once keep both books. A manifest that fails to load stops the upload: an
+/// empty one would overwrite every book recorded so far.
 pub fn push_book_missing(
     fingerprint: &str,
     record: &BookRecord,
     bytes: &[u8],
-    manifest: impl Fn() -> Option<HashMap<String, BookRecord>>,
+    manifest: impl Fn() -> Result<Option<HashMap<String, BookRecord>>, String>,
     upload: impl Fn(&str, &[u8]) -> Result<(), String>,
     store: impl Fn(&HashMap<String, BookRecord>) -> Result<(), String>,
 ) -> Result<bool, String> {
-    if manifest().is_some_and(|books| books.contains_key(fingerprint)) {
+    if manifest()?.is_some_and(|books| books.contains_key(fingerprint)) {
         return Ok(false);
     }
     upload(&remote_book_name(fingerprint, &record.name), bytes)?;
-    let mut fresh = manifest().unwrap_or_default();
+    let mut fresh = manifest()?.unwrap_or_default();
     fresh.entry(fingerprint.into()).or_insert_with(|| record.clone());
     store(&fresh)?;
     Ok(true)

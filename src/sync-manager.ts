@@ -93,16 +93,17 @@ export function createSyncManager(deps: SyncDeps): SyncManager {
     const synced = document
     const fingerprint = deps.fingerprint()
     if ((!dirty && pending.size === 0) || !location || !synced || !fingerprint) return
+    // A new position goes to every transport; a retry of the same one only
+    // to the transports that still owe an ack.
+    const moved = dirty
     dirty = false
-    // A retry goes only to the transports that still owe an ack.
-    const only = pending.size ? [...pending] : undefined
+    const only = moved ? undefined : [...pending]
     try {
       const reports = await invoke<PushReport[]>('sync_push', { document: synced, fingerprint, cfi: location.cfi, fraction: location.fraction, only })
       pending = new Set(reports.filter(r => r.error).map(r => r.transport))
-      if (pending.size) dirty = true
     } catch (e) {
       // Retried next time, unless another book has opened meanwhile.
-      if (document === synced) dirty = true
+      if (document === synced && moved) dirty = true
       console.warn('sync:', e)
     }
   }
