@@ -11,7 +11,6 @@ use crate::platform::{Active, Platform};
 use crate::{kosync, net, oauth};
 use oauth::PendingLogin;
 use std::collections::HashMap;
-use std::sync::Mutex;
 
 /// The last Google Drive sync failure, for the settings.
 static LAST_ERROR: ErrorSlot = ErrorSlot::new();
@@ -114,14 +113,33 @@ pub fn finish(login: PendingLogin) -> Result<(), String> {
     Active::save_password(TOKEN_ID, &refresh)
 }
 
-/// A login waiting for the phone's browser: the answer arrives as an intent
-/// with the app's scheme, so nothing listens locally (unlike the desktop).
-struct AndroidLogin {
-    verifier: String,
-    state: String,
+/// Where the phone keeps a login waiting for the browser (its state and
+/// PKCE verifier), in the credential store: Android may end the app while
+/// the browser is open, and the answer must still find its login.
+pub(crate) const LOGIN_ID: &str = "google-login";
+
+/// How long a phone login waits for the browser's answer.
+const LOGIN_WAIT_MS: u64 = 15 * 60 * 1000;
+
+/// A waiting login as kept: state, verifier and start time, space-separated
+/// (the first two are alphanumeric).
+fn pending_login(state: &str, verifier: &str, started: u64) -> String {
+    format!("{state} {verifier} {started}")
 }
 
-static ANDROID_LOGIN: Mutex<Option<AndroidLogin>> = Mutex::new(None);
+/// The state and verifier of a kept login, unless it is malformed or older
+/// than `LOGIN_WAIT_MS`.
+fn read_pending_login(kept: &str, now: u64) -> Result<(String, String), String> {
+    let mut parts = kept.split(' ');
+    let (Some(state), Some(verifier), Some(started)) = (parts.next(), parts.next(), parts.next()) else {
+        return Err("login: no Google login is waiting".into());
+    };
+    let started: u64 = started.parse().map_err(|_| "login: no Google login is waiting")?;
+    if now.saturating_sub(started) > LOGIN_WAIT_MS {
+        return Err("login: the Google login took too long; connect again".into());
+    }
+    Ok((state.into(), verifier.into()))
+}
 
 /// Starts the phone login: open the returned address in the browser, and the
 /// answer comes back to `finish_answer` through the app's intent filter.
@@ -130,15 +148,18 @@ pub fn begin_android() -> Result<String, String> {
     let verifier = oauth::random_string(64);
     let state = oauth::random_string(16);
     let url = auth_url(client_id, &oauth::challenge(&verifier), &state);
-    *ANDROID_LOGIN.lock().unwrap() = Some(AndroidLogin { verifier, state });
+    Active::save_password(LOGIN_ID, &pending_login(&state, &verifier, crate::clock::now_ms()))?;
     Ok(url)
 }
 
-/// Finishes the phone login with the address the browser came back to.
+/// Finishes the phone login with the address the browser came back to; the
+/// waiting login is used once, even when it fails.
 pub fn finish_answer(answer: &str) -> Result<(), String> {
-    let login = ANDROID_LOGIN.lock().unwrap().take().ok_or("login: no Google login is waiting")?;
-    let code = oauth::code_in_answer(answer, &login.state, "Google")?;
-    let (_access, refresh) = exchange(&code, &login.verifier, Active::password(TOKEN_ID))?;
+    let kept = Active::password(LOGIN_ID).ok_or("login: no Google login is waiting")?;
+    Active::forget_password(LOGIN_ID);
+    let (state, verifier) = read_pending_login(&kept, crate::clock::now_ms())?;
+    let code = oauth::code_in_answer(answer, &state, "Google")?;
+    let (_access, refresh) = exchange(&code, &verifier, Active::password(TOKEN_ID))?;
     Active::save_password(TOKEN_ID, &refresh)
 }
 
@@ -440,6 +461,14 @@ fn push_inner(
 mod tests {
     use super::*;
     use crate::cloud::pick_refresh;
+
+    #[test]
+    fn a_kept_phone_login_survives_until_it_is_too_old() {
+        let kept = pending_login("st", "ver", 1_000);
+        assert_eq!(read_pending_login(&kept, 1_000 + 60_000).unwrap(), ("st".to_string(), "ver".to_string()));
+        assert!(read_pending_login(&kept, 1_000 + LOGIN_WAIT_MS + 1).is_err());
+        assert!(read_pending_login("garbage", 1_000).is_err());
+    }
 
     #[test]
     fn names_with_quotes_stay_one_search_term() {
