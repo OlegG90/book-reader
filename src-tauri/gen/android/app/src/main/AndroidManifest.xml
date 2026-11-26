@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Whether the network is metered: book files wait for Wi-Fi. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- All files access: the library is a plain folder in shared storage
          (Documents/Books), read and written by the same Rust code as on Windows.
          Sideloaded app, so Google Play's limits on this permission don't apply. -->

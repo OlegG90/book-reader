@@ -16,6 +16,10 @@ jobs:
   windows:
     # One x64 runner builds both: MSVC cross-compiles to ARM64.
     runs-on: windows-latest
+    env:
+      # Baked into google::CLIENT_ID/CLIENT_SECRET, as in windows.yml.
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v7
 
@@ -25,6 +29,9 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
+          if (-not $env:GOOGLE_CLIENT_ID -or -not $env:GOOGLE_CLIENT_SECRET) {
+            throw "The GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET secrets are missing: a release would ship without Google Drive"
+          }
           $version = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches.Groups[1].Value
           if ("v$version" -ne $env:TAG) {
             throw "Tag $env:TAG does not match the version in src-tauri/Cargo.toml (v$version)"
@@ -69,6 +76,9 @@ jobs:
   android:
     needs: windows
     runs-on: ubuntu-latest
+    env:
+      # Baked into google::CLIENT_ID, as in android.yml (the Android client has no secret).
+      GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.GOOGLE_ANDROID_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v7
 
@@ -81,6 +91,10 @@ jobs:
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
         run: |
+          if [ -z "$GOOGLE_ANDROID_CLIENT_ID" ] && [ "${{ github.event_name }}" = "push" ]; then
+            echo "::error::The GOOGLE_ANDROID_CLIENT_ID secret is missing: a release would ship without Google Drive"
+            exit 1
+          fi
           if [ -z "$KEYSTORE" ]; then
             echo "::error::The ANDROID_KEYSTORE secret is missing"
             exit 1

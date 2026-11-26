@@ -170,7 +170,8 @@ impl Platform for Android {
         struct Metered {
             metered: bool,
         }
-        run::<Metered>("networkMetered", ()).map(|m| m.metered).unwrap_or(false)
+        // Unknown counts as metered: book files wait rather than use mobile data.
+        run::<Metered>("networkMetered", ()).map(|m| m.metered).unwrap_or(true)
     }
 }
 
