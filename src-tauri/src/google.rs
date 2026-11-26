@@ -207,13 +207,8 @@ fn find_file(access: &str, name: &str) -> Result<Option<String>, SyncError> {
 /// The Drive search for one file name; quotes and backslashes in book names
 /// are escaped, as the query language asks.
 fn name_query(name: &str) -> String {
-    format!("name = '{}' and trashed = false", escape_query(name))
-}
-
-/// A string made safe inside a quoted Drive search term: backslashes and
-/// quotes escaped, as the query language asks.
-fn escape_query(text: &str) -> String {
-    text.replace('\\', "\\\\").replace('\'', "\\'")
+    let escaped = name.replace('\\', "\\\\").replace('\'', "\\'");
+    format!("name = '{escaped}' and trashed = false")
 }
 
 /// Downloads an opaque cloud file by its id.
