@@ -189,7 +189,7 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
     void sync.pull()
   }
 
-  /** Closes the open book: pushes its last position, uploads its file when it counts as reading, and clears the reading chrome. */
+  /** Closes the open book: hands its last position to the sync engine and clears the reading chrome. */
   function close() {
     if (book) setReading(false, deps.getSettings().volumeKeys)
     void sync.push()

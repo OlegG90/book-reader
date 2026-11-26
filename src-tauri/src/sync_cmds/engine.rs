@@ -10,7 +10,10 @@ use super::{book_stores, book_transfer_allowed, cloud_books, enabled, latest_of,
 use crate::clock::now_ms;
 use crate::library_cmds::{library_root, LibraryBooks};
 use crate::platform::{Active, Platform};
+use crate::cloud::BookRecord;
+use crate::library::Entry;
 use crate::store::{Job, Pending, Store};
+use std::collections::{BTreeSet, HashMap};
 use crate::sync_error::Kind;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -47,6 +50,14 @@ pub(crate) fn queue(outbox: &mut Vec<Pending>, job: Job) {
     outbox.push(Pending { job, attempts: 0, not_before: 0 });
 }
 
+/// Adds a job unless the same work is already waiting: the reconcile finds
+/// the same work every round, and must not wipe its wait after failures.
+fn queue_once(outbox: &mut Vec<Pending>, job: Job) {
+    if !outbox.iter().any(|p| p.job.same_work(&job)) {
+        outbox.push(Pending { job, attempts: 0, not_before: 0 });
+    }
+}
+
 /// What one try of a job came to.
 #[derive(Debug, PartialEq)]
 enum Verdict {
@@ -71,17 +82,26 @@ fn moves_a_file(job: &Job) -> bool {
     matches!(job, Job::Upload { .. } | Job::Download { .. })
 }
 
-/// Removes a book from every cloud that holds it; done when none does.
+/// Removes a book from every cloud that holds it; done when none does. A
+/// connected cloud that can't be read counts as failed, so the removal
+/// reaches it later. Until then the book stays in Removed books, so it is
+/// never downloaded back meanwhile.
 fn remove_everywhere(store: &Store, transports: &[&dyn Transport], fingerprint: &str) -> Verdict {
     let mut failed = None;
     for t in book_stores(store, transports) {
-        let Some(record) = t.books().and_then(|books| books.get(fingerprint).cloned()) else { continue };
-        if record.removed.is_some() {
+        let Some(books) = t.books() else {
+            failed = Some(Kind::Offline);
             continue;
-        }
-        if let Err(e) = t.remove_book(store, fingerprint, &record) {
+        };
+        let Some(record) = books.get(fingerprint).filter(|r| r.removed.is_none()) else { continue };
+        if let Err(e) = t.remove_book(store, fingerprint, record) {
             failed = Some(e.kind);
         }
+    }
+    if failed.is_none() {
+        let _ = store.update(|s| {
+            s.removed_here.remove(fingerprint);
+        });
     }
     failed.map_or(Verdict::Done, Verdict::Retry)
 }
@@ -141,16 +161,22 @@ pub(super) struct Reconciled {
 /// back after its removal), or to leave this library (another device removed
 /// it from the clouds after it came here). Returns the uploads' fingerprints
 /// and the books to move out.
+/// A book found by the library's first scan carries its file's date, which
+/// says nothing about when it came to this device; for removals it counts as
+/// arriving at that first scan (`since`), so a copied-in old collection never
+/// loses books removed before it arrived.
 pub(super) fn sort_library(
-    library: &[crate::library::Entry],
-    per_cloud: &[std::collections::HashMap<String, crate::cloud::BookRecord>],
-    latest: &std::collections::HashMap<String, crate::cloud::BookRecord>,
-) -> (Vec<String>, Vec<crate::library::Entry>) {
+    library: &[Entry],
+    per_cloud: &[HashMap<String, BookRecord>],
+    latest: &HashMap<String, BookRecord>,
+    since: u64,
+) -> (Vec<String>, Vec<Entry>) {
     let mut uploads = Vec::new();
     let mut moved_out = Vec::new();
     for entry in library {
+        let arrived = entry.added.max(since);
         match latest.get(&entry.fingerprint) {
-            Some(record) if record.removed.is_some_and(|at| at >= entry.added) => moved_out.push(entry.clone()),
+            Some(record) if record.removed.is_some_and(|at| at >= arrived) => moved_out.push(entry.clone()),
             _ if per_cloud.iter().any(|books| books.get(&entry.fingerprint).is_none_or(|r| r.removed.is_some())) => {
                 uploads.push(entry.fingerprint.clone());
             }
@@ -174,18 +200,21 @@ pub(super) fn reconcile(store: &Store, books: &LibraryBooks, transports: &[&dyn 
     let Some(latest) = latest_of(&per_cloud) else { return Reconciled::default() };
     let library = books.snapshot(store, &root);
     let removed_here = store.read(|s| s.removed_here.clone());
-    let (uploads, moved_out) = sort_library(&library, &per_cloud, &latest);
+    let since = store.read(|s| s.library_since.as_ref().filter(|(at, _)| *at == root).map_or(0, |(_, t)| *t));
+    let (uploads, moved_out) = sort_library(&library, &per_cloud, &latest, since);
     let mut jobs: Vec<Job> = uploads.into_iter().map(|fingerprint| Job::Upload { fingerprint }).collect();
-    let local: std::collections::BTreeSet<String> = library.iter().map(|b| b.fingerprint.clone()).collect();
+    let local: BTreeSet<String> = library.iter().map(|b| b.fingerprint.clone()).collect();
     let missing = super::collect_missing(store, &latest, &local, &removed_here);
     if missing.len() <= AUTO_BOOKS && missing.iter().map(|m| m.size).sum::<u64>() <= AUTO_BYTES {
         jobs.extend(missing.into_iter().map(|m| Job::Download { fingerprint: m.fingerprint }));
     }
     let _ = store.update(|s| {
         for job in jobs {
-            queue(&mut s.outbox, job);
+            queue_once(&mut s.outbox, job);
         }
-        s.removed_here.retain(|fingerprint| latest.get(fingerprint).is_some_and(|r| r.removed.is_none()));
+        // Removed books forgets only books removed from the clouds: a cloud
+        // that couldn't be read, or a book not uploaded yet, keeps its entry.
+        s.removed_here.retain(|fingerprint| latest.get(fingerprint).is_none_or(|r| r.removed.is_none()));
     });
     let mut moved = 0;
     for entry in moved_out {

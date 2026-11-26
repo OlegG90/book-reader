@@ -24,7 +24,7 @@ import { SORTS, SORT_LABELS, type Sort } from './library'
 import { createCatalogView } from './catalog-view'
 import { setFormats } from './catalog'
 import { createSeriesView } from './series-view'
-import { closePopup } from './book-menu'
+import { closePopup, confirmDialog } from './book-menu'
 import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
@@ -412,7 +412,14 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
   openLatestRelease: () => void invoke('open_latest_release').catch(console.error),
   organizeLibrary: () => void library.organize(),
   removeFromClouds: fingerprints => {
-    void invoke('sync_remove_from_clouds', { fingerprints }).then(refreshCloudStatus, e => showError(undefined, e))
+    const n = fingerprints.length
+    void confirmDialog({
+      title: `Remove ${n === 1 ? 'the book' : `${n} books`} from the clouds?`,
+      text: 'They leave every cloud, and every other device moves them out of its library (to the Recycle Bin on Windows). Reading positions and bookmarks are kept.',
+      confirm: 'Remove',
+    }).then(ok => {
+      if (ok) void invoke('sync_remove_from_clouds', { fingerprints }).then(refreshCloudStatus, e => showError(undefined, e))
+    })
   },
   close: closePanels,
 })

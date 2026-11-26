@@ -42,6 +42,9 @@ pub struct State {
     /// not downloaded again here, and listed under Removed books until they
     /// are removed from the clouds too (or come back).
     pub removed_here: BTreeSet<String>,
+    /// The library folder and when this device first scanned it (ms): books
+    /// found then count as arriving then, whatever their file dates say.
+    pub library_since: Option<(PathBuf, u64)>,
 }
 
 /// Reads the outbox, skipping entries this build doesn't know (a job kind

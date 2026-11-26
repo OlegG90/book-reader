@@ -606,7 +606,8 @@ pub(crate) fn sync_queue_position(
 /// devices' libraries too, and Removed books forgets them.
 #[tauri::command(async)]
 pub(crate) fn sync_remove_from_clouds(store: State<Store>, engine: State<SyncEngine>, fingerprints: Vec<String>) -> CmdResult<()> {
-    store.update(|s| s.removed_here.retain(|f| !fingerprints.contains(f))).map_err(|e| e.to_string())?;
+    // The books stay in removed_here until every cloud has the removal (the
+    // engine drops them then), so none is downloaded back meanwhile.
     queue_jobs(&store, &engine, fingerprints.into_iter().map(|fingerprint| Job::Remove { fingerprint }))
 }
 
@@ -614,7 +615,14 @@ pub(crate) fn sync_remove_from_clouds(store: State<Store>, engine: State<SyncEng
 /// Removed books list, from which they can be removed from the clouds too.
 #[tauri::command(async)]
 pub(crate) fn sync_removed_books(store: State<Store>) -> Vec<MissingBook> {
-    let removed_here = store.read(|s| s.removed_here.clone());
+    // A book on its way out of the clouds is no longer listed.
+    let removed_here: BTreeSet<String> = store.read(|s| {
+        let leaving: BTreeSet<&str> = s.outbox.iter().filter_map(|p| match &p.job {
+            Job::Remove { fingerprint } => Some(fingerprint.as_str()),
+            _ => None,
+        }).collect();
+        s.removed_here.iter().filter(|f| !leaving.contains(f.as_str())).cloned().collect()
+    });
     if removed_here.is_empty() {
         return Vec::new();
     }
@@ -1283,10 +1291,28 @@ mod tests {
         let per_cloud = vec![a.clone(), b];
         let latest = super::latest_of(&per_cloud).unwrap();
         let library = [entry("both", 10), entry("new", 10), entry("gone-elsewhere", 10), entry("came-back", 90)];
-        let (uploads, moved_out) = super::engine::sort_library(&library, &per_cloud, &latest);
+        let (uploads, moved_out) = super::engine::sort_library(&library, &per_cloud, &latest, 0);
         // "both" is missing from the second cloud; "came-back" was added again after its removal.
         assert_eq!(uploads, ["both", "new", "came-back"]);
         assert_eq!(moved_out.iter().map(|e| e.fingerprint.as_str()).collect::<Vec<_>>(), ["gone-elsewhere"]);
+        // A device whose first scan came after the removal keeps its old copy.
+        let (_, moved_out) = super::engine::sort_library(&library, &per_cloud, &latest, 60);
+        assert!(moved_out.is_empty());
+    }
+
+    #[test]
+    fn a_removal_waits_for_a_cloud_that_cannot_be_read() {
+        let down = MemCloud::new(true);
+        let (_dir, store, books, _root) = library_with(&[]);
+        store
+            .update(|s| {
+                s.removed_here.insert("fp".into());
+                super::engine::queue(&mut s.outbox, Job::Remove { fingerprint: "fp".into() });
+            })
+            .unwrap();
+        super::engine::run_due(&store, &books, &[&CloudTransport(&down)], 0);
+        assert_eq!(store.read(|s| s.outbox[0].attempts), 1, "retried, not done");
+        assert!(store.read(|s| s.removed_here.contains("fp")), "and never downloaded back meanwhile");
     }
 
     #[test]
@@ -1300,6 +1326,7 @@ mod tests {
         super::engine::run_due(&store, &books, &[&via], 0);
         assert!(store.read(|s| s.outbox.is_empty()));
         assert!(!cloud.names().iter().any(|n| n.starts_with("book-")), "the file went");
+        assert!(store.read(|s| !s.removed_here.contains(&fp)), "Removed books forgets it once every cloud has the removal");
         let latest = super::latest_books(&store, &[&via]).unwrap();
         assert!(latest[&fp].removed.is_some(), "and every device learns of it");
         // Another device lists it neither as missing nor as Removed books.
