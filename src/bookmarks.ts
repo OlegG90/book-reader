@@ -27,6 +27,18 @@ export function toggleBookmark(list: Bookmark[], page: Page): Bookmark[] {
   return [...list, mark].sort((a, b) => a.fraction - b.fraction)
 }
 
+/**
+ * The bookmarks with their CFIs moved to the book's current sections, or null
+ * when none moved. An FB2 book whose long chapters reader-core cuts into parts
+ * (from 0.4) numbers its sections anew; `upgrade` is its `upgradeCFI`, and
+ * books that have none keep their CFIs.
+ */
+export function upgradeBookmarks(list: Bookmark[], upgrade?: (cfi: string) => string): Bookmark[] | null {
+  if (!upgrade) return null
+  const moved = list.map(mark => ({ ...mark, cfi: upgrade(mark.cfi) }))
+  return moved.some((mark, i) => mark.cfi !== list[i].cfi) ? moved : null
+}
+
 export const hasBookmark = (list: Bookmark[], pageCfi: string | undefined) =>
   !!pageCfi && list.some(mark => onPage(mark, pageCfi))
 

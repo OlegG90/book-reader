@@ -6,7 +6,7 @@ import { setReading } from './platform'
 import { createSyncManager, type SyncManager } from './sync-manager'
 import { SAVE_DELAY_MS, type Settings } from './settings'
 import { FINISHED_AT } from './library'
-import { bookmarkLabel, hasBookmark, toggleBookmark, type Bookmark } from './bookmarks'
+import { bookmarkLabel, hasBookmark, toggleBookmark, upgradeBookmarks, type Bookmark } from './bookmarks'
 import { $ } from './dom'
 
 export interface Position {
@@ -170,11 +170,21 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
     $('bottombar').hidden = false
     deps.updateTopbarButtons()
     if (info.offer && deps.getSettings().offerLibrary) deps.showOffer(info.offer)
-    bookmarks = await invoke<Bookmark[]>('get_bookmarks', { fingerprint }).catch((e): Bookmark[] => {
+    const opened = book
+    const stored = await invoke<Bookmark[]>('get_bookmarks', { fingerprint }).catch((e): Bookmark[] => {
       console.error(e)
       return []
     })
+    // Another book opened meanwhile: its own open() shows its bookmarks.
+    if (book !== opened) return
+    // Bookmarks made before reader-core cut this book's long chapters move,
+    // and are saved moved where the window saves. reader-core's Book type
+    // doesn't list FB2's upgradeCFI yet.
+    const parsed = opened.view.book as { upgradeCFI?: (cfi: string) => string } | undefined
+    const upgraded = upgradeBookmarks(stored, parsed?.upgradeCFI)
+    bookmarks = upgraded ?? stored
     renderBookmarks()
+    if (upgraded && !noSave) saveBookmarks()
     setReading(true, deps.getSettings().volumeKeys)
     void sync.pull()
   }
@@ -254,7 +264,12 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
   function setBookmarks(list: Bookmark[]) {
     bookmarks = list
     renderBookmarks()
-    void invoke('set_bookmarks', { fingerprint, bookmarks: list }).catch(console.error)
+    saveBookmarks()
+  }
+
+  /** Saves the book's bookmarks as they are now. */
+  function saveBookmarks() {
+    void invoke('set_bookmarks', { fingerprint, bookmarks }).catch(console.error)
   }
 
   /** Draws the drawer's Bookmarks tab and its count. */
