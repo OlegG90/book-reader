@@ -177,10 +177,10 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
     void sync.pull()
   }
 
-  /** Uploads the open book's file when it counts as reading. */
+  /** Uploads the open book's file when it counts as reading; `--no-save` windows don't sync. */
   function pushBookFile() {
     const fraction = book?.view.lastLocation?.fraction
-    if (fraction == null || fraction <= 0 || fraction >= FINISHED_AT || !fingerprint) return
+    if (noSave || fraction == null || fraction <= 0 || fraction >= FINISHED_AT || !fingerprint) return
     void invoke<boolean>('sync_push_book', { fingerprint }).catch(e => console.warn('sync:', e))
   }
 
