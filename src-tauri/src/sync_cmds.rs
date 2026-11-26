@@ -75,8 +75,8 @@ trait Transport {
         let _ = remote_name;
         Ok(None)
     }
-    /// Uploads a book file the cloud lacks, and records it in the cloud
-    /// manifest; true when the cloud gained the book.
+    /// Uploads a book file the cloud lacks, and records it in this device's
+    /// manifest there; true when the cloud gained the book.
     fn push_book(&self, store: &Store, fingerprint: &str, record: &crate::cloud::BookRecord, bytes: &[u8]) -> Result<bool, SyncError> {
         let _ = (store, fingerprint, record, bytes);
         Ok(false)
@@ -230,7 +230,8 @@ fn merge_remote(
             None => library.contains(fingerprint) && record.time > 0,
         };
         if newer && record.device_id != own_device {
-            local.insert(fingerprint.clone(), Position { cfi: record.cfi.clone(), fraction: record.fraction, time: record.time });
+            let by = Some(crate::store::Writer { device: record.device.clone(), device_id: record.device_id.clone() });
+            local.insert(fingerprint.clone(), Position { cfi: record.cfi.clone(), fraction: record.fraction, time: record.time, by });
             changed += 1;
         }
     }
@@ -685,7 +686,7 @@ mod tests {
 
 
     fn here(cfi: &str, time: u64) -> Position {
-        Position { cfi: cfi.into(), fraction: 0.5, time }
+        Position { cfi: cfi.into(), fraction: 0.5, time, by: None }
     }
 
     fn server(cfi: &str, device_id: &str, timestamp: u64) -> Progress {
@@ -987,21 +988,45 @@ mod tests {
         assert!(!uploaded.get() && stored.borrow().is_empty(), "nothing moves, nothing is overwritten");
     }
 
+    /// A positions file as a device writes it: (fingerprint, cfi, time, writer).
+    fn positions_file(records: &[(&str, &str, u64, &str)]) -> Vec<u8> {
+        let positions: serde_json::Map<String, serde_json::Value> = records
+            .iter()
+            .map(|(fp, cfi, time, by)| {
+                (fp.to_string(), serde_json::json!({ "cfi": cfi, "fraction": 0.5, "time": time, "device": by, "deviceId": by }))
+            })
+            .collect();
+        serde_json::json!({ "version": 1, "positions": positions }).to_string().into_bytes()
+    }
+
     #[test]
     fn two_devices_keep_their_own_files_and_see_each_others() {
         let cloud = MemCloud::new(false);
-        let local = HashMap::new();
-        crate::cloud::push(&cloud, &local, "fp", "epubcfi(/6/2)", 0.2, "PC", "pc").unwrap();
-        // Positions carry the time they were saved; the phone saves later.
-        std::thread::sleep(std::time::Duration::from_millis(5));
-        crate::cloud::push(&cloud, &local, "fp", "epubcfi(/6/9)", 0.9, "Phone", "phone").unwrap();
-        assert_eq!(cloud.names(), ["positions-pc.json", "positions-phone.json"]);
-        let newest = crate::cloud::pull(&cloud, "fp").unwrap();
-        assert_eq!(newest.progress, "epubcfi(/6/9)", "the newer one, whichever device wrote it");
-        // A file from an earlier version is still read.
-        let legacy = serde_json::json!({ "version": 1, "positions": { "old": { "cfi": "x", "fraction": 0.1, "time": 5, "device": "Tab", "deviceId": "tab" } } });
-        cloud.files.lock().unwrap().insert("sync-state.json".into(), legacy.to_string().into_bytes());
-        assert_eq!(crate::cloud::pull(&cloud, "old").unwrap().progress, "x");
+        crate::cloud::push(&cloud, &HashMap::new(), "fp", "epubcfi(/6/2)", 0.2, "PC", "pc").unwrap();
+        assert_eq!(cloud.names(), ["positions-pc.json"], "only its own file");
+        // The phone read on later.
+        cloud.files.lock().unwrap().insert("positions-phone.json".into(), positions_file(&[("fp", "epubcfi(/6/9)", u64::MAX, "phone")]));
+        assert_eq!(crate::cloud::pull(&cloud, "fp").unwrap().progress, "epubcfi(/6/9)");
+    }
+
+    #[test]
+    fn the_device_that_read_there_names_a_shared_place() {
+        let cloud = MemCloud::new(false);
+        // The PC took the phone's place at startup and passes it on under the phone's name.
+        cloud.files.lock().unwrap().insert("positions-a-pc.json".into(), positions_file(&[("fp", "x", 100, "phone")]));
+        cloud.files.lock().unwrap().insert("positions-phone.json".into(), positions_file(&[("fp", "x", 100, "phone")]));
+        assert_eq!(crate::cloud::pull(&cloud, "fp").unwrap().device_id, "phone");
+    }
+
+    #[test]
+    fn a_broken_or_old_file_never_hides_the_rest() {
+        let cloud = MemCloud::new(false);
+        cloud.files.lock().unwrap().insert("positions-broken.json".into(), b"not json".to_vec());
+        cloud.files.lock().unwrap().insert("positions-phone.json".into(), positions_file(&[("fp", "new", 200, "phone")]));
+        // The shared file of an earlier version: read, but it loses a tie.
+        cloud.files.lock().unwrap().insert("sync-state.json".into(), positions_file(&[("fp", "old", 200, "tab"), ("only-old", "o", 5, "tab")]));
+        assert_eq!(crate::cloud::pull(&cloud, "fp").unwrap().progress, "new");
+        assert_eq!(crate::cloud::pull(&cloud, "only-old").unwrap().progress, "o");
     }
 
     /// A library with real files on disk and a matching scan.

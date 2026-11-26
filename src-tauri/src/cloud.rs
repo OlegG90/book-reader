@@ -32,7 +32,8 @@ pub trait CloudStore: Sync {
     fn get(&self, access: &str, name: &str) -> Result<Option<Vec<u8>>, SyncError>;
     /// Writes a file by name, creating it or replacing what is there.
     fn put(&self, access: &str, name: &str, bytes: &[u8]) -> Result<(), SyncError>;
-    /// The names of the files whose name starts with `prefix`.
+    /// The names of the files whose name starts with `prefix` ("" lists
+    /// every file); an app folder not made yet lists nothing.
     fn list(&self, access: &str, prefix: &str) -> Result<Vec<String>, SyncError>;
     /// The cloud's last failure, for the settings.
     fn errors(&self) -> &ErrorSlot;
@@ -103,14 +104,19 @@ fn device_file(prefix: &str, device_id: &str) -> String {
     format!("{prefix}{device_id}.json")
 }
 
-/// Every file of a kind in the cloud: each device's, then the legacy one.
+/// Every file of a kind in the cloud, from one listing: each device's (in
+/// name order), then the legacy one when it is there.
 fn files_of(store: &dyn CloudStore, access: &str, prefix: &str, legacy: &str) -> Result<Vec<String>, SyncError> {
-    let mut names: Vec<String> = store.list(access, prefix)?.into_iter().filter(|n| n.starts_with(prefix) && n.ends_with(".json")).collect();
+    let listed = store.list(access, "")?;
+    let mut names: Vec<String> = listed.iter().filter(|n| n.starts_with(prefix) && n.ends_with(".json")).cloned().collect();
     names.sort();
     names.dedup();
-    names.push(legacy.into());
+    if listed.iter().any(|n| n == legacy) {
+        names.push(legacy.into());
+    }
     Ok(names)
 }
+
 
 /// Every cloud, in merge order.
 pub fn stores() -> [&'static dyn CloudStore; 2] {
@@ -154,8 +160,9 @@ fn parse_positions(store: &dyn CloudStore, body: &[u8]) -> Result<HashMap<String
 }
 
 /// Every device's positions, merged newest per book: `None` when no device
-/// ever wrote one. Another device's broken file is passed over, so it never
-/// stops the rest from syncing.
+/// ever wrote one. A device's file also holds positions it took from others,
+/// still under their writer, so a tie is the same record. Another device's
+/// broken file is passed over, so it never stops the rest.
 fn all_positions(store: &dyn CloudStore, access: &str) -> Result<Option<HashMap<String, RemoteRecord>>, SyncError> {
     let mut merged: Option<HashMap<String, RemoteRecord>> = None;
     for name in files_of(store, access, POSITIONS_PREFIX, LEGACY_POSITIONS)? {
@@ -191,8 +198,8 @@ pub fn pull(store: &dyn CloudStore, fingerprint: &str) -> Option<kosync::Progres
 }
 
 /// Writes this device's positions file: every local position, with the open
-/// book's new one, stamped with this device. Nothing is uploaded when the
-/// cloud already has exactly that.
+/// book's new one, stamped with this device. Only this device writes it, so
+/// nothing needs reading first.
 pub fn push(
     store: &dyn CloudStore,
     local: &HashMap<String, Position>,
@@ -205,15 +212,10 @@ pub fn push(
     let pushed = (|| {
         let access = store.access_token()?;
         let mut local = local.clone();
-        local.insert(fingerprint.into(), Position { cfi: cfi.into(), fraction, time: crate::clock::now_ms() });
+        local.insert(fingerprint.into(), Position { cfi: cfi.into(), fraction, time: crate::clock::now_ms(), by: None });
         let mine = own_records(&local, device, device_id);
-        let name = device_file(POSITIONS_PREFIX, device_id);
-        let kept = store.get(&access, &name)?.and_then(|body| parse_positions(store, &body).ok());
-        if kept.as_ref() == Some(&mine) {
-            return Ok(());
-        }
         let body = serde_json::to_vec(&SyncFile { version: POSITIONS_VERSION, positions: mine }).map_err(|e| SyncError::data(e.to_string()))?;
-        store.put(&access, &name, &body)
+        store.put(&access, &device_file(POSITIONS_PREFIX, device_id), &body)
     })();
     settle(store, pushed)
 }
@@ -266,7 +268,9 @@ pub fn push_book(store: &dyn CloudStore, device_id: &str, fingerprint: &str, rec
             bytes,
             || all_books(store, &access),
             |name, bytes| store.put(&access, name, bytes),
-            || store.get(&access, &own)?.map(|body| manifest_books(&body)).transpose(),
+            // A broken own manifest starts over: the books it named are
+            // uploaded again under the same names. A failed read stops.
+            || Ok(store.get(&access, &own)?.and_then(|body| manifest_books(&body).ok())),
             |books| store.put(&access, &own, &render_manifest(books).map_err(SyncError::data)?),
         )
     });
@@ -296,13 +300,17 @@ struct SyncFile {
 }
 
 /// This device's records for its positions file: every local position,
-/// stamped with this device (the echo check needs a writer).
+/// stamped with the device that saved it — this one, or the device it came
+/// from (the echo check and the jump offer need the real writer).
 fn own_records(local: &HashMap<String, Position>, device: &str, device_id: &str) -> HashMap<String, RemoteRecord> {
     local
         .iter()
         .map(|(fingerprint, pos)| {
-            let record = RemoteRecord { cfi: pos.cfi.clone(), fraction: pos.fraction, time: pos.time, device: device.into(), device_id: device_id.into() };
-            (fingerprint.clone(), record)
+            let (device, device_id) = match &pos.by {
+                Some(writer) => (writer.device.clone(), writer.device_id.clone()),
+                None => (device.to_string(), device_id.to_string()),
+            };
+            (fingerprint.clone(), RemoteRecord { cfi: pos.cfi.clone(), fraction: pos.fraction, time: pos.time, device, device_id })
         })
         .collect()
 }
@@ -467,15 +475,19 @@ mod tests {
     }
 
     fn position(cfi: &str, time: u64) -> crate::store::Position {
-        crate::store::Position { cfi: cfi.into(), fraction: 0.5, time }
+        crate::store::Position { cfi: cfi.into(), fraction: 0.5, time, by: None }
     }
 
     #[test]
-    fn a_device_writes_its_own_positions_stamped_with_itself() {
+    fn a_device_passes_on_positions_under_their_writer() {
         let mut local = HashMap::new();
-        local.insert("fp".into(), position("a", 100));
-        let mine = own_records(&local, "PC", "pc");
-        assert_eq!((mine["fp"].cfi.as_str(), mine["fp"].device_id.as_str(), mine["fp"].time), ("a", "pc", 100));
+        local.insert("mine".into(), position("a", 100));
+        let mut taken = position("b", 200);
+        taken.by = Some(crate::store::Writer { device: "Phone".into(), device_id: "phone".into() });
+        local.insert("taken".into(), taken);
+        let records = own_records(&local, "PC", "pc");
+        assert_eq!(records["mine"].device_id, "pc");
+        assert_eq!((records["taken"].device.as_str(), records["taken"].device_id.as_str()), ("Phone", "phone"));
     }
 
     fn book_record(name: &str) -> BookRecord {

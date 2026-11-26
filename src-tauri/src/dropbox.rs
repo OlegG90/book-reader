@@ -159,6 +159,10 @@ impl CloudStore for Dropbox {
                 body.to_string().as_bytes(),
             )
             .map_err(SyncError::offline)?;
+            // An app folder nothing was ever written to doesn't exist yet.
+            if reply.status == 409 && String::from_utf8_lossy(&reply.body).contains("not_found") {
+                return Ok(names);
+            }
             if reply.status != 200 {
                 return Err(SyncError::from_reply("Dropbox list", &reply));
             }

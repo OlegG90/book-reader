@@ -72,10 +72,11 @@ pub(crate) fn save_position(store: State<Store>, fingerprint: String, mut positi
     store
         .update(|s| {
             // The time says when the reader moved there (sync compares it), so
-            // saving the same place again (a reflow) keeps it.
-            position.time = match s.positions.get(&fingerprint) {
-                Some(old) if old.cfi == position.cfi => old.time,
-                _ => now_ms(),
+            // saving the same place again (a reflow) keeps it, and keeps the
+            // device that saved it; a new place is this device's own.
+            (position.time, position.by) = match s.positions.get(&fingerprint) {
+                Some(old) if old.cfi == position.cfi => (old.time, old.by.clone()),
+                _ => (now_ms(), None),
             };
             s.positions.insert(fingerprint, position);
         })

@@ -328,7 +328,9 @@ impl CloudStore for Google {
             let mut query = url::form_urlencoded::Serializer::new(String::new());
             query
                 .append_pair("spaces", "appDataFolder")
-                .append_pair("q", &format!("name contains '{}' and trashed = false", escape_query(prefix)))
+                // The whole app folder, filtered here: how Drive's "contains"
+                // splits a name with dashes into words isn't documented.
+                .append_pair("q", "trashed = false")
                 .append_pair("fields", "nextPageToken,files(name)")
                 .append_pair("pageSize", "1000");
             if let Some(token) = &page_token {
@@ -340,7 +342,6 @@ impl CloudStore for Google {
             }
             let page: serde_json::Value =
                 serde_json::from_slice(&reply.body).map_err(|e| SyncError::data(format!("Google Drive list is not ours: {e}")))?;
-            // "contains" matches word starts; the prefix itself is checked here.
             for file in page["files"].as_array().into_iter().flatten() {
                 if let Some(name) = file["name"].as_str().filter(|n| n.starts_with(prefix)) {
                     names.push(name.to_string());
