@@ -225,7 +225,7 @@ pub fn check_turning_off(state: &store::State, next: &BTreeSet<String>) -> Resul
         }
     }
     if next.contains("capability:catalogs") && !state.sources.is_empty() {
-        return Err("\"Catalogs\" is in use: delete its catalog sources first.".into());
+        return Err("Catalogs is in use: delete its catalog sources first.".into());
     }
     // A module stays usable only while what it requires stays on: turning
     // one of them off is refused while a module that needs it is still on
@@ -238,7 +238,7 @@ pub fn check_turning_off(state: &store::State, next: &BTreeSet<String>) -> Resul
                 Some(d) => d.label,
                 None => id.as_str(),
             };
-            return Err(format!("\"{label}\" is in use: turn off \"{}\" first.", d.label));
+            return Err(format!("{label} is in use: turn off {} first.", d.label));
         }
     }
     Ok(())
@@ -437,7 +437,7 @@ mod tests {
                 let req_label = definitions().iter().find(|d| d.id == *req).unwrap().label;
                 assert_eq!(
                     check_turning_off(&state, &next),
-                    Err(format!("\"{req_label}\" is in use: turn off \"{}\" first.", def.label))
+                    Err(format!("{req_label} is in use: turn off {} first.", def.label))
                 );
                 let listed = list(&state).into_iter().find(|m| m.id == *req).unwrap();
                 assert!(listed.in_use);

@@ -240,8 +240,8 @@ fn pull_merged(store: &Store, transports: &[&dyn Transport], book: &BookKey) -> 
     remote
 }
 
-/// The newer of two remote positions (a server stamps the time, so the
-/// clocks agree); ties keep the earlier transport.
+/// The newer of two remote positions; ties keep the earlier transport. KOSync
+/// times come from the server, cloud records from each device's clock.
 fn newest(current: Option<kosync::Progress>, next: Option<kosync::Progress>) -> Option<kosync::Progress> {
     match (current, next) {
         (None, next) => next,
@@ -329,6 +329,8 @@ pub(crate) fn sync_push_book(store: State<Store>, books: State<LibraryBooks>, fi
     push_book_to_cloud(&store, &books, &fingerprint)
 }
 
+/// Uploads a library book's file to every cloud that keeps books and lacks it;
+/// true when one gained it, an error only when none did.
 fn push_book_to_cloud(store: &Store, books: &LibraryBooks, fingerprint: &str) -> CmdResult<bool> {
     if !book_transfer_allowed(store) {
         return Ok(false);
@@ -414,6 +416,8 @@ pub(crate) fn sync_missing_books(store: State<Store>, books: State<LibraryBooks>
     missing_cloud_books(&store, &books)
 }
 
+/// The books the clouds hold and the library lacks, leaving out names this
+/// device wouldn't open.
 fn missing_cloud_books(store: &Store, books: &LibraryBooks) -> CmdResult<Vec<MissingBook>> {
     let root = library_root(store)?;
     let local: BTreeSet<String> = books.snapshot(store, &root).into_iter().map(|b| b.fingerprint).collect();
@@ -482,6 +486,8 @@ pub(crate) fn sync_pull_book(store: State<Store>, fingerprint: String) -> CmdRes
     pull_book_from_cloud(&store, &fingerprint)
 }
 
+/// Downloads one book from the first cloud with a good copy and lands it in the
+/// library; true when it landed.
 fn pull_book_from_cloud(store: &Store, fingerprint: &str) -> CmdResult<bool> {
     if !book_transfer_allowed(store) {
         return Ok(false);
@@ -567,6 +573,7 @@ fn device_id(store: &Store) -> CmdResult<String> {
     Ok(id)
 }
 
+/// How this device names itself to the other devices (in the jump offer).
 const DEVICE_NAME: &str = if cfg!(mobile) {
     "Book Reader on Android"
 } else if cfg!(windows) {

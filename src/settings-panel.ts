@@ -496,6 +496,11 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     cloudAddRow.hidden = !visible
   }
 
+  /** Shows the Wi-Fi rule for book files: only on a phone, where networks can be metered. */
+  function setBooksWifiVisible(visible: boolean) {
+    booksWifiRow.hidden = !visible
+  }
+
   /**
    * Shows which cloud is connected and its last sync failure, if any.
    * Sync stays quiet; only the settings say what went wrong.
@@ -534,6 +539,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     setLibraryFolder,
     setCloudConnected,
     setCloudVisible,
+    setBooksWifiVisible,
     setOrganizeVisible,
     setSectionVisible,
     showSection,

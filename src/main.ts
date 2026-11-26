@@ -583,7 +583,10 @@ function applyCapabilities() {
   settingsPage.setSectionVisible('catalogs', catalogs)
   settingsPage.setOrganizeVisible(!off.has('capability:organize'))
   settingsPage.setFileTypesVisible(!isAndroid && !off.has('capability:file-types'))
-  settingsPage.setCloudVisible(!off.has('capability:dropbox') || !off.has('capability:googledrive'))
+  const cloudsOn = !off.has('capability:dropbox') || !off.has('capability:googledrive')
+  settingsPage.setCloudVisible(cloudsOn)
+  // The desktop counts every network as unmetered, so the rule means nothing there.
+  settingsPage.setBooksWifiVisible(cloudsOn && isAndroid)
   settingsPage.setUpdatesVisible(!off.has('capability:update-check'))
   if (!catalogs && (view === 'catalogs' || view === 'settings:catalogs')) {
     showView(view === 'catalogs' ? 'library' : 'settings:modules')

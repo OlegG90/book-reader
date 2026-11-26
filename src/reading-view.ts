@@ -68,6 +68,7 @@ export interface ReadingView {
   showTrackAt(fraction: number): void
 }
 
+/** The reading window: opens a book, keeps and syncs its position and bookmarks, and runs the progress row and contents. */
 export function createReadingView(deps: ReadingDeps): ReadingView {
   let book: BookView | null = null
   let fingerprint = ''
@@ -81,6 +82,7 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
   let pendingSave: PendingSave | null = null
   let saveTimer: number | undefined
 
+  /** Saves the position after a short pause, so turning pages quickly writes once. */
   function scheduleSave(save: PendingSave) {
     if (!deps.getSettings().savePositions || noSave) return
     pendingSave = save
@@ -88,6 +90,7 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
     saveTimer = window.setTimeout(flushSave, SAVE_DELAY_MS)
   }
 
+  /** Writes a waiting position now (before closing, or when the pause ends). */
   async function flushSave() {
     clearTimeout(saveTimer)
     const save = pendingSave
@@ -184,6 +187,7 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
     void invoke<boolean>('sync_push_book', { fingerprint }).catch(e => console.warn('sync:', e))
   }
 
+  /** Closes the open book: pushes its last position, uploads its file when it counts as reading, and clears the reading chrome. */
   function close() {
     if (book) setReading(false, deps.getSettings().volumeKeys)
     void sync.push()
@@ -207,6 +211,7 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
     deps.setChrome(false)
   }
 
+  /** Follows a page turn: the progress row, the chapter, the bookmark button, and a save of the new position. */
   function relocated(location: Relocation) {
     const { fraction, cfi, tocItem } = location
     const percent = Math.round(fraction * 100)
@@ -225,17 +230,20 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
 
   let currentTocHref: string | undefined
 
+  /** Marks the current chapter in the contents. */
   function highlightToc(href: string | undefined) {
     if (!href || href === currentTocHref) return
     currentTocHref = href
     tocView?.setCurrentHref(href)
   }
 
+  /** Moves the progress track's fill and knob to `fraction`. */
   function showTrackAt(fraction: number) {
     $('progress-done').style.width = `${fraction * 100}%`
     $('progress-knob').style.left = `${fraction * 100}%`
   }
 
+  /** Bookmarks the current page, or removes the bookmark on it. */
   function toggleCurrentBookmark() {
     const location = book?.view.lastLocation
     if (!location || noSave) return
@@ -243,12 +251,14 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
     setBookmarks(toggleBookmark(bookmarks, mark))
   }
 
+  /** Keeps the book's bookmarks, shows them and saves them. */
   function setBookmarks(list: Bookmark[]) {
     bookmarks = list
     renderBookmarks()
     void invoke('set_bookmarks', { fingerprint, bookmarks: list }).catch(console.error)
   }
 
+  /** Draws the drawer's Bookmarks tab and its count. */
   function renderBookmarks() {
     $('bookmark-count').textContent = bookmarks.length ? `(${bookmarks.length})` : ''
     $('bookmarks-empty').hidden = bookmarks.length > 0
@@ -277,6 +287,7 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
     updateBookmarkButton()
   }
 
+  /** Fills the top bar's bookmark when the current page has one. */
   function updateBookmarkButton() {
     const marked = hasBookmark(bookmarks, book?.view.lastLocation?.cfi)
     $('bookmark-button').setAttribute('aria-pressed', String(marked))

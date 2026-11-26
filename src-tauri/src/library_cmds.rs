@@ -369,6 +369,7 @@ pub(crate) fn book_cloud(store: State<Store>, fingerprint: String) -> CmdResult<
     book_cloud_for(&store, &fingerprint)
 }
 
+/// The cloud verdicts for one fingerprint (see `book_cloud`).
 fn book_cloud_for(store: &Store, fingerprint: &str) -> CmdResult<Vec<CloudStatus>> {
     let labels: HashMap<&str, &str> = store.read(modules::list).into_iter().map(|m| (m.id, m.label)).collect();
     let clouds: [CloudTransport; 2] = [
