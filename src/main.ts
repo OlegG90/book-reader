@@ -24,11 +24,11 @@ import { SORTS, SORT_LABELS, type Sort } from './library'
 import { createCatalogView } from './catalog-view'
 import { setFormats } from './catalog'
 import { createSeriesView } from './series-view'
-import { closePopup } from './book-menu'
+import { closePopup, confirmDialog } from './book-menu'
 import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
-import { cloudModuleId, createAppearancePanel, createSettingsPage, type CloudConnection, type ModuleInfo, type SettingsSection } from './settings-panel'
+import { cloudModuleId, createAppearancePanel, createSettingsPage, type CloudConnection, type ModuleInfo, type RemovedBook, type SettingsSection } from './settings-panel'
 import { initBackButton, initIncoming, initOauthAnswer, initVolumeKeys, isAndroid, pollOauthAnswer, setReading } from './platform'
 import { createReadingView, type AddMode, type Offer } from './reading-view'
 import { createLibraryView, type View } from './library-view'
@@ -411,6 +411,16 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
   checkForUpdate: () => invoke('check_for_update'),
   openLatestRelease: () => void invoke('open_latest_release').catch(console.error),
   organizeLibrary: () => void library.organize(),
+  removeFromClouds: fingerprints => {
+    const n = fingerprints.length
+    void confirmDialog({
+      title: `Remove ${n === 1 ? 'the book' : `${n} books`} from the clouds?`,
+      text: 'They leave every cloud, and every other device moves them out of its library (to the Recycle Bin on Windows). Reading positions and bookmarks are kept.',
+      confirm: 'Remove',
+    }).then(ok => {
+      if (ok) void invoke('sync_remove_from_clouds', { fingerprints }).then(refreshCloudStatus, e => showError(undefined, e))
+    })
+  },
   close: closePanels,
 })
 const appearancePanel = createAppearancePanel($('appearance'), settings, changes => void changeSettings(changes), {
@@ -634,6 +644,14 @@ async function refreshCloudStatus() {
   })
   connectedClouds = clouds.filter(c => c.connected).map(c => c.id)
   settingsPage.setClouds(clouds)
+  // Asks the clouds, so only with one connected.
+  const removed = connectedClouds.length
+    ? await invoke<RemovedBook[]>('sync_removed_books').catch((e): RemovedBook[] => {
+        console.error(e)
+        return []
+      })
+    : []
+  settingsPage.setRemovedBooks(removed)
 }
 
 // ---- Edge controls ----------------------------------------------------------

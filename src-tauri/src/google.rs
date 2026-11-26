@@ -188,12 +188,17 @@ fn exchange(code: &str, verifier: &str, stored: Option<String>) -> Result<(Strin
 /// two files with one name (two devices creating it at once); every device
 /// then picks the oldest, so they all keep reading and writing the same one.
 fn find_file(access: &str, name: &str) -> Result<Option<String>, SyncError> {
+    Ok(find_files(access, name, 1)?.into_iter().next())
+}
+
+/// The ids of the app folder's files with this name, oldest first, at most `limit`.
+fn find_files(access: &str, name: &str, limit: u32) -> Result<Vec<String>, SyncError> {
     let query = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("spaces", "appDataFolder")
         .append_pair("q", &name_query(name))
         .append_pair("orderBy", "createdTime")
         .append_pair("fields", "files(id)")
-        .append_pair("pageSize", "1")
+        .append_pair("pageSize", &limit.to_string())
         .finish();
     let reply = net::bearer_get(&format!("https://www.googleapis.com/drive/v3/files?{query}"), access).map_err(SyncError::offline)?;
     if reply.status != 200 {
@@ -201,7 +206,7 @@ fn find_file(access: &str, name: &str) -> Result<Option<String>, SyncError> {
     }
     let list: serde_json::Value =
         serde_json::from_slice(&reply.body).map_err(|e| SyncError::data(format!("Google Drive list is not ours: {e}")))?;
-    Ok(list["files"].as_array().and_then(|files| files.first()).and_then(|file| file["id"].as_str()).map(str::to_string))
+    Ok(list["files"].as_array().into_iter().flatten().filter_map(|file| file["id"].as_str()).map(str::to_string).collect())
 }
 
 /// The Drive search for one file name; quotes and backslashes in book names
@@ -314,6 +319,18 @@ impl CloudStore for Google {
     fn put(&self, access: &str, name: &str, bytes: &[u8]) -> Result<(), SyncError> {
         let file_id = find_file(access, name)?;
         upload_bytes(access, file_id.as_deref(), name, bytes)
+    }
+
+    fn delete(&self, access: &str, name: &str) -> Result<(), SyncError> {
+        // Two files may share a name (see find_file): every one goes, each
+        // looked up once (a listing that lags must not loop).
+        for id in find_files(access, name, 10)? {
+            let reply = net::bearer_delete(&format!("https://www.googleapis.com/drive/v3/files/{id}"), access).map_err(SyncError::offline)?;
+            if reply.status != 204 && reply.status != 200 && reply.status != 404 {
+                return Err(SyncError::from_reply("Google Drive delete", &reply));
+            }
+        }
+        Ok(())
     }
 
     fn list(&self, access: &str, prefix: &str) -> Result<Vec<String>, SyncError> {

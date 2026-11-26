@@ -35,6 +35,8 @@ pub trait CloudStore: Sync {
     /// The names of the files whose name starts with `prefix` ("" lists
     /// every file); an app folder not made yet lists nothing.
     fn list(&self, access: &str, prefix: &str) -> Result<Vec<String>, SyncError>;
+    /// Deletes a file by name; a file that isn't there is no failure.
+    fn delete(&self, access: &str, name: &str) -> Result<(), SyncError>;
     /// The cloud's last failure, for the settings.
     fn errors(&self) -> &ErrorSlot;
     /// The access token while it lives, so one sync round asks for it once.
@@ -225,8 +227,9 @@ fn manifest_books(body: &[u8]) -> Result<HashMap<String, BookRecord>, SyncError>
     parse_manifest(body).map_err(SyncError::data)
 }
 
-/// The books every device recorded: `None` when no device ever uploaded
-/// one. Another device's broken manifest is passed over.
+/// What every device recorded about each book, the latest event winning: an
+/// upload, or a removal from the clouds (`removed`). `None` when no device
+/// ever uploaded a book. Another device's broken manifest is passed over.
 fn all_books(store: &dyn CloudStore, access: &str) -> Result<Option<HashMap<String, BookRecord>>, SyncError> {
     let mut union: Option<HashMap<String, BookRecord>> = None;
     for name in files_of(store, access, BOOKS_PREFIX, LEGACY_BOOKS)? {
@@ -234,27 +237,53 @@ fn all_books(store: &dyn CloudStore, access: &str) -> Result<Option<HashMap<Stri
         let Ok(books) = manifest_books(&body) else { continue };
         let all = union.get_or_insert_with(HashMap::new);
         for (fingerprint, record) in books {
-            all.entry(fingerprint).or_insert(record);
+            if all.get(&fingerprint).is_none_or(|have| record.event_time() > have.event_time()) {
+                all.insert(fingerprint, record);
+            }
         }
     }
     Ok(union)
 }
 
-/// The cloud's books from every device: `None` when no book was ever
-/// uploaded, an error when the cloud could not be read (never mistaken for
-/// an empty one).
-pub fn manifest(store: &dyn CloudStore) -> Result<Option<HashMap<String, BookRecord>>, SyncError> {
+/// Every book the cloud knows, removed ones included (`removed` set): `None`
+/// when no book was ever uploaded, an error when the cloud could not be read
+/// (never mistaken for an empty one).
+pub fn book_events(store: &dyn CloudStore) -> Result<Option<HashMap<String, BookRecord>>, SyncError> {
     all_books(store, &store.access_token()?)
 }
 
-/// The cloud's books, if the app ever synced books; a failure goes to the settings.
+/// The books the cloud holds now (removed ones left out); `None` and errors
+/// as in `book_events`.
+pub fn manifest(store: &dyn CloudStore) -> Result<Option<HashMap<String, BookRecord>>, SyncError> {
+    Ok(book_events(store)?.map(|mut books| {
+        books.retain(|_, record| record.removed.is_none());
+        books
+    }))
+}
+
+/// Every book the cloud knows, removed ones included, if the app ever synced
+/// books; a failure goes to the settings.
 pub fn book_manifest(store: &dyn CloudStore) -> Option<HashMap<String, BookRecord>> {
-    settle(store, manifest(store)).ok().flatten()
+    settle(store, book_events(store)).ok().flatten()
 }
 
 /// A book file by its cloud name; `None` when the cloud never saw it.
 pub fn download_book(store: &dyn CloudStore, remote_name: &str) -> Result<Option<Vec<u8>>, SyncError> {
     settle(store, store.access_token().and_then(|access| store.get(&access, remote_name)))
+}
+
+/// Removes a book from the cloud: this device's manifest records the removal
+/// (so every device learns of it, and the book isn't uploaded again), then
+/// the file is deleted.
+pub fn remove_book(store: &dyn CloudStore, device_id: &str, fingerprint: &str, record: &BookRecord) -> Result<(), SyncError> {
+    let own = device_file(BOOKS_PREFIX, device_id);
+    let removed = store.access_token().and_then(|access| {
+        let mut mine = store.get(&access, &own)?.and_then(|body| manifest_books(&body).ok()).unwrap_or_default();
+        mine.insert(fingerprint.into(), BookRecord { removed: Some(crate::clock::now_ms()), ..record.clone() });
+        store.put(&access, &own, &render_manifest(&mine).map_err(SyncError::data)?)?;
+        store.delete(&access, &remote_book_name(fingerprint, &record.name))
+    });
+    settle(store, removed)
 }
 
 /// Uploads a book file the cloud lacks and records it in this device's
@@ -316,13 +345,27 @@ fn own_records(local: &HashMap<String, Position>, device: &str, device_id: &str)
 }
 
 /// One book file the cloud keeps, keyed by fingerprint in `BookManifest`.
-/// Same fingerprint means same bytes, so records never conflict.
+/// Same fingerprint means same bytes, so records never conflict; what
+/// changes is whether the book is there, told by the latest event.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BookRecord {
     pub name: String,
     pub size: u64,
     pub sha256: String,
+    /// When a device uploaded it (ms); 0 for records older than removals.
+    #[serde(default)]
+    pub added: u64,
+    /// When it was removed from the clouds (ms), if it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub removed: Option<u64>,
+}
+
+impl BookRecord {
+    /// When the record's latest event happened: its removal, else its upload.
+    pub fn event_time(&self) -> u64 {
+        self.removed.unwrap_or(self.added)
+    }
 }
 
 /// The fingerprint-keyed book manifest envelope; unknown fields are
@@ -381,7 +424,7 @@ pub fn push_book_missing(
     own: impl Fn() -> Result<Option<HashMap<String, BookRecord>>, SyncError>,
     store_own: impl Fn(&HashMap<String, BookRecord>) -> Result<(), SyncError>,
 ) -> Result<bool, SyncError> {
-    if recorded()?.is_some_and(|books| books.contains_key(fingerprint)) {
+    if recorded()?.is_some_and(|books| books.get(fingerprint).is_some_and(|r| r.removed.is_none())) {
         return Ok(false);
     }
     let mut mine = own()?.unwrap_or_default();
@@ -491,7 +534,7 @@ mod tests {
     }
 
     fn book_record(name: &str) -> BookRecord {
-        BookRecord { name: name.into(), size: 10, sha256: "abc".into() }
+        BookRecord { name: name.into(), size: 10, sha256: "abc".into(), added: 0, removed: None }
     }
 
     #[test]
@@ -577,6 +620,9 @@ mod tests {
             Err(SyncError::new(self.kind, "nope"))
         }
         fn list(&self, _access: &str, _prefix: &str) -> Result<Vec<String>, SyncError> {
+            Err(SyncError::new(self.kind, "nope"))
+        }
+        fn delete(&self, _access: &str, _name: &str) -> Result<(), SyncError> {
             Err(SyncError::new(self.kind, "nope"))
         }
         fn errors(&self) -> &ErrorSlot {

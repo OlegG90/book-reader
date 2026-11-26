@@ -148,6 +148,21 @@ impl CloudStore for Dropbox {
         }
     }
 
+    fn delete(&self, access: &str, name: &str) -> Result<(), SyncError> {
+        let body = serde_json::json!({ "path": format!("/{name}") }).to_string();
+        let reply = net::post(
+            "https://api.dropboxapi.com/2/files/delete_v2",
+            &[("Authorization", &format!("Bearer {access}")), ("Content-Type", "application/json")],
+            body.as_bytes(),
+        )
+        .map_err(SyncError::offline)?;
+        if reply.status == 200 || (reply.status == 409 && String::from_utf8_lossy(&reply.body).contains("not_found")) {
+            Ok(())
+        } else {
+            Err(SyncError::from_reply("Dropbox delete", &reply))
+        }
+    }
+
     fn list(&self, access: &str, prefix: &str) -> Result<Vec<String>, SyncError> {
         let mut names = Vec::new();
         let mut url = "https://api.dropboxapi.com/2/files/list_folder";

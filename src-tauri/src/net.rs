@@ -94,6 +94,12 @@ pub fn patch(url: &str, headers: &[(&str, &str)], body: &[u8]) -> Result<Reply, 
     finish(req.send(body), url)
 }
 
+/// DELETE with a bearer token.
+pub fn bearer_delete(url: &str, token: &str) -> Result<Reply, String> {
+    let auth = format!("Bearer {token}");
+    finish(agent().delete(url).header("Authorization", auth.as_str()).call(), url)
+}
+
 /// GET `url` with a Bearer token (a sync store's API).
 pub fn bearer_get(url: &str, token: &str) -> Result<Reply, String> {
     let auth = format!("Bearer {token}");
