@@ -207,8 +207,13 @@ fn find_file(access: &str, name: &str) -> Result<Option<String>, SyncError> {
 /// The Drive search for one file name; quotes and backslashes in book names
 /// are escaped, as the query language asks.
 fn name_query(name: &str) -> String {
-    let escaped = name.replace('\\', "\\\\").replace('\'', "\\'");
-    format!("name = '{escaped}' and trashed = false")
+    format!("name = '{}' and trashed = false", escape_query(name))
+}
+
+/// A string made safe inside a quoted Drive search term: backslashes and
+/// quotes escaped, as the query language asks.
+fn escape_query(text: &str) -> String {
+    text.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
 /// Downloads an opaque cloud file by its id.
@@ -314,6 +319,38 @@ impl CloudStore for Google {
     fn put(&self, access: &str, name: &str, bytes: &[u8]) -> Result<(), SyncError> {
         let file_id = find_file(access, name)?;
         upload_bytes(access, file_id.as_deref(), name, bytes)
+    }
+
+    fn list(&self, access: &str, prefix: &str) -> Result<Vec<String>, SyncError> {
+        let mut names = Vec::new();
+        let mut page_token: Option<String> = None;
+        loop {
+            let mut query = url::form_urlencoded::Serializer::new(String::new());
+            query
+                .append_pair("spaces", "appDataFolder")
+                .append_pair("q", &format!("name contains '{}' and trashed = false", escape_query(prefix)))
+                .append_pair("fields", "nextPageToken,files(name)")
+                .append_pair("pageSize", "1000");
+            if let Some(token) = &page_token {
+                query.append_pair("pageToken", token);
+            }
+            let reply = net::bearer_get(&format!("https://www.googleapis.com/drive/v3/files?{}", query.finish()), access).map_err(SyncError::offline)?;
+            if reply.status != 200 {
+                return Err(SyncError::from_reply("Google Drive list", &reply));
+            }
+            let page: serde_json::Value =
+                serde_json::from_slice(&reply.body).map_err(|e| SyncError::data(format!("Google Drive list is not ours: {e}")))?;
+            // "contains" matches word starts; the prefix itself is checked here.
+            for file in page["files"].as_array().into_iter().flatten() {
+                if let Some(name) = file["name"].as_str().filter(|n| n.starts_with(prefix)) {
+                    names.push(name.to_string());
+                }
+            }
+            match page["nextPageToken"].as_str() {
+                Some(token) => page_token = Some(token.to_string()),
+                None => return Ok(names),
+            }
+        }
     }
 
     fn errors(&self) -> &ErrorSlot {
