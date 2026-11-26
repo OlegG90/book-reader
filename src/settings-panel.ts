@@ -42,26 +42,34 @@ export interface ModuleInfo {
   inUseReason: string | null
 }
 
-/** A cloud store sync can run through; only Dropbox has a transport yet. */
+/** The clouds sync can run through; every connected one is used at once. */
 export const CLOUD_PROVIDERS = [
   { id: 'dropbox', label: 'Dropbox', available: true },
   { id: 'onedrive', label: 'OneDrive', available: false },
   { id: 'google', label: 'Google Drive', available: true },
 ] as const
-/** Which cloud `connectCloud` connects; unavailable ones stay picked but never sent. */
+/** A cloud by its id; unavailable ones are never sent. */
 export type CloudProviderId = (typeof CLOUD_PROVIDERS)[number]['id']
 
-/** The Modules switch behind a cloud picker entry. */
+/** One cloud's connection as the backend reports it. */
+export interface CloudConnection {
+  id: string
+  connected: boolean
+  /** The last sync failure, until a sync succeeds. */
+  lastError: string | null
+}
+
+/** The Modules switch behind a cloud. */
 export const cloudModuleId = (id: string) => (id === 'google' ? MODULE.googleDrive : `capability:${id}`)
 
 /** Buttons in the settings page that act instead of changing a value. */
 export interface PanelActions {
   /** Turns a layer-1 module off (or back on) in Settings › Modules. */
   toggleModule(id: string, off: boolean): void
-  /** Connects the chosen cloud (reading positions sync through it). */
+  /** Connects a cloud (positions and books sync through it, beside the others). */
   connectCloud(provider: CloudProviderId): void
-  /** Forgets the connected cloud's token; connecting again starts over. */
-  disconnectCloud(): void
+  /** Forgets a cloud's login; connecting again starts over. */
+  disconnectCloud(provider: CloudProviderId): void
   /** Forgets the recent books list (reading positions are kept). */
   clearHistory(): void
   /** Registers or unregisters the app for its book file types. */
@@ -236,39 +244,47 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   const libraryFolder = el('span', { className: 'hint path' })
   const fileTypesStatus = el('span', { className: 'hint' })
   const fileTypesButton = el('button', { type: 'button', onclick: actions.toggleFileTypes })
-  const cloudStatus = el('span', { className: 'hint' })
-  const cloudDisconnect = el('button', { type: 'button', textContent: 'Disconnect', hidden: true, onclick: actions.disconnectCloud })
-  const cloudSelect = el(
-    'select',
-    { ariaLabel: 'Cloud to connect' },
-    ...CLOUD_PROVIDERS.map(p => el('option', { value: p.id, textContent: p.available ? p.label : `${p.label} (soon)`, disabled: !p.available })),
-  ) as HTMLSelectElement
-  const cloudAddHint = el('span', { className: 'hint' })
-  const cloudConnect = el('button', { type: 'button', textContent: 'Connect' })
-  // Whether a cloud is connected: the Add row locks while one is.
-  let cloudConnected = false
+  // One row per cloud, each with its own state and one button.
+  const cloudRows = CLOUD_PROVIDERS.map(provider => {
+    const hint = el('span', { className: 'hint' })
+    const button = el('button', { type: 'button' }) as HTMLButtonElement
+    return { provider, hint, button, row: row(provider.label, hint, button) }
+  })
+  let cloudStates: CloudConnection[] = []
+  // Clouds whose login is open in the browser, until their state comes back.
+  const waiting = new Set<string>()
   // The modules switched off; a cloud whose module is off cannot connect.
   let modulesOff = [...initial.disabledModules]
-  const pickedCloud = () => CLOUD_PROVIDERS.find(p => p.id === cloudSelect.value) ?? CLOUD_PROVIDERS[0]
-  const refreshCloudAdd = () => {
-    const picked = pickedCloud()
-    const off = modulesOff.includes(cloudModuleId(picked.id))
-    for (const option of cloudSelect.options) {
-      const entry = CLOUD_PROVIDERS.find(p => p.id === option.value)
-      if (entry) option.disabled = !entry.available || modulesOff.includes(cloudModuleId(entry.id))
+  /** Shows each cloud's state: connected (with its last failure), waiting for
+  the browser, off, or ready to connect. A cloud whose module is off shows
+  only while it still has a login to forget. */
+  const refreshClouds = () => {
+    for (const { provider, hint, button, row } of cloudRows) {
+      const state = cloudStates.find(c => c.id === provider.id)
+      const off = modulesOff.includes(cloudModuleId(provider.id))
+      row.hidden = off && !state?.connected
+      hint.title = state?.lastError ?? ''
+      if (state?.connected) {
+        hint.textContent = off ? 'Turned off in Modules; disconnect to forget the login.' : (state.lastError ?? 'Reading positions and books sync through it.')
+        button.textContent = 'Disconnect'
+        button.disabled = false
+        button.onclick = () => actions.disconnectCloud(provider.id)
+      } else if (waiting.has(provider.id)) {
+        hint.textContent = 'Waiting for the browser…'
+        button.textContent = 'Connect'
+        button.disabled = true
+      } else {
+        hint.textContent = !provider.available ? 'Coming soon — not available yet.' : off ? `Turn on ${provider.label} in Modules to connect.` : 'Not connected'
+        button.textContent = 'Connect'
+        button.disabled = !provider.available || off
+        button.onclick = () => {
+          waiting.add(provider.id)
+          refreshClouds()
+          actions.connectCloud(provider.id)
+        }
+      }
     }
-    cloudAddHint.textContent = cloudConnected
-      ? 'Disconnect to switch clouds.'
-      : !picked.available
-        ? 'Coming soon — not available yet.'
-        : off
-          ? `Turn on ${picked.label} in Modules to connect.`
-          : ''
-    cloudConnect.disabled = !picked.available || off || cloudConnected
-    cloudSelect.disabled = cloudConnected
   }
-  cloudSelect.onchange = refreshCloudAdd
-  cloudConnect.onclick = () => actions.connectCloud(pickedCloud().id)
   const catalogs = el('div', { className: 'catalogs' })
   const modules = el('div', { className: 'modules' })
   const moduleBoxes = new Map<string, HTMLInputElement>()
@@ -286,8 +302,6 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     organizeButton,
   )
   const fileTypesRow = row('File types', fileTypesStatus, fileTypesButton)
-  const cloudRow = row('Cloud connection', cloudStatus, cloudDisconnect)
-  const cloudAddRow = row('Add cloud', cloudAddHint, cloudSelect, cloudConnect)
   const booksWifiRow = checkRow('Sync books only on Wi-Fi', 'Book files wait for an unmetered network; positions always sync.', booksWifiOnly)
   const updatesRow = row('Updates', updateStatus, openRelease, checkUpdate)
   const historyLength = el(
@@ -358,7 +372,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     system: [
       group('Library', libraryRow, offerRow),
       group('History', continueRow, clearRow),
-      group('Sync', cloudRow, cloudAddRow, booksWifiRow),
+      group('Sync', ...cloudRows.map(c => c.row), booksWifiRow),
       fileTypesRow,
       interfaceRow,
     ],
@@ -466,7 +480,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     uiFont.value = values.uiFont
     for (const [id, box] of moduleBoxes) box.checked = !values.disabledModules.includes(id)
     modulesOff = [...values.disabledModules]
-    refreshCloudAdd()
+    refreshClouds()
   }
 
   /** Asks for the latest release and says what it found; a newer one gets a button to its page. */
@@ -491,36 +505,17 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     fileTypesButton.textContent = registered ? 'Unregister' : 'Register'
   }
 
-  /** Hides the cloud rows (every cloud module is off). */
-  function setCloudVisible(visible: boolean) {
-    cloudRow.hidden = !visible
-    cloudAddRow.hidden = !visible
-  }
-
   /** Shows the Wi-Fi rule for book files: only on a phone, where networks can be metered. */
   function setBooksWifiVisible(visible: boolean) {
     booksWifiRow.hidden = !visible
   }
 
-  /**
-   * Shows which cloud is connected and its last sync failure, if any.
-   * Sync stays quiet; only the settings say what went wrong.
-   */
-  function setCloudConnected(provider: CloudProviderId | null, connected: boolean, error: string | null = null) {
-    cloudConnected = connected
-    const label = CLOUD_PROVIDERS.find(p => p.id === provider)?.label ?? ''
-    if (!connected) {
-      cloudStatus.textContent = 'Not connected'
-      cloudStatus.title = ''
-    } else if (error) {
-      cloudStatus.textContent = label ? `${label} — ${error}` : error
-      cloudStatus.title = error
-    } else {
-      cloudStatus.textContent = `${label} — reading positions sync through it`
-      cloudStatus.title = ''
-    }
-    cloudDisconnect.hidden = !connected
-    refreshCloudAdd()
+  /** Shows every cloud's connection (a login that was waiting has come back
+  either way). Sync stays quiet; only the settings say what went wrong. */
+  function setClouds(states: CloudConnection[]) {
+    cloudStates = states
+    waiting.clear()
+    refreshClouds()
   }
 
   function setLibraryFolder(folder: string | null) {
@@ -530,7 +525,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
 
   show(initial)
   setFileTypesRegistered(false)
-  setCloudConnected(null, false)
+  setClouds([])
   setLibraryFolder(null)
   showSection('reading')
   return {
@@ -538,8 +533,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     setFileTypesRegistered,
     setFileTypesVisible,
     setLibraryFolder,
-    setCloudConnected,
-    setCloudVisible,
+    setClouds,
     setBooksWifiVisible,
     setOrganizeVisible,
     setSectionVisible,

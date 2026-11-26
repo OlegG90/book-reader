@@ -262,9 +262,9 @@ describe('settings page', () => {
     expect(actions.toggleFileTypes).toHaveBeenCalledOnce()
     button('Connect').click()
     expect(actions.connectCloud).toHaveBeenCalledWith('dropbox')
-    panel.setCloudConnected('dropbox', true, null)
+    panel.setClouds([{ id: 'dropbox', connected: true, lastError: null }])
     button('Disconnect').click()
-    expect(actions.disconnectCloud).toHaveBeenCalledOnce()
+    expect(actions.disconnectCloud).toHaveBeenCalledWith('dropbox')
     button('Change…').click()
     expect(actions.changeLibrary).toHaveBeenCalledOnce()
     button('Organize…').click()
@@ -287,31 +287,33 @@ describe('settings page', () => {
     }
     expect(rowsOf('Library')).toEqual(['Library folder', 'Offer to add books opened from elsewhere'])
     expect(rowsOf('History')).toEqual(['Continue reading', 'History'])
-    expect(rowsOf('Sync')).toEqual(['Cloud connection', 'Add cloud', 'Sync books only on Wi-Fi'])
+    expect(rowsOf('Sync')).toEqual(['Dropbox', 'OneDrive', 'Google Drive', 'Sync books only on Wi-Fi'])
   })
 
-  it('connects the picked cloud', () => {
-    const { host, actions, button } = page()
-    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Cloud to connect"]')
-    if (!select) throw new Error('no cloud select')
-    select.value = 'google'
-    select.dispatchEvent(new Event('change'))
-    expect(button('Connect').disabled).toBe(false)
-    button('Connect').click()
+  /** A cloud's row in Settings › System. */
+  const cloudRow = (host: HTMLElement, label: string) => {
+    const found = [...host.querySelectorAll<HTMLElement>('.row')].find(r => r.querySelector('.row-label')?.textContent === label)
+    if (!found) throw new Error(`no row "${label}"`)
+    return { row: found, button: found.querySelector('button') as HTMLButtonElement, hint: found.querySelector('.hint')?.textContent }
+  }
+
+  it('connects any cloud, beside the ones already connected', () => {
+    const { host, panel, actions } = page()
+    panel.setClouds([{ id: 'dropbox', connected: true, lastError: null }])
+    const google = cloudRow(host, 'Google Drive')
+    expect(google.button.disabled).toBe(false)
+    google.button.click()
     expect(actions.connectCloud).toHaveBeenCalledWith('google')
   })
 
-  it('locks a cloud whose module is off', () => {
-    const { host, panel, button } = page()
+  it('locks a cloud whose module is off, but still lets it disconnect', () => {
+    const { host, panel } = page()
     panel.show({ ...initial, disabledModules: ['capability:googledrive'] })
-    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Cloud to connect"]')
-    if (!select) throw new Error('no cloud select')
-    const google = [...select.options].find(o => o.value === 'google')
-    expect(google?.disabled).toBe(true)
-    select.value = 'google'
-    select.dispatchEvent(new Event('change'))
-    expect(button('Connect').disabled).toBe(true)
-    expect(host.textContent).toContain('Turn on Google Drive in Modules to connect.')
+    expect(cloudRow(host, 'Google Drive').button.disabled).toBe(true)
+    expect(cloudRow(host, 'Google Drive').hint).toBe('Turn on Google Drive in Modules to connect.')
+    panel.setClouds([{ id: 'google', connected: true, lastError: null }])
+    expect(cloudRow(host, 'Google Drive').button.textContent).toBe('Disconnect')
+    expect(cloudRow(host, 'Google Drive').button.disabled).toBe(false)
   })
 
   it('shows the library folder', () => {
@@ -321,40 +323,37 @@ describe('settings page', () => {
     expect(host.textContent).toContain(String.raw`D:\Books`)
   })
 
-  it('shows the cloud connection state', () => {
-    const { host, panel, button } = page()
-    expect(host.textContent).toContain('Not connected')
-    panel.setCloudConnected('dropbox', true, null)
-    expect(host.textContent).toContain('Dropbox')
-    panel.setCloudConnected('dropbox', true, 'Dropbox upload failed (401)')
-    expect(host.textContent).toContain('Dropbox upload failed (401)')
-    expect(button('Disconnect')).toBeDefined()
-    panel.setCloudVisible(false)
-    expect(button('Disconnect').closest<HTMLElement>('.row')?.hidden).toBe(true)
-    panel.setCloudVisible(true)
-    expect(button('Disconnect').closest<HTMLElement>('.row')?.hidden).toBe(false)
+  it('shows each cloud\'s connection and last failure', () => {
+    const { host, panel } = page()
+    expect(cloudRow(host, 'Dropbox').hint).toBe('Not connected')
+    panel.setClouds([
+      { id: 'dropbox', connected: true, lastError: 'Dropbox upload failed (401)' },
+      { id: 'google', connected: true, lastError: null },
+    ])
+    expect(cloudRow(host, 'Dropbox').hint).toBe('Dropbox upload failed (401)')
+    expect(cloudRow(host, 'Google Drive').hint).toBe('Reading positions and books sync through it.')
+    // OneDrive waits for its transport.
+    expect(cloudRow(host, 'OneDrive').button.disabled).toBe(true)
+    expect(cloudRow(host, 'OneDrive').hint).toContain('Coming soon')
   })
 
-  it('locks the cloud picker on unavailable clouds and while connected', () => {
-    const { host, panel, actions, button } = page()
-    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Cloud to connect"]')
-    if (!select) throw new Error('no cloud select')
-    // Only OneDrive waits for its transport; the rest connect.
-    expect([...select.options].map(o => o.textContent)).toEqual(['Dropbox', 'OneDrive (soon)', 'Google Drive'])
-    select.value = 'onedrive'
-    select.dispatchEvent(new Event('change'))
-    expect(button('Connect').disabled).toBe(true)
-    expect(host.textContent).toContain('Coming soon')
-    select.value = 'dropbox'
-    select.dispatchEvent(new Event('change'))
-    expect(button('Connect').disabled).toBe(false)
-    // While a cloud is connected the picker locks until disconnect.
-    panel.setCloudConnected('dropbox', true, null)
-    expect(button('Connect').disabled).toBe(true)
-    expect(select.disabled).toBe(true)
-    expect(host.textContent).toContain('Disconnect to switch clouds.')
-    button('Connect').click()
-    expect(actions.connectCloud).not.toHaveBeenCalled()
+  it('hides a cloud turned off in Modules unless it still has a login to forget', () => {
+    const { host, panel } = page()
+    panel.show({ ...initial, disabledModules: ['capability:dropbox'] })
+    expect(cloudRow(host, 'Dropbox').row.hidden).toBe(true)
+    panel.setClouds([{ id: 'dropbox', connected: true, lastError: 'Dropbox upload failed (401)' }])
+    expect(cloudRow(host, 'Dropbox').row.hidden).toBe(false)
+    expect(cloudRow(host, 'Dropbox').hint).toBe('Turned off in Modules; disconnect to forget the login.')
+  })
+
+  it('waits for the browser after Connect, until the state comes back', () => {
+    const { host, panel, actions } = page()
+    cloudRow(host, 'Dropbox').button.click()
+    expect(actions.connectCloud).toHaveBeenCalledWith('dropbox')
+    expect(cloudRow(host, 'Dropbox').hint).toBe('Waiting for the browser…')
+    expect(cloudRow(host, 'Dropbox').button.disabled).toBe(true)
+    panel.setClouds([{ id: 'dropbox', connected: true, lastError: null }])
+    expect(cloudRow(host, 'Dropbox').button.textContent).toBe('Disconnect')
   })
 
   it('shows the file-type registration state', () => {
