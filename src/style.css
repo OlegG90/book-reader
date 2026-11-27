@@ -1536,12 +1536,6 @@ button:hover {
   gap: var(--space-2);
 }
 
-#removed-view h2 {
-  margin: 0 0 var(--space-2);
-  font-size: 22px;
-  font-weight: 600;
-}
-
 /* The phone's header already names the page. */
 .android #removed-view h2 {
   display: none;
@@ -1910,16 +1904,6 @@ body.library-mode #topbar {
   font-size: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* The settings inside the phone's library: the drawer lists the sections. */
-.android #settings.embedded .page-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.android #settings.embedded .page-content {
-  padding: 0;
 }
 
 /* The book grid: three across on a phone */

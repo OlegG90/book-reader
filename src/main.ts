@@ -341,8 +341,7 @@ function openAppearance() {
 function closePanels() {
   closeMoreMenu()
   $('scrim').hidden = true
-  $('start').classList.remove('nav-open')
-  $('nav-button').setAttribute('aria-expanded', 'false')
+  setNavOpen(false)
   $('organize').hidden = true
   $('toc').hidden = true
   $('book-details').hidden = true
@@ -481,7 +480,8 @@ let lastCapabilities = ''
 
 /** Shows `to` in the library window's content and marks it in the pane. */
 function showView(to: View) {
-  const wasSettings = !!view?.startsWith('settings:')
+  const was = view
+  const wasSettings = !!was?.startsWith('settings:')
   view = to
   if (!to.startsWith('settings:')) lastPage = to
   const settingsView = to.startsWith('settings:')
@@ -499,7 +499,7 @@ function showView(to: View) {
     showTab(to === 'catalogs' || to === 'series' || to === 'removed' ? to : 'books')
     // The history and the books are separate pages.
     $('books-view').dataset.show = to === 'recent' ? 'recent' : 'all'
-    if (to === 'removed') void refreshCloudStatus()
+    if (to === 'removed' && was !== 'removed') void refreshCloudStatus()
   }
   const current = navItems.find(item => item.dataset.nav === to)
   for (const item of navItems) item.setAttribute('aria-current', String(item === current))
@@ -525,8 +525,13 @@ function openNav() {
   closePopup()
   closePanels()
   $('scrim').hidden = false
-  $('start').classList.add('nav-open')
-  $('nav-button').setAttribute('aria-expanded', 'true')
+  setNavOpen(true)
+}
+
+/** Slides the phone's drawer in or out, and says so on its button. */
+function setNavOpen(open: boolean) {
+  $('start').classList.toggle('nav-open', open)
+  $('nav-button').setAttribute('aria-expanded', String(open))
 }
 
 /** The library's parts: the books on disk, their series, the books removed here, and the catalogs to get more from. */
@@ -624,9 +629,8 @@ function refreshModules() {
 function applyCapabilities() {
   const off = new Set(settings.disabledModules)
   const catalogs = !off.has(MODULE.catalogs)
-  for (const item of navItems) {
-    if (item.dataset.nav === 'catalogs' || item.dataset.nav === 'settings:catalogs') item.hidden = !catalogs
-  }
+  setNavVisible('catalogs', catalogs)
+  setNavVisible('settings:catalogs', catalogs)
   settingsPage.setSectionVisible('catalogs', catalogs)
   settingsPage.setOrganizeVisible(!off.has(MODULE.organize))
   settingsPage.setFileTypesVisible(!isAndroid && !off.has(MODULE.fileTypes))
@@ -678,7 +682,8 @@ async function refreshCloudStatus() {
   connectedClouds = clouds.filter(c => c.connected).map(c => c.id)
   settingsPage.setClouds(clouds)
   showRemovedItem()
-  // Asks the clouds, so only with one connected.
+  // Asks the clouds, so only with one connected, and only for the page that shows the list.
+  if (view !== 'removed') return
   const removed = connectedClouds.length
     ? await invoke<RemovedBook[]>('sync_removed_books').catch((e): RemovedBook[] => {
         console.error(e)
@@ -691,8 +696,13 @@ async function refreshCloudStatus() {
 /** Removed is in the pane only while a cloud syncs; leaving it shows the books. */
 function showRemovedItem() {
   const shown = cloudReady()
-  for (const item of navItems) if (item.dataset.nav === 'removed') item.hidden = !shown
+  setNavVisible('removed', shown)
   if (!shown && view === 'removed') showView('books')
+}
+
+/** Shows or hides a page's item in the pane. */
+function setNavVisible(nav: View, visible: boolean) {
+  for (const item of navItems) if (item.dataset.nav === nav) item.hidden = !visible
 }
 
 // ---- Edge controls ----------------------------------------------------------

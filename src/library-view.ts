@@ -21,7 +21,7 @@ import { icon } from './icons'
 /** How far a book is read, as the library shows it: at least 1% once started. */
 const percent = (fraction: number) => `${Math.max(1, Math.round(fraction * 100))}%`
 
-/** What the library window shows: the reading history, the books, the catalogs, or a settings section. */
+/** What the library window shows: the reading history, the books, the series, the books removed here, the catalogs, or a settings section. */
 export type View = 'recent' | 'books' | 'series' | 'removed' | 'catalogs' | `settings:${SettingsSection}`
 
 interface RecentBook {
