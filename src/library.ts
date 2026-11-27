@@ -31,7 +31,7 @@ export const SORTS = ['author', 'title', 'added'] as const
 export type Sort = (typeof SORTS)[number]
 export const SORT_LABELS: Record<Sort, string> = { author: 'Author', title: 'Title', added: 'Recently added' }
 
-/** How Books and a series' books show: cover cards, or one compact line each. */
+/** How a page of books shows: cover cards, or one compact line each (each page has its own). */
 export const LAYOUTS = ['covers', 'list'] as const
 export type Layout = (typeof LAYOUTS)[number]
 

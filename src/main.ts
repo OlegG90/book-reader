@@ -956,7 +956,7 @@ appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
   const valid = readSettings({ ...settings, ...payload })
   applySettings(Object.fromEntries(Object.keys(payload).map(k => [k, valid[k as keyof Settings]])))
   // How the library shows: this window's own choices redraw it as they are made.
-  if (['libraryStatus', 'librarySort', 'libraryLayout'].some(k => k in payload) && !reading.book) library.render()
+  if (['libraryStatus', 'librarySort', 'libraryLayout', 'recentLayout', 'seriesLayout'].some(k => k in payload) && !reading.book) library.render()
 })
 // reading.flush never throws, so a failed save cannot keep the window open.
 appWindow.onCloseRequested(async () => {

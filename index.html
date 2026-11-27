@@ -57,11 +57,14 @@
             <span class="library-tools">
               <button type="button" id="library-status" aria-haspopup="menu" title="Show"></button>
               <button type="button" id="library-sort" aria-haspopup="menu" title="Sort by"></button>
-              <button type="button" id="library-layout"></button>
+              <button type="button" id="library-layout" class="layout-switch"></button>
             </span>
             <button id="open-button" title="Open a book file (Ctrl+O)"><span class="desktop-only">Open file…</span><span class="android-only">Add book…</span></button>
           </div>
-          <h2 id="recent-title">Continue reading</h2>
+          <div class="page-head recent-head">
+            <h2 id="recent-title">Continue reading</h2>
+            <button type="button" id="recent-layout" class="layout-switch"></button>
+          </div>
           <ol id="recent" class="book-grid" aria-label="Recent books"></ol>
           <p id="recent-empty" class="muted" hidden>No books read yet. Open one from the library.</p>
           <p id="library-message" class="muted" hidden></p>
@@ -69,7 +72,10 @@
         </div>
         <!-- The library's series: their list, or one series' books in order -->
         <div id="series-view" hidden>
-          <nav id="series-crumbs" class="crumbs" aria-label="Series"></nav>
+          <div class="page-head">
+            <nav id="series-crumbs" class="crumbs" aria-label="Series"></nav>
+            <button type="button" id="series-layout" class="layout-switch"></button>
+          </div>
           <p id="series-empty" class="muted" hidden>No series in the library: books show here when their metadata names one.</p>
           <ul id="series-list" class="book-grid" aria-label="Series"></ul>
           <ul id="series-books" class="book-grid" aria-label="The series' books"></ul>

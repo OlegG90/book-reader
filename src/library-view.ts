@@ -374,13 +374,34 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     const sort = $('library-sort')
     sort.replaceChildren(icon('sort'), el('span', { className: 'label', textContent: SORT_LABELS[settings.librarySort] }))
     menuOf(sort, 'librarySort', SORTS, SORT_LABELS)
-    const list = settings.libraryLayout === 'list'
-    const layout = $('library-layout')
-    layout.replaceChildren(icon(list ? 'grid' : 'list'))
-    layout.title = list ? 'Show covers' : 'Show as a list'
-    layout.setAttribute('aria-label', layout.title)
-    layout.onclick = () => choose({ libraryLayout: list ? 'covers' : 'list' })
-    for (const id of ['library-books', 'series-books']) $(id).classList.toggle('list', list)
+    showLayouts()
+  }
+
+  /** Each page's covers / list switch, and the lists it shapes. */
+  const LAYOUT_SWITCHES = [
+    { key: 'libraryLayout', button: 'library-layout', lists: ['library-books'] },
+    { key: 'recentLayout', button: 'recent-layout', lists: ['recent'] },
+    { key: 'seriesLayout', button: 'series-layout', lists: ['series-list', 'series-books'] },
+  ] as const
+
+  /**
+   * Shows each page as its own setting says, as cover cards or as a list, and
+   * its switch offering the other. Switching only reshapes the page's lists.
+   */
+  function showLayouts() {
+    const settings = deps.getSettings()
+    for (const { key, button, lists } of LAYOUT_SWITCHES) {
+      const list = settings[key] === 'list'
+      const toggle = $(button)
+      toggle.replaceChildren(icon(list ? 'grid' : 'list'))
+      toggle.title = list ? 'Show covers' : 'Show as a list'
+      toggle.setAttribute('aria-label', toggle.title)
+      toggle.onclick = () => {
+        deps.changeSettings({ [key]: list ? 'covers' : 'list' })
+        showLayouts()
+      }
+      for (const id of lists) $(id).classList.toggle('list', list)
+    }
   }
 
   /** Draws the grid for the current search, status and sort, with the bar's counts. */

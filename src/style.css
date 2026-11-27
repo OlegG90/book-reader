@@ -1803,7 +1803,7 @@ body.library-mode #topbar {
   display: none !important;
 }
 
-#books-view[data-show='all'] :is(#recent-title, #recent, #recent-empty) {
+#books-view[data-show='all'] :is(.recent-head, #recent, #recent-empty) {
   display: none !important;
 }
 
@@ -1928,9 +1928,24 @@ body.library-mode #topbar {
   color: var(--muted);
 }
 
-.library-tools svg.icon {
+.library-tools svg.icon,
+.layout-switch svg.icon {
   width: 16px;
   height: 16px;
+}
+
+/* A page's heading (or crumbs) with its covers / list switch at the end */
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.page-head .layout-switch {
+  display: inline-flex;
+  margin-inline-start: auto;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
 }
 
 /* Phone: the search and Add book on one line, the buttons under it; the sort
