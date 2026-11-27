@@ -23,11 +23,19 @@ const DEFAULT_HEIGHT: f64 = 800.0;
 /// backend assigned to its window, so book content cannot make the app read
 /// arbitrary files.
 #[derive(Default)]
-pub(crate) struct ReaderWindows(Mutex<HashMap<String, Launch>>);
+pub(crate) struct ReaderWindows(Mutex<HashMap<String, Shown>>);
+
+/// One window's book, and whether it was asked to close: such a window stays
+/// until it is destroyed, so its page can still save, but no longer counts as open.
+#[derive(Default)]
+struct Shown {
+    launch: Launch,
+    closing: bool,
+}
 
 impl ReaderWindows {
     pub(crate) fn get(&self, label: &str) -> Launch {
-        self.0.lock().unwrap().get(label).cloned().unwrap_or_default()
+        self.0.lock().unwrap().get(label).map(|w| w.launch.clone()).unwrap_or_default()
     }
 
     pub(crate) fn path_of(&self, label: &str) -> Result<PathBuf, String> {
@@ -35,43 +43,56 @@ impl ReaderWindows {
     }
 
     pub(crate) fn insert(&self, label: &str, launch: Launch) {
-        self.0.lock().unwrap().insert(label.to_string(), launch);
+        self.0.lock().unwrap().insert(label.to_string(), Shown { launch, closing: false });
     }
 
     pub(crate) fn remove(&self, label: &str) {
         self.0.lock().unwrap().remove(label);
     }
 
+    /// The window was asked to close: it is on its way out, though its page still saves.
+    #[cfg(desktop)]
+    pub(crate) fn mark_closing(&self, label: &str) {
+        if let Some(w) = self.0.lock().unwrap().get_mut(label) {
+            w.closing = true;
+        }
+    }
+
     pub(crate) fn set_path(&self, label: &str, path: PathBuf) {
-        self.0.lock().unwrap().entry(label.to_string()).or_default().file = Some(path);
+        self.0.lock().unwrap().entry(label.to_string()).or_default().launch.file = Some(path);
     }
 
     /// Takes the window's "from the beginning" request: it holds for one load.
     pub(crate) fn take_from_start(&self, label: &str) -> bool {
-        self.0.lock().unwrap().get_mut(label).is_some_and(|w| std::mem::take(&mut w.from_start))
+        self.0.lock().unwrap().get_mut(label).is_some_and(|w| std::mem::take(&mut w.launch.from_start))
     }
 
-    /// The window, other than `except`, already showing `path`.
+    /// The label of the first open window (closing ones are left out) whose book matches.
+    fn find_open(&self, matches: impl Fn(&str, &Launch) -> bool) -> Option<String> {
+        let windows = self.0.lock().unwrap();
+        windows.iter().find(|(label, w)| !w.closing && matches(label, &w.launch)).map(|(label, _)| label.clone())
+    }
+
+    /// The open window, other than `except`, already showing `path`.
     pub(crate) fn showing(&self, path: &Path, except: Option<&str>) -> Option<String> {
-        let windows = self.0.lock().unwrap();
-        windows
-            .iter()
-            .filter(|(label, _)| Some(label.as_str()) != except)
-            .find(|(_, w)| w.file.as_deref().is_some_and(|file| paths::same_file(file, path)))
-            .map(|(label, _)| label.clone())
+        self.find_open(|label, w| Some(label) != except && w.file.as_deref().is_some_and(|file| paths::same_file(file, path)))
     }
 
-    /// The library window's label: the window without a book.
+    /// Whether a window other than `label` stays open: one that is closing too doesn't count.
+    pub(crate) fn has_others(&self, label: &str) -> bool {
+        self.find_open(|other, _| other != label).is_some()
+    }
+
+    /// The library window's label: the open window without a book.
     pub(crate) fn library_window(&self) -> Option<String> {
-        let windows = self.0.lock().unwrap();
-        windows.iter().find(|(_, w)| w.file.is_none()).map(|(label, _)| label.clone())
+        self.find_open(|_, w| w.file.is_none())
     }
 
     /// Points windows showing a file that moved at its new place.
     pub(crate) fn repath(&self, from: &Path, to: &Path) {
         for w in self.0.lock().unwrap().values_mut() {
-            if w.file.as_deref().is_some_and(|file| paths::same_file(file, from)) {
-                w.file = Some(to.to_path_buf());
+            if w.launch.file.as_deref().is_some_and(|file| paths::same_file(file, from)) {
+                w.launch.file = Some(to.to_path_buf());
             }
         }
     }
@@ -268,7 +289,8 @@ pub(crate) fn remember_geometry(window: &Window) -> tauri::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::theme_script;
+    use super::{theme_script, ReaderWindows};
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn theme_script_uses_known_themes() {
@@ -282,5 +304,31 @@ mod tests {
             assert!(script.contains("prefers-color-scheme"), "{script}");
             assert!(!script.contains("alert"), "{script}");
         }
+    }
+
+    #[test]
+    fn has_others_sees_only_other_open_windows() {
+        let windows = ReaderWindows::default();
+        windows.insert("reader-1", Default::default());
+        assert!(!windows.has_others("reader-1"));
+        windows.insert("reader-2", Default::default());
+        assert!(windows.has_others("reader-1"));
+    }
+
+    #[test]
+    fn closing_windows_no_longer_count_as_open() {
+        let windows = ReaderWindows::default();
+        windows.insert("reader-1", Default::default());
+        windows.insert("reader-2", Default::default());
+        windows.mark_closing("reader-2");
+        // Closing both at once: the last one still sends the positions owed.
+        assert!(!windows.has_others("reader-1"));
+        assert_eq!(windows.library_window().as_deref(), Some("reader-1"));
+        windows.mark_closing("reader-1");
+        assert_eq!(windows.library_window(), None);
+        // The closing window still reads its book until it is destroyed.
+        windows.set_path("reader-1", "a.epub".into());
+        assert_eq!(windows.path_of("reader-1").unwrap(), PathBuf::from("a.epub"));
+        assert_eq!(windows.showing(Path::new("a.epub"), None), None);
     }
 }
