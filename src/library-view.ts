@@ -350,24 +350,30 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
       deps.changeSettings(changes)
       renderLibrary()
     }
+    /** Has `button` open a menu of one setting's choices under it, the current one checked. */
+    const menuOf = <K extends 'libraryStatus' | 'librarySort'>(
+      button: HTMLElement,
+      key: K,
+      values: readonly Settings[K][],
+      labels: Record<Settings[K], string>,
+      detail?: (value: Settings[K]) => string,
+    ) => {
+      button.onclick = () =>
+        showMenu(
+          under(button),
+          values.map(v => ({ label: labels[v], detail: detail?.(v), checked: v === settings[key], action: () => choose({ [key]: v }) })),
+        )
+    }
     const status = $('library-status')
     status.replaceChildren(
       el('span', { textContent: STATUS_LABELS[settings.libraryStatus] }),
       el('span', { className: 'count', textContent: String(counts[settings.libraryStatus]) }),
       icon('chevron'),
     )
-    status.onclick = () =>
-      showMenu(
-        under(status),
-        STATUSES.map(s => ({ label: STATUS_LABELS[s], detail: String(counts[s]), checked: s === settings.libraryStatus, action: () => choose({ libraryStatus: s }) })),
-      )
+    menuOf(status, 'libraryStatus', STATUSES, STATUS_LABELS, s => String(counts[s]))
     const sort = $('library-sort')
     sort.replaceChildren(icon('sort'), el('span', { className: 'label', textContent: SORT_LABELS[settings.librarySort] }))
-    sort.onclick = () =>
-      showMenu(
-        under(sort),
-        SORTS.map(s => ({ label: SORT_LABELS[s], checked: s === settings.librarySort, action: () => choose({ librarySort: s }) })),
-      )
+    menuOf(sort, 'librarySort', SORTS, SORT_LABELS)
     const list = settings.libraryLayout === 'list'
     const layout = $('library-layout')
     layout.replaceChildren(icon(list ? 'grid' : 'list'))
