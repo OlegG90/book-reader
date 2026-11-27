@@ -30,6 +30,8 @@ mod register;
 mod platform;
 mod store;
 mod updates;
+#[cfg(windows)]
+mod watch;
 #[cfg(desktop)]
 mod version;
 mod xml;
@@ -177,6 +179,8 @@ pub fn run() {
             let data_dir = Some(app.path().app_data_dir()?);
             app.manage(Store::load(data_dir::resolve_state_file(data_dir.as_deref())));
             sync_cmds::start_engine(app.handle());
+            #[cfg(windows)]
+            watch::start(app.handle());
             windows::open_window(app.handle(), launch)?;
             Ok(())
         })

@@ -152,6 +152,9 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
   /** Each book's place in the clouds, by fingerprint (see `sync_book_states`). */
   let cloudStates: Record<string, CloudPlace> = {}
   let scanning: Promise<void> | null = null
+  /** What the last scan and the last history read found, to skip redrawing the same. */
+  let libraryDrawn = ''
+  let recentDrawn = ''
   /** The reading history isn't empty (the desktop then opens on it). */
   let hasRecent = false
 
@@ -225,6 +228,10 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
       console.error(e)
       return []
     })
+    // The same list as shown: nothing to redraw (the phone looks every 30 s).
+    const drawn = JSON.stringify(books)
+    if (drawn === recentDrawn) return
+    recentDrawn = drawn
     $('recent').replaceChildren(...books.slice(0, deps.getSettings().historyLength).map(recentItem))
     $('recent-title').hidden = !books.length
     $('recent-empty').hidden = books.length > 0
@@ -234,6 +241,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
   /** Forgets the books: the next scan reads the folder anew. */
   function clearBooks() {
     libraryBooks = []
+    libraryDrawn = ''
   }
 
   /** Shows what "Organize library" would rename, for confirmation. */
@@ -296,14 +304,21 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
   /** Rescans the folder (cheap: unchanged files come from the cache) and redraws. */
   function refreshLibrary(): Promise<void> {
     scanning ??= (async () => {
-      if (!libraryBooks.length) showLibraryMessage('Looking for books…')
+      // Only before the first scan: a rescan that finds the same keeps the page as it is.
+      if (!libraryDrawn) showLibraryMessage('Looking for books…')
       // Late: importing this module (as the tests do) must not need the Tauri runtime.
       const stopProgress = await getCurrentWindow().listen<number>('scan-progress', ({ payload }) => {
-        if (!libraryBooks.length) showLibraryMessage(`Looking for books… (${payload})`)
+        if (!libraryDrawn) showLibraryMessage(`Looking for books… (${payload})`)
       }).catch((): undefined => undefined)
       try {
-        libraryBooks = await invoke<LibraryBook[]>('scan_library')
-        cloudStates = await bookCloudStates()
+        const books = await invoke<LibraryBook[]>('scan_library')
+        const states = await bookCloudStates()
+        // The same books and marks as shown: the grid stays as it is (no flicker of covers).
+        const drawn = JSON.stringify([books, states])
+        if (drawn === libraryDrawn) return
+        libraryDrawn = drawn
+        libraryBooks = books
+        cloudStates = states
         renderLibrary()
         void offerCloudBooks()
       } catch (e) {

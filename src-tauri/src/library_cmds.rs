@@ -269,10 +269,14 @@ pub(crate) fn scan_library(
             })
             .collect()
     });
+    let changed = entries.len() != before.len() || entries.iter().any(|e| !before.contains(&e.fingerprint));
     note_removals(&store, &before, &entries);
     books.replace(entries, &root);
-    // Books came or went: the engine compares the library with the clouds.
-    engine.request_reconcile();
+    // Books came or went: the engine compares the library with the clouds. A
+    // scan that found the same books (the phone looks every 30 s) asks nothing.
+    if changed {
+        engine.request_reconcile();
+    }
     Ok(views)
 }
 
