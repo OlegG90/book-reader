@@ -143,7 +143,8 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
           style: deps.currentBookStyle(),
         },
         {
-          relocate: relocated,
+          // An overtaken book's moves are not the reader's: nothing is saved for them.
+          relocate: location => turn === opens && relocated(location),
           key: deps.onKey,
           pointer: deps.onPointer,
           menu: deps.toggleTopbar,

@@ -9,11 +9,17 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
 vi.mock('reader-core/foliate-js/ui/tree.js', () => ({ createTOCView: vi.fn() }))
 vi.mock('./platform', () => ({ setReading: vi.fn() }))
-/** The book being laid out: settles when the test says so. */
+/** The book being laid out: settles when the test says so; its events go to `events`. */
 let settle: (view: unknown) => void = () => {}
+let events: { relocate(location: unknown): void } = { relocate: () => {} }
 vi.mock('reader-core', async original => ({
   ...(await original<typeof import('reader-core')>()),
-  BookView: { open: vi.fn(() => new Promise(done => (settle = done))) },
+  BookView: {
+    open: vi.fn((_stage: unknown, _source: unknown, _options: unknown, handlers: typeof events) => {
+      events = handlers
+      return new Promise(done => (settle = done))
+    }),
+  },
 }))
 
 const { createReadingView } = await import('./reading-view')
@@ -68,10 +74,16 @@ describe('open', () => {
     const first = reading.open()
     await tick()
     const late = settle
+    const lateEvents = events
     // Back: the window's book is gone, and the library shows.
     current = null
     await reading.open()
     expect(library).toHaveBeenCalled()
+    // The late book settling on its page is no move of the reader's.
+    lateEvents.relocate({ fraction: 0.5, cfi: 'epubcfi(/6/2)' })
+    await reading.flush()
+    const { invoke } = await import('@tauri-apps/api/core')
+    expect(vi.mocked(invoke).mock.calls.some(([command]) => command === 'save_position')).toBe(false)
     const destroy = vi.fn()
     late({ destroy })
     await first
