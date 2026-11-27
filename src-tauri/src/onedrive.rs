@@ -7,7 +7,7 @@
 //! is kept like catalog passwords (the OS credential store, the Android
 //! Keystore).
 
-use crate::cloud::{self, access_from, token_json, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
+use crate::cloud::{self, access_with_life, token_json, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
 use crate::sync_error::SyncError;
 use crate::platform::{Active, Platform};
 use crate::{net, oauth};
@@ -30,23 +30,26 @@ pub const CLIENT_ID: &str = "49f35fef-3df6-4d60-a932-cd6865fd6788";
 /// Where the refresh token is kept, like catalog passwords.
 pub(crate) const TOKEN_ID: &str = "onedrive";
 
-/// The Microsoft identity platform for personal accounts.
-const AUTHORITY: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0";
+/// The Microsoft identity platform for personal accounts: where the
+/// browser signs in, and where codes and refresh tokens become tokens.
+const AUTHORIZE_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize";
+const TOKEN_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
 
 /// The app's own folder, and a refresh token to stay signed in.
 const SCOPE: &str = "Files.ReadWrite.AppFolder offline_access";
 
 /// The OAuth callback, registered under "Mobile and desktop applications".
 /// No manifest or key-hash changes are needed: the loopback address works
-/// in the desktop browser and on the phone.
+/// in the desktop browser and on the phone. The login listens on `PORT`.
 const REDIRECT_URI: &str = "http://localhost:51945/onedrive";
+const PORT: u16 = 51945;
 
 /// The app folder in Microsoft Graph.
 const APP_ROOT: &str = "https://graph.microsoft.com/v1.0/me/drive/special/approot";
 
 /// The OneDrive authorize address for the loopback flow.
 fn auth_url(challenge: &str, state: &str) -> String {
-    url::form_urlencoded::Serializer::new(format!("{AUTHORITY}/authorize?"))
+    url::form_urlencoded::Serializer::new(format!("{AUTHORIZE_URL}?"))
         .append_pair("response_type", "code")
         .append_pair("client_id", CLIENT_ID)
         .append_pair("redirect_uri", REDIRECT_URI)
@@ -62,7 +65,7 @@ fn auth_url(challenge: &str, state: &str) -> String {
 pub fn begin() -> Result<PendingLogin, String> {
     let verifier = oauth::random_string(64);
     let state = oauth::random_string(16);
-    let listener = oauth::bind(51945)?;
+    let listener = oauth::bind(PORT)?;
     let url = auth_url(&oauth::challenge(&verifier), &state);
     Ok(PendingLogin { verifier, state, listener, url })
 }
@@ -70,27 +73,34 @@ pub fn begin() -> Result<PendingLogin, String> {
 /// Waits for the browser's code (or the timeout), trades it for tokens and
 /// keeps the refresh token like a catalog password.
 pub fn finish(login: PendingLogin) -> Result<(), String> {
-    let code = oauth::wait_for_code(login.listener, &login.state, "OneDrive")?;
-    let body = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("client_id", CLIENT_ID)
-        .append_pair("grant_type", "authorization_code")
-        .append_pair("code", &code)
-        .append_pair("redirect_uri", REDIRECT_URI)
-        .append_pair("code_verifier", &login.verifier)
-        .append_pair("scope", SCOPE)
-        .finish();
-    let (_access, refresh) = tokens(&token_post(&format!("{AUTHORITY}/token"), &body, "OneDrive")?, Active::password(TOKEN_ID), "OneDrive")?;
+    let code = oauth::wait_for_code(login.listener, &login.state, STORE.label())?;
+    let form = token_form(&[
+        ("grant_type", "authorization_code"),
+        ("code", &code),
+        ("redirect_uri", REDIRECT_URI),
+        ("code_verifier", &login.verifier),
+    ]);
+    let (_access, refresh) = tokens(&token_post(TOKEN_URL, &form, STORE.label())?, Active::password(TOKEN_ID), STORE.label())?;
     cloud::keep_login(&STORE, &refresh)
 }
 
-/// A refresh answer: the access token, how many seconds it lives, and the
-/// new refresh token when the answer carries one. Microsoft hands out a new
-/// refresh token with every refresh, and the old one is not extended.
-fn refreshed(body: &[u8]) -> Result<(String, u64, Option<String>), String> {
-    let tokens = token_json(body)?;
-    let access = access_from(&tokens, "OneDrive")?;
-    let lives = tokens["expires_in"].as_u64().unwrap_or(3600);
-    Ok((access, lives, tokens["refresh_token"].as_str().map(str::to_string)))
+/// The form for a token request: the grant's own fields, plus the client
+/// and the scope every request names.
+fn token_form(grant: &[(&str, &str)]) -> String {
+    let mut form = url::form_urlencoded::Serializer::new(String::new());
+    form.append_pair("client_id", CLIENT_ID).extend_pairs(grant).append_pair("scope", SCOPE);
+    form.finish()
+}
+
+/// The new refresh token a refresh answer carries, if any. Microsoft hands
+/// out a new one with every refresh, and the old one is not extended.
+fn rotated_refresh(body: &[u8]) -> Option<String> {
+    token_json(body).ok()?["refresh_token"].as_str().map(str::to_string)
+}
+
+/// A Graph answer's JSON, or a sync failure naming what was being read.
+fn graph_json(body: &[u8], what: &str) -> Result<serde_json::Value, SyncError> {
+    serde_json::from_slice(body).map_err(|e| SyncError::data(format!("OneDrive {what} is not ours: {e}")))
 }
 
 /// A file's name in the app folder. OneDrive refuses some characters that
@@ -127,16 +137,14 @@ impl CloudStore for OneDrive {
     }
 
     fn refresh(&self, refresh_token: &str) -> Result<(String, u64), SyncError> {
-        let body = url::form_urlencoded::Serializer::new(String::new())
-            .append_pair("client_id", CLIENT_ID)
-            .append_pair("grant_type", "refresh_token")
-            .append_pair("refresh_token", refresh_token)
-            .append_pair("scope", SCOPE)
-            .finish();
-        let (access, lives, fresh) = refreshed(&token_post(&format!("{AUTHORITY}/token"), &body, "OneDrive")?).map_err(SyncError::data)?;
+        let form = token_form(&[("grant_type", "refresh_token"), ("refresh_token", refresh_token)]);
+        let answer = token_post(TOKEN_URL, &form, self.label())?;
+        let (access, lives) = access_with_life(&answer, self.label()).map_err(SyncError::data)?;
         // Keep the newest refresh token, or the login runs out in 90 days.
-        if let Some(fresh) = fresh.filter(|f| f != refresh_token) {
-            Active::save_password(TOKEN_ID, &fresh).map_err(SyncError::data)?;
+        // A failed save still leaves the kept one, which stays valid: the
+        // access token is good either way.
+        if let Some(fresh) = rotated_refresh(&answer).filter(|f| f != refresh_token) {
+            let _ = Active::save_password(self.token_id(), &fresh);
         }
         Ok((access, lives))
     }
@@ -151,7 +159,7 @@ impl CloudStore for OneDrive {
         if reply.status != 200 {
             return Err(SyncError::from_reply("OneDrive download", &reply));
         }
-        let item: serde_json::Value = serde_json::from_slice(&reply.body).map_err(|e| SyncError::data(format!("OneDrive file is not ours: {e}")))?;
+        let item = graph_json(&reply.body, "file")?;
         let address = item["@microsoft.graph.downloadUrl"].as_str().ok_or_else(|| SyncError::data("OneDrive gave no download address"))?;
         let reply = net::get(address, None, net::Auth::OnChallenge, "*/*").map_err(SyncError::offline)?;
         if reply.status != 200 {
@@ -167,7 +175,7 @@ impl CloudStore for OneDrive {
             bytes,
         )
         .map_err(SyncError::offline)?;
-        if reply.status == 200 || reply.status == 201 {
+        if matches!(reply.status, 200 | 201) {
             Ok(())
         } else {
             Err(SyncError::from_reply("OneDrive upload", &reply))
@@ -176,7 +184,7 @@ impl CloudStore for OneDrive {
 
     fn delete(&self, access: &str, name: &str) -> Result<(), SyncError> {
         let reply = net::bearer_delete(&item_url(name, ""), access).map_err(SyncError::offline)?;
-        if reply.status == 204 || reply.status == 200 || reply.status == 404 {
+        if matches!(reply.status, 200 | 204 | 404) {
             Ok(())
         } else {
             Err(SyncError::from_reply("OneDrive delete", &reply))
@@ -188,7 +196,7 @@ impl CloudStore for OneDrive {
         if reply.status != 200 {
             return Err(SyncError::from_reply("OneDrive space", &reply));
         }
-        let drive: serde_json::Value = serde_json::from_slice(&reply.body).map_err(|e| SyncError::data(format!("OneDrive space is not ours: {e}")))?;
+        let drive = graph_json(&reply.body, "space")?;
         Ok(drive["quota"]["used"].as_u64().zip(drive["quota"]["total"].as_u64()))
     }
 
@@ -204,8 +212,7 @@ impl CloudStore for OneDrive {
             if reply.status != 200 {
                 return Err(SyncError::from_reply("OneDrive list", &reply));
             }
-            let page: serde_json::Value =
-                serde_json::from_slice(&reply.body).map_err(|e| SyncError::data(format!("OneDrive list is not ours: {e}")))?;
+            let page = graph_json(&reply.body, "list")?;
             for item in page["value"].as_array().into_iter().flatten() {
                 if let Some(name) = item["name"].as_str().filter(|n| item.get("file").is_some() && n.starts_with(prefix)) {
                     names.push(name.to_string());
@@ -246,12 +253,22 @@ mod tests {
     }
 
     #[test]
+    fn the_login_listens_where_the_redirect_points() {
+        assert_eq!(REDIRECT_URI, format!("http://localhost:{PORT}/onedrive"));
+    }
+
+    #[test]
+    fn token_requests_name_the_client_and_the_scope() {
+        let form = token_form(&[("grant_type", "refresh_token"), ("refresh_token", "M.C5")]);
+        assert_eq!(form, format!("client_id={CLIENT_ID}&grant_type=refresh_token&refresh_token=M.C5&scope=Files.ReadWrite.AppFolder+offline_access"));
+    }
+
+    #[test]
     fn a_refresh_answer_may_carry_a_new_refresh_token() {
         let rotated = br#"{"token_type": "Bearer", "expires_in": 3600, "access_token": "EwB", "refresh_token": "M.C5"}"#;
-        assert_eq!(refreshed(rotated).unwrap(), ("EwB".into(), 3600, Some("M.C5".into())));
-        let plain = br#"{"access_token": "EwB"}"#;
-        assert_eq!(refreshed(plain).unwrap(), ("EwB".into(), 3600, None));
-        assert!(refreshed(br#"{"error": "invalid_grant"}"#).is_err());
+        assert_eq!(access_with_life(rotated, "OneDrive").unwrap(), ("EwB".into(), 3600));
+        assert_eq!(rotated_refresh(rotated).as_deref(), Some("M.C5"));
+        assert_eq!(rotated_refresh(br#"{"access_token": "EwB"}"#), None);
     }
 
     #[test]

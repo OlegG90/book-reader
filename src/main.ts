@@ -27,7 +27,7 @@ import { closePopup, confirmDialog } from './book-menu'
 import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
-import { cloudModuleId, createAppearancePanel, createSettingsPage, type CloudConnection, type ModuleInfo, type SettingsSection } from './settings-panel'
+import { CLOUD_PROVIDERS, cloudModuleId, createAppearancePanel, createSettingsPage, type CloudConnection, type ModuleInfo, type SettingsSection } from './settings-panel'
 import { createRemovedView, type RemovedBook } from './removed-view'
 import { initBackButton, initIncoming, initOauthAnswer, initVolumeKeys, isAndroid, pollOauthAnswer, setReading } from './platform'
 import { createReadingView, type AddMode, type Offer } from './reading-view'
@@ -371,7 +371,6 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
     void invoke(command).then(refreshFileTypesStatus, console.error)
   },
   connectCloud: provider => {
-    // A disabled module refuses.
     // A phone's answer comes back on the app's scheme: the push event is
     // unreliable there, so a Google connect polls the stash instead; the
     // desktop waits on a loopback address instead.
@@ -634,7 +633,7 @@ function applyCapabilities() {
   settingsPage.setSectionVisible('catalogs', catalogs)
   settingsPage.setOrganizeVisible(!off.has(MODULE.organize))
   settingsPage.setFileTypesVisible(!isAndroid && !off.has(MODULE.fileTypes))
-  const cloudsOn = !off.has(MODULE.dropbox) || !off.has(MODULE.oneDrive) || !off.has(MODULE.googleDrive)
+  const cloudsOn = CLOUD_PROVIDERS.some(p => !off.has(cloudModuleId(p.id)))
   // The desktop counts every network as unmetered, so the rule means nothing there.
   settingsPage.setBooksWifiVisible(cloudsOn && isAndroid)
   settingsPage.setUpdatesVisible(!off.has(MODULE.updateCheck))

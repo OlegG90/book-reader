@@ -1177,7 +1177,7 @@ mod tests {
                 // switch the clouds off here — no keyring, no network, ever.
                 s.settings.insert(
                     "disabledModules".into(),
-                    serde_json::json!([crate::modules::id::DROPBOX, crate::modules::id::ONEDRIVE, crate::modules::id::GOOGLE_DRIVE]),
+                    serde_json::json!(crate::cloud::stores().map(|cloud| cloud.module())),
                 );
             })
             .unwrap();
