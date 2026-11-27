@@ -840,7 +840,7 @@ document.addEventListener('visibilitychange', () => {
   if (isAndroid && libraryVisible()) void library.refreshScreen()
 })
 // ...and every so often while the library shows (Windows watches the folder instead).
-if (isAndroid) setInterval(() => !document.hidden && libraryVisible() && void library.refreshScreen(), PHONE_RESCAN_MS)
+if (isAndroid) setInterval(() => !document.hidden && libraryVisible() && void library.refreshScreen(true), PHONE_RESCAN_MS)
 $('organize-cancel').addEventListener('click', closePanels)
 // The library window's pane: its items, its groups folding out, its width (desktop).
 for (const item of navItems) {

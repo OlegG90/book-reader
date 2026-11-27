@@ -221,12 +221,15 @@ pub(crate) struct LibraryBook {
 }
 
 /// Scans the library folder (cheap after the first time: see library::scan).
+/// A `quiet` scan (the phone's look every 30 s) asks the clouds nothing unless
+/// books came or went; any other has the engine compare the library with them.
 #[tauri::command(async)]
 pub(crate) fn scan_library(
     app: AppHandle,
     store: State<Store>,
     books: State<LibraryBooks>,
     engine: State<crate::sync_cmds::SyncEngine>,
+    quiet: Option<bool>,
 ) -> CmdResult<Vec<LibraryBook>> {
     let root = library_root(&store)?;
     Active::check_library_access(&app)?;
@@ -269,12 +272,14 @@ pub(crate) fn scan_library(
             })
             .collect()
     });
-    let changed = entries.len() != before.len() || entries.iter().any(|e| !before.contains(&e.fingerprint));
+    let now: HashSet<&str> = entries.iter().map(|e| e.fingerprint.as_str()).collect();
+    let changed = now.len() != before.len() || now.iter().any(|f| !before.contains(*f));
     note_removals(&store, &before, &entries);
     books.replace(entries, &root);
-    // Books came or went: the engine compares the library with the clouds. A
-    // scan that found the same books (the phone looks every 30 s) asks nothing.
-    if changed {
+    // The engine compares the library with the clouds: always after a scan the
+    // reader caused (it also retries a reconcile that failed offline), and
+    // after a quiet one only when books came or went.
+    if changed || quiet != Some(true) {
         engine.request_reconcile();
     }
     Ok(views)

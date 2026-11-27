@@ -14,7 +14,7 @@ import {
   type LibraryBook,
   type Status,
 } from './library'
-import { deleteFileNote } from './platform'
+import { deleteFileNote, isAndroid } from './platform'
 import type { Settings } from './settings'
 import type { SettingsSection } from './settings-panel'
 import { $ } from './dom'
@@ -101,10 +101,11 @@ export interface LibraryView {
   /** The organize preview is open. */
   isOrganizeOpen(): boolean
   showScreen(): Promise<void>
-  refreshScreen(): Promise<void>
+  /** Rescans the library and the history; a `quiet` look (the phone's every 30 s) redraws only what changed. */
+  refreshScreen(quiet?: boolean): Promise<void>
   /** Redraws the cards' cloud marks from what the sync engine last learned. */
   refreshCloudMarks(): void
-  refreshRecent(): Promise<void>
+  refreshRecent(quiet?: boolean): Promise<void>
   render(): void
   chooseLibrary(pick: boolean): Promise<void>
   bookCard(book: LibraryBook): HTMLElement
@@ -152,9 +153,9 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
   /** Each book's place in the clouds, by fingerprint (see `sync_book_states`). */
   let cloudStates: Record<string, CloudPlace> = {}
   let scanning: Promise<void> | null = null
-  /** What the last scan and the last history read found, to skip redrawing the same. */
-  let libraryDrawn = ''
-  let recentDrawn = ''
+  /** What the library and Continue reading show, so a quiet rescan that finds the same redraws nothing. */
+  let shownScan = ''
+  let shownRecent = ''
   /** The reading history isn't empty (the desktop then opens on it). */
   let hasRecent = false
 
@@ -218,20 +219,20 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     return info
   }
 
-  const refreshScreen = async (): Promise<void> => {
-    await Promise.all([refreshRecent(), refreshLibrary()])
+  const refreshScreen = async (quiet = false): Promise<void> => {
+    await Promise.all([refreshRecent(quiet), refreshLibrary(quiet)])
   }
 
   /** Fills Continue reading with the newest books from the history, as many as the setting asks. */
-  async function refreshRecent() {
+  async function refreshRecent(quiet = false) {
     const books = await invoke<RecentBook[]>('recent_books').catch((e): RecentBook[] => {
       console.error(e)
       return []
     })
-    // The same list as shown: nothing to redraw (the phone looks every 30 s).
-    const drawn = JSON.stringify(books)
-    if (drawn === recentDrawn) return
-    recentDrawn = drawn
+    // A quiet look that finds the list as shown redraws nothing (no flicker of covers).
+    const found = JSON.stringify(books)
+    if (quiet && found === shownRecent) return
+    shownRecent = found
     $('recent').replaceChildren(...books.slice(0, deps.getSettings().historyLength).map(recentItem))
     $('recent-title').hidden = !books.length
     $('recent-empty').hidden = books.length > 0
@@ -241,7 +242,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
   /** Forgets the books: the next scan reads the folder anew. */
   function clearBooks() {
     libraryBooks = []
-    libraryDrawn = ''
+    shownScan = ''
   }
 
   /** Shows what "Organize library" would rename, for confirmation. */
@@ -302,21 +303,20 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
   }
 
   /** Rescans the folder (cheap: unchanged files come from the cache) and redraws. */
-  function refreshLibrary(): Promise<void> {
+  function refreshLibrary(quiet = false): Promise<void> {
     scanning ??= (async () => {
-      // Only before the first scan: a rescan that finds the same keeps the page as it is.
-      if (!libraryDrawn) showLibraryMessage('Looking for books…')
+      if (!libraryBooks.length) showLibraryMessage('Looking for books…')
       // Late: importing this module (as the tests do) must not need the Tauri runtime.
       const stopProgress = await getCurrentWindow().listen<number>('scan-progress', ({ payload }) => {
-        if (!libraryDrawn) showLibraryMessage(`Looking for books… (${payload})`)
+        if (!libraryBooks.length) showLibraryMessage(`Looking for books… (${payload})`)
       }).catch((): undefined => undefined)
       try {
-        const books = await invoke<LibraryBook[]>('scan_library')
+        const books = await invoke<LibraryBook[]>('scan_library', { quiet })
         const states = await bookCloudStates()
-        // The same books and marks as shown: the grid stays as it is (no flicker of covers).
-        const drawn = JSON.stringify([books, states])
-        if (drawn === libraryDrawn) return
-        libraryDrawn = drawn
+        // A quiet look that finds the books and marks as shown leaves the grid as it is.
+        const found = JSON.stringify([books, states])
+        if (quiet && found === shownScan) return
+        shownScan = found
         libraryBooks = books
         cloudStates = states
         renderLibrary()
@@ -339,6 +339,8 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
   /** Redraws the cloud marks after the engine learned more (an upload, a reconcile). */
   async function refreshCloudMarks() {
     cloudStates = await bookCloudStates()
+    // The marks shown are no longer the last scan's.
+    shownScan = ''
     if (libraryBooks.length) renderLibrary()
   }
 
@@ -431,7 +433,11 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     const shown = sortBooks(chosen === 'all' ? matching : matching.filter(b => statusOf(b) === chosen), settings.librarySort)
     showBar(counts)
     if (!libraryBooks.length) {
-      showLibraryMessage(`The library is empty. Open a book (Ctrl+O) or put EPUB and FB2 files into ${libraryFolder}.`)
+      showLibraryMessage(
+        isAndroid
+          ? `The library is empty. Put EPUB and FB2 files into ${libraryFolder}, or open one from another app (Open with, Share).`
+          : `The library is empty. Open a book (Ctrl+O) or put EPUB and FB2 files into ${libraryFolder}.`,
+      )
     } else {
       showLibraryMessage(shown.length ? '' : 'No books match.')
     }
@@ -552,7 +558,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
         : {
             className: 'missing',
             title: 'File not found. Click to remove it from the list.',
-            onclick: () => void invoke('forget_recent', { key: book.key }).then(refreshRecent, console.error),
+            onclick: () => void invoke('forget_recent', { key: book.key }).then(() => refreshRecent(), console.error),
           },
       coverWithProgress(title, book.coverKey, book.fraction),
       el('span', { className: 'title', textContent: title }),
