@@ -6,7 +6,7 @@
 //! reach. Secrets stay out of the config: the refresh token is kept like
 //! catalog passwords (the OS credential store, the Android Keystore).
 
-use crate::cloud::{self, access_with_life, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
+use crate::cloud::{self, access_with_life, code_post, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
 use crate::sync_error::SyncError;
 use crate::platform::{Active, Platform};
 use crate::{net, oauth};
@@ -181,7 +181,7 @@ fn exchange(code: &str, verifier: &str, stored: Option<String>) -> Result<(Strin
     if !client_secret.is_empty() {
         form.append_pair("client_secret", client_secret);
     }
-    tokens(&token_post(TOKEN_URL, &form.finish(), "Google")?, stored, "Google")
+    tokens(&code_post(TOKEN_URL, &form.finish(), "Google")?, stored, "Google")
 }
 
 /// A file's id in the app folder by its name, if there is one. Drive allows

@@ -116,7 +116,9 @@ fn read_answer(stream: TcpStream, state: &str, service: &str) -> Option<Result<S
         return None;
     };
     let result = code_in_answer(&answer, state, service);
-    let text = if result.is_ok() { "Connected — you can close this tab." } else { "The login did not go through — you can close this tab." };
+    // The tokens are traded in the app after this answer: on a phone that
+    // waits for the reader to come back to it.
+    let text = if result.is_ok() { "Signed in — go back to Book Reader to finish." } else { "The login did not go through — you can close this tab." };
     respond(&stream, "200 OK", text);
     Some(result)
 }
