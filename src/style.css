@@ -1537,7 +1537,8 @@ button:hover {
 }
 
 /* The phone's header already names the page. */
-.android #removed-view h2 {
+.android #removed-view h2,
+.android #recent-title {
   display: none;
 }
 
