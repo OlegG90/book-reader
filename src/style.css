@@ -1508,19 +1508,37 @@ button:hover {
   margin-left: var(--space-4);
 }
 
-/* The books deleted here that the clouds still hold, under their row. */
-#settings .removed-books {
-  margin: 0 0 0 var(--space-4);
+/* Removed: one book a line, its actions at the end */
+.removed-books {
+  max-width: 760px;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
-#settings .removed-books li {
+.removed-books li {
   display: flex;
-  gap: var(--space-4);
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
   align-items: center;
   justify-content: space-between;
-  padding: 4px 0;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.removed-books .name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.removed-books .actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* The phone's header already names the page. */
+.android #removed-view h2 {
+  display: none;
 }
 
 #settings .appearance {
@@ -1620,7 +1638,7 @@ button:hover {
 /* ---- Desktop library window: a WinUI-style navigation pane ---------------------
    The pane on the window's ground; the content on a lighter layer with a
    rounded corner beside it; the chosen item marked by an accent pill. */
-/* The library has its own navigation (the pane, or the phone's bottom bar):
+/* The library has its own navigation (the pane, a drawer on the phone):
    no top bar, no tabs */
 body.library-mode #topbar {
   display: none !important;
@@ -1633,41 +1651,13 @@ body.library-mode #topbar {
   overflow: hidden;
 }
 
-/* A panel a swipe brought in slides in from that side (not with reduced motion). */
-@keyframes slide-from-right {
-  from {
-    transform: translateX(24px);
-    opacity: 0.4;
-  }
-}
-
-@keyframes slide-from-left {
-  from {
-    transform: translateX(-24px);
-    opacity: 0.4;
-  }
-}
-
-.slide-next {
-  animation: slide-from-right 150ms ease-out;
-}
-
-.slide-prev {
-  animation: slide-from-left 150ms ease-out;
-}
-
 /* Sideways moves on the phone's library screen reach the swipe; up and down still scroll. */
 :root.android #start,
 :root.android #start-main,
-:root.android #settings {
+:root.android #settings,
+:root.android #sidebar,
+:root.android #scrim {
   touch-action: pan-y pinch-zoom;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .slide-next,
-  .slide-prev {
-    animation: none;
-  }
 }
 
 #start-main {
@@ -1847,58 +1837,73 @@ body.library-mode #topbar {
   margin-bottom: 24px;
 }
 
-/* ---- Phone library: navigation at the bottom ---------------------------------- */
+/* ---- Phone library: the pane as a drawer from the left ---------------------------- */
 .android #start {
-  padding: calc(16px + var(--safe-top)) 16px calc(76px + var(--safe-bottom));
+  padding: 0 16px calc(24px + var(--safe-bottom));
 }
 
-#bottom-nav {
+/* The page scrolls in #start, so the header can stay at its top. */
+.android #start-main {
+  overflow: visible;
+}
+
+.android #sidebar {
   position: fixed;
-  left: 0;
-  right: 0;
+  top: 0;
   bottom: 0;
-  z-index: 15;
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  padding: 6px 8px calc(6px + var(--safe-bottom));
-  background: var(--bg);
-  border-top: 1px solid var(--line);
+  left: 0;
+  z-index: 21;
+  width: min(300px, 85vw);
+  padding: calc(8px + var(--safe-top)) 4px calc(8px + var(--safe-bottom));
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  transform: translateX(-105%);
+  visibility: hidden;
+  transition:
+    transform 150ms ease-out,
+    visibility 150ms;
 }
 
-#bottom-nav button {
-  display: grid;
-  justify-items: center;
-  gap: 2px;
-  min-height: 52px;
-  padding: 4px;
-  font-family: var(--font-body);
-  font-weight: 400;
-  font-size: 12px;
-  color: var(--muted);
+.android #start.nav-open #sidebar {
+  transform: none;
+  visibility: visible;
 }
 
-#bottom-nav .icon {
-  width: 22px;
-  height: 22px;
+@media (prefers-reduced-motion: reduce) {
+  .android #sidebar {
+    transition: none;
+  }
 }
 
-#bottom-nav button[aria-current='true'] {
-  color: var(--accent-text);
+/* A finger needs taller items than a mouse. */
+.android #sidebar :is(.side-item, .section-head) {
+  min-height: 44px;
 }
 
-/* The settings inside the phone's library: the section chips stay, as tabs.
-   The single column is definite, so the strip and its arrows always fit. */
-.android #settings.embedded .sections {
+/* The drawer's button and the page's name, staying at the top as the page scrolls */
+#phone-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -16px 8px;
+  padding: calc(4px + var(--safe-top)) 8px 4px;
+  background: var(--bg);
 }
 
-.android #settings.embedded .page-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+#phone-header button {
+  min-width: 44px;
+  min-height: 44px;
 }
 
-.android #settings.embedded .page-content {
-  padding: 0;
+#phone-header h1 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The book grid: three across on a phone */

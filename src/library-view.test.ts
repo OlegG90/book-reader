@@ -44,7 +44,7 @@ describe('stepBack', () => {
   })
 
   it('is already home on the history and the books', () => {
-    for (const view of ['recent', 'library'] as const) {
+    for (const view of ['recent', 'books'] as const) {
       const { library, shown } = setup(view)
       expect(library.stepBack()).toBe(false)
       expect(shown).toEqual([])
@@ -54,7 +54,7 @@ describe('stepBack', () => {
   it('returns to the history, else the books, from elsewhere', () => {
     const { library, shown } = setup('settings:reading')
     expect(library.stepBack()).toBe(true)
-    expect(shown).toEqual(['library'])
+    expect(shown).toEqual(['books'])
   })
 })
 

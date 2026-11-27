@@ -29,7 +29,6 @@ function page(found: Promise<{ latest: string; newer: boolean }> = Promise.resol
     disconnectCloud: vi.fn(),
     changeLibrary: vi.fn(),
     organizeLibrary: vi.fn(),
-    removeFromClouds: vi.fn(),
     close: vi.fn(),
     openRepository: vi.fn(),
     checkForUpdate: vi.fn(() => found),
@@ -288,7 +287,7 @@ describe('settings page', () => {
     }
     expect(rowsOf('Library')).toEqual(['Library folder', 'Offer to add books opened from elsewhere'])
     expect(rowsOf('History')).toEqual(['Continue reading', 'History'])
-    expect(rowsOf('Sync')).toEqual(['Dropbox', 'OneDrive', 'Google Drive', 'Removed books', 'Sync books only on Wi-Fi'])
+    expect(rowsOf('Sync')).toEqual(['Dropbox', 'OneDrive', 'Google Drive', 'Sync books only on Wi-Fi'])
   })
 
   /** A cloud's row in Settings › System. */
@@ -315,21 +314,6 @@ describe('settings page', () => {
     panel.setClouds([{ id: 'google', connected: true, lastError: null }])
     expect(cloudRow(host, 'Google Drive').button.textContent).toBe('Disconnect')
     expect(cloudRow(host, 'Google Drive').button.disabled).toBe(false)
-  })
-
-  it('lists the books removed here and removes them from the clouds', () => {
-    const { host, panel, actions, button } = page()
-    expect(cloudRow(host, 'Removed books').row.hidden).toBe(true)
-    panel.setRemovedBooks([
-      { fingerprint: 'a', name: 'A/One.epub', size: 1 },
-      { fingerprint: 'b', name: 'B/Two.epub', size: 2 },
-    ])
-    expect(cloudRow(host, 'Removed books').row.hidden).toBe(false)
-    expect(host.textContent).toContain('B/Two.epub')
-    ;[...host.querySelectorAll<HTMLButtonElement>('.removed-books button')][1].click()
-    expect(actions.removeFromClouds).toHaveBeenCalledWith(['b'])
-    button('Remove all from clouds').click()
-    expect(actions.removeFromClouds).toHaveBeenLastCalledWith(['a', 'b'])
   })
 
   it('shows the library folder', () => {

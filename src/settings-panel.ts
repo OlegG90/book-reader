@@ -11,7 +11,11 @@ export interface PanelValues extends Appearance {
   offerLibrary: boolean
   /** Android: the volume keys turn pages. */
   volumeKeys: boolean
-  /** Android: a sideways swipe moves between the library's panels and the settings' sections. */
+  /**
+   * Android: a swipe to the right opens the navigation drawer. The key is
+   * older than the drawer (it once moved between panels), and is kept so
+   * stored settings carry over.
+   */
   swipePanels: boolean
   /** A sideways swipe turns pages (taps turn them either way). */
   swipePages: boolean
@@ -55,14 +59,6 @@ export const CLOUD_PROVIDERS = [
 /** A cloud by its id; unavailable ones are never sent. */
 export type CloudProviderId = (typeof CLOUD_PROVIDERS)[number]['id']
 
-/** A book deleted from this library that the clouds still hold. */
-export interface RemovedBook {
-  fingerprint: string
-  /** Its library path, as the cloud recorded it. */
-  name: string
-  size: number
-}
-
 /** One cloud's connection as the backend reports it. */
 export interface CloudConnection {
   id: string
@@ -101,8 +97,6 @@ export interface PanelActions {
   changeLibrary(): void
   /** Renames the library's books to follow the naming pattern (after a preview). */
   organizeLibrary(): void
-  /** Removes books from every cloud, for every device. */
-  removeFromClouds(fingerprints: string[]): void
   /** Closes the settings page. */
   close(): void
   /** Opens the app's source on GitHub in the browser. */
@@ -245,9 +239,6 @@ const SECTIONS = [
 
 export type SettingsSection = (typeof SECTIONS)[number]['id']
 
-/** The sections a phone doesn't show (its keyboard shortcuts are a desktop's). */
-export const DESKTOP_ONLY_SECTIONS: readonly SettingsSection[] = SECTIONS.filter(s => 'desktopOnly' in s).map(s => s.id)
-
 /**
  * The settings page: a back button, the sections' names on the left as tabs,
  * and one section at a time (Reading with the appearance, Catalogs, Modules,
@@ -281,11 +272,6 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     return { provider, hint, button, row: row(provider.label, hint, button) }
   })
   let cloudStates: CloudConnection[] = []
-  // Books deleted here that the clouds still hold, each removable from them.
-  const removedHint = el('span', { className: 'hint' })
-  const removedAll = el('button', { type: 'button', textContent: 'Remove all from clouds' }) as HTMLButtonElement
-  const removedRow = row('Removed books', removedHint, removedAll)
-  const removedList = el('ul', { className: 'removed-books' })
   // Clouds whose login is open in the browser, until their state comes back.
   const waiting = new Set<string>()
   // The modules switched off; a cloud whose module is off cannot connect.
@@ -367,7 +353,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   volumeKeysRow.classList.add('android-only')
   // Swipes are a touch screen's: the phone.
   const swipePagesRow = checkRow('Swipe turns pages', 'Taps on the sides turn them either way.', swipePages)
-  const swipePanelsRow = checkRow('Swipe between panels', 'Reading, Library, Series, Catalogs and Settings; in Settings, its sections.', swipePanels)
+  const swipePanelsRow = checkRow('Swipe opens the navigation', 'A swipe to the right opens the list of pages; to the left closes it.', swipePanels)
   swipePagesRow.classList.add('android-only')
   swipePanelsRow.classList.add('android-only')
 
@@ -415,7 +401,7 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     system: [
       group('Library', libraryRow, offerRow),
       group('History', continueRow, clearRow),
-      group('Sync', ...cloudRows.map(c => c.row), removedRow, removedList, booksWifiRow),
+      group('Sync', ...cloudRows.map(c => c.row), booksWifiRow),
       fileTypesRow,
       interfaceRow,
     ],
@@ -563,23 +549,6 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     refreshClouds()
   }
 
-  /** Lists the books deleted here that the clouds still hold; hidden when there are none. */
-  function setRemovedBooks(books: RemovedBook[]) {
-    removedRow.hidden = removedList.hidden = books.length === 0
-    removedHint.textContent = `${books.length === 1 ? 'A book' : `${books.length} books`} deleted here, still in the clouds; removing them there takes them off every device.`
-    removedAll.onclick = () => actions.removeFromClouds(books.map(b => b.fingerprint))
-    removedList.replaceChildren(
-      ...books.map(book =>
-        el(
-          'li',
-          {},
-          el('span', { textContent: book.name }),
-          el('button', { type: 'button', textContent: 'Remove from clouds', onclick: () => actions.removeFromClouds([book.fingerprint]) }),
-        ),
-      ),
-    )
-  }
-
   function setLibraryFolder(folder: string | null) {
     libraryFolder.textContent = folder ?? 'Not chosen yet'
     libraryFolder.title = folder ?? ''
@@ -588,7 +557,6 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
   show(initial)
   setFileTypesRegistered(false)
   setClouds([])
-  setRemovedBooks([])
   setLibraryFolder(null)
   showSection('reading')
   return {
@@ -597,7 +565,6 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
     setFileTypesVisible,
     setLibraryFolder,
     setClouds,
-    setRemovedBooks,
     setBooksWifiVisible,
     setOrganizeVisible,
     setSectionVisible,

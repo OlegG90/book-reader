@@ -28,7 +28,8 @@ import { closePopup, confirmDialog } from './book-menu'
 import { icon } from './icons'
 import { sidebarResizer } from './sidebar-resize'
 import { createSourcesPanel } from './sources-panel'
-import { DESKTOP_ONLY_SECTIONS, cloudModuleId, createAppearancePanel, createSettingsPage, type CloudConnection, type ModuleInfo, type RemovedBook, type SettingsSection } from './settings-panel'
+import { cloudModuleId, createAppearancePanel, createSettingsPage, type CloudConnection, type ModuleInfo, type SettingsSection } from './settings-panel'
+import { createRemovedView, type RemovedBook } from './removed-view'
 import { initBackButton, initIncoming, initOauthAnswer, initVolumeKeys, isAndroid, pollOauthAnswer, setReading } from './platform'
 import { createReadingView, type AddMode, type Offer } from './reading-view'
 import { createLibraryView, type View } from './library-view'
@@ -36,7 +37,7 @@ import { SYNC_EVERY_MS, SYNC_ON_CLOSE_MS } from './sync-manager'
 import { readSettings, SAVE_DELAY_MS, type Settings } from './settings'
 import { $ } from './dom'
 import { MODULE } from './modules'
-import { neighbour, onSwipe, type SwipeDirection } from './swipe'
+import { onSwipe } from './swipe'
 
 /** The top bar shows when the mouse comes this close to the top edge. */
 const TOP_EDGE_PX = 48
@@ -252,7 +253,7 @@ function closeTopLayer() {
   if (closePopup()) return true
   const open = reading.book
   if (open?.footnoteOpen) open.hideFootnote()
-  else if (tocOpen() || library.isOrganizeOpen() || library.isDetailsOpen() || settingsOpen() || scrimlessOpen()) closePanels()
+  else if (navOpen() || tocOpen() || library.isOrganizeOpen() || library.isDetailsOpen() || settingsOpen() || scrimlessOpen()) closePanels()
   else return false
   return true
 }
@@ -336,9 +337,11 @@ function openAppearance() {
   $('appearance').querySelector<HTMLElement>('button[aria-pressed="true"], button')?.focus()
 }
 
+/** Closes every panel over the window: menus, drawers, dialogs and the scrim. */
 function closePanels() {
   closeMoreMenu()
   $('scrim').hidden = true
+  setNavOpen(false)
   $('organize').hidden = true
   $('toc').hidden = true
   $('book-details').hidden = true
@@ -412,6 +415,9 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
   checkForUpdate: () => invoke('check_for_update'),
   openLatestRelease: () => void invoke('open_latest_release').catch(console.error),
   organizeLibrary: () => void library.organize(),
+  close: closePanels,
+})
+const removedView = createRemovedView($('removed-view'), {
   removeFromClouds: fingerprints => {
     const n = fingerprints.length
     void confirmDialog({
@@ -419,11 +425,18 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
       text: 'They leave every cloud, and every other device moves them out of its library (to the Recycle Bin on Windows). Reading positions and bookmarks are kept.',
       confirm: 'Remove',
     }).then(ok => {
-      if (ok) void invoke('sync_remove_from_clouds', { fingerprints }).then(refreshCloudStatus, e => showError(undefined, e))
+      if (ok) void changeRemoved('sync_remove_from_clouds', fingerprints)
     })
   },
-  close: closePanels,
+  restore: fingerprints => void changeRemoved('sync_restore_books', fingerprints),
 })
+
+/** Runs a Removed command on its books, then shows the list as it now stands. */
+function changeRemoved(command: 'sync_remove_from_clouds' | 'sync_restore_books', fingerprints: string[]) {
+  return invoke(command, { fingerprints }).then(refreshCloudStatus, e => showError(undefined, e))
+}
+/** Whether a cloud is connected and its module on: books then sync, and Removed shows. */
+const cloudReady = () => connectedClouds.some(id => !settings.disabledModules.includes(cloudModuleId(id)))
 const appearancePanel = createAppearancePanel($('appearance'), settings, changes => void changeSettings(changes), {
   flow: flow => changeSettings({ flow }),
   allSettings: () => openSettings('reading'),
@@ -431,7 +444,7 @@ const appearancePanel = createAppearancePanel($('appearance'), settings, changes
 // The catalogs (OPDS servers), the key list and the version have their own sections in the settings.
 const sourcesPanel = createSourcesPanel(settingsPage.catalogs, {
   syncOff: () => settings.disabledModules.includes(MODULE.progressSync),
-  cloudReady: () => connectedClouds.some(id => !settings.disabledModules.includes(cloudModuleId(id))),
+  cloudReady,
 })
 settingsPage.shortcuts.append($('shortcuts').querySelector('dl')!.cloneNode(true))
 const settingsVersion = el('span')
@@ -453,21 +466,22 @@ const seriesView = createSeriesView({
 })
 const catalogView = createCatalogView({ library: () => library.getBooks(), openSettings: () => openSettings('catalogs') })
 
-// ---- The library's navigation (the desktop's pane, the phone's bottom bar) ----------
+// ---- The library's navigation (the desktop's pane, the phone's drawer) ----------
 
 /** Unset until the library first shows: then the history if there is one, else the books. */
 let view: View | null = null
-/** The pane's and the bottom bar's items; the pane's Settings heading. */
+/** The pane's items; its group headings (Library, Settings). */
 const navItems = [...document.querySelectorAll<HTMLElement>('[data-nav]')]
-const settingsHead = document.querySelector<HTMLElement>('#sidebar .section-head')!
+const navHeads = [...document.querySelectorAll<HTMLElement>('#sidebar .section-head')]
 /** The last page that isn't a settings section, for S / Ctrl+, to go back to. */
-let lastPage: View = 'library'
+let lastPage: View = 'books'
 /** The disabled modules the capabilities UI was last drawn for. */
 let lastCapabilities = ''
 
 /** Shows `to` in the library window's content and marks it in the pane. */
 function showView(to: View) {
-  const wasSettings = !!view?.startsWith('settings:')
+  const was = view
+  const wasSettings = !!was?.startsWith('settings:')
   view = to
   if (!to.startsWith('settings:')) lastPage = to
   const settingsView = to.startsWith('settings:')
@@ -481,51 +495,50 @@ function showView(to: View) {
       void refreshCloudStatus()
     }
     settingsPage.showSection(to.slice('settings:'.length) as SettingsSection)
-    foldSettingsNav(false)
   } else if (library.isReady()) {
-    showTab(to === 'catalogs' || to === 'series' ? to : 'books')
-    // The history and the books are separate pages here (the phone shows both on one).
+    showTab(to === 'catalogs' || to === 'series' || to === 'removed' ? to : 'books')
+    // The history and the books are separate pages.
     $('books-view').dataset.show = to === 'recent' ? 'recent' : 'all'
+    if (to === 'removed' && was !== 'removed') void refreshCloudStatus()
   }
-  for (const item of navItems) {
-    // The phone's Settings stands for all its sections.
-    const group = item.dataset.navGroup
-    item.setAttribute('aria-current', String(item.dataset.nav === to || (!!group && to.startsWith(`${group}:`))))
-  }
+  const current = navItems.find(item => item.dataset.nav === to)
+  for (const item of navItems) item.setAttribute('aria-current', String(item === current))
+  // The group holding the page opens, so the pane shows where the reader is.
+  const group = current?.closest<HTMLElement>('.section')
+  const head = navHeads.find(h => h.getAttribute('aria-controls') === group?.id)
+  if (head) foldNav(head, false)
+  const name = current?.textContent ?? ''
+  $('view-title').textContent = settingsView ? `Settings › ${name}` : name
 }
 
-/** The views a swipe walks through: the bottom bar's panels, or within Settings its sections, in their order. */
-function swipeOrder(): View[] {
-  if (view?.startsWith('settings:')) {
-    const sections = [...document.querySelectorAll<HTMLElement>('#settings-nav [data-nav]')].filter(item => !item.hidden)
-    return sections.map(item => item.dataset.nav as View).filter(nav => !DESKTOP_ONLY_SECTIONS.some(id => nav === `settings:${id}`))
-  }
-  return [...document.querySelectorAll<HTMLElement>('#bottom-nav [data-nav]')].filter(item => !item.hidden).map(item => item.dataset.nav as View)
+/** Folds a group in the pane (Library, Settings) away (`true`) or open. */
+function foldNav(head: HTMLElement, fold: boolean) {
+  $(head.getAttribute('aria-controls')!).hidden = fold
+  head.setAttribute('aria-expanded', String(!fold))
 }
 
-/** A swipe on the library screen: the next or previous panel slides in. */
-function swipeView(direction: SwipeDirection) {
-  const to = view && neighbour(swipeOrder(), view, direction)
-  if (!to) return
-  showView(to)
-  const panel = to.startsWith('settings:') && library.isSettingsEmbedded() ? $('settings') : $('start-main')
-  panel.classList.remove('slide-next', 'slide-prev')
-  void panel.offsetWidth
-  panel.classList.add(`slide-${direction}`)
-  // Gone once played, so a panel shown again later (after a book, say) doesn't replay it.
-  panel.addEventListener('animationend', () => panel.classList.remove(`slide-${direction}`), { once: true })
+/** Whether the phone's navigation drawer is open. */
+const navOpen = () => $('start').classList.contains('nav-open')
+
+/** Opens the phone's navigation drawer over the library, with the scrim behind it. */
+function openNav() {
+  closePopup()
+  closePanels()
+  $('scrim').hidden = false
+  setNavOpen(true)
 }
 
-/** Folds the Settings group in the pane away (`true`) or open. */
-function foldSettingsNav(fold: boolean) {
-  $('settings-nav').hidden = fold
-  settingsHead.setAttribute('aria-expanded', String(!fold))
+/** Slides the phone's drawer in or out, and says so on its button. */
+function setNavOpen(open: boolean) {
+  $('start').classList.toggle('nav-open', open)
+  $('nav-button').setAttribute('aria-expanded', String(open))
 }
 
-/** The library's parts: the books on disk, their series, and the catalogs to get more from. */
-function showTab(tab: 'books' | 'series' | 'catalogs') {
+/** The library's parts: the books on disk, their series, the books removed here, and the catalogs to get more from. */
+function showTab(tab: 'books' | 'series' | 'removed' | 'catalogs') {
   $('books-view').hidden = tab !== 'books'
   $('series-view').hidden = tab !== 'series'
+  $('removed-view').hidden = tab !== 'removed'
   $('catalog-view').hidden = tab !== 'catalogs'
   if (tab === 'catalogs') void catalogView.show()
   if (tab === 'series') seriesView.show()
@@ -616,9 +629,8 @@ function refreshModules() {
 function applyCapabilities() {
   const off = new Set(settings.disabledModules)
   const catalogs = !off.has(MODULE.catalogs)
-  for (const item of navItems) {
-    if (item.dataset.nav === 'catalogs' || item.dataset.nav === 'settings:catalogs') item.hidden = !catalogs
-  }
+  setNavVisible('catalogs', catalogs)
+  setNavVisible('settings:catalogs', catalogs)
   settingsPage.setSectionVisible('catalogs', catalogs)
   settingsPage.setOrganizeVisible(!off.has(MODULE.organize))
   settingsPage.setFileTypesVisible(!isAndroid && !off.has(MODULE.fileTypes))
@@ -626,8 +638,9 @@ function applyCapabilities() {
   // The desktop counts every network as unmetered, so the rule means nothing there.
   settingsPage.setBooksWifiVisible(cloudsOn && isAndroid)
   settingsPage.setUpdatesVisible(!off.has(MODULE.updateCheck))
+  showRemovedItem()
   if (!catalogs && (view === 'catalogs' || view === 'settings:catalogs')) {
-    showView(view === 'catalogs' ? 'library' : 'settings:modules')
+    showView(view === 'catalogs' ? 'books' : 'settings:modules')
   }
   const key = [...off].sort().join(',')
   if (key !== lastCapabilities) {
@@ -668,14 +681,28 @@ async function refreshCloudStatus() {
   })
   connectedClouds = clouds.filter(c => c.connected).map(c => c.id)
   settingsPage.setClouds(clouds)
-  // Asks the clouds, so only with one connected.
+  showRemovedItem()
+  // Asks the clouds, so only with one connected, and only for the page that shows the list.
+  if (view !== 'removed') return
   const removed = connectedClouds.length
     ? await invoke<RemovedBook[]>('sync_removed_books').catch((e): RemovedBook[] => {
         console.error(e)
         return []
       })
     : []
-  settingsPage.setRemovedBooks(removed)
+  removedView.show(removed)
+}
+
+/** Removed is in the pane only while a cloud syncs; leaving it shows the books. */
+function showRemovedItem() {
+  const shown = cloudReady()
+  setNavVisible('removed', shown)
+  if (!shown && view === 'removed') showView('books')
+}
+
+/** Shows or hides a page's item in the pane. */
+function setNavVisible(nav: View, visible: boolean) {
+  for (const item of navItems) if (item.dataset.nav === nav) item.hidden = !visible
 }
 
 // ---- Edge controls ----------------------------------------------------------
@@ -814,13 +841,24 @@ document.addEventListener('visibilitychange', () => {
   else void invoke('sync_wake').catch(console.error)
 })
 $('organize-cancel').addEventListener('click', closePanels)
-// The library window's pane (desktop): its items, Settings folding out, its width.
-for (const item of navItems) item.addEventListener('click', () => showView(item.dataset.nav as View))
-// The phone: a sideways swipe on the library screen moves between its panels.
-const swipeOn = () => isAndroid && settings.swipePanels && !reading.book && !library.isOrganizeOpen() && !library.isDetailsOpen()
-// The embedded settings sit inside it, so one listener covers both.
-onSwipe($('start'), swipeOn, swipeView)
-settingsHead.addEventListener('click', () => foldSettingsNav(!$('settings-nav').hidden))
+// The library window's pane: its items, its groups folding out, its width (desktop).
+for (const item of navItems) {
+  item.addEventListener('click', () => {
+    showView(item.dataset.nav as View)
+    if (navOpen()) closePanels()
+  })
+}
+for (const head of navHeads) head.addEventListener('click', () => foldNav(head, head.getAttribute('aria-expanded') === 'true'))
+// The phone: the pane is a drawer, opened by its button or a swipe to the right.
+$('nav-button').addEventListener('click', openNav)
+// An open drawer always closes with a swipe; it opens with one when the setting says so (and there is a library).
+const swipeOn = () =>
+  isAndroid && !reading.book && !library.isOrganizeOpen() && !library.isDetailsOpen() && (navOpen() || (settings.swipePanels && library.isReady()))
+// The drawer and the scrim lie outside the library's content, so the listener is the page's.
+onSwipe(document.body, swipeOn, direction => {
+  if (direction === 'prev') openNav()
+  else if (navOpen()) closePanels()
+})
 sidebarResizer($('start'), $('sidebar-resizer'))
 appWindow.listen('catalogs-changed', () => {
   void sourcesPanel.refresh()
