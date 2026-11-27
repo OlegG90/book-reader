@@ -267,7 +267,8 @@ async function handleEscape() {
  */
 function handleBack() {
   if (closeTopLayer() || library.stepBack()) return
-  void invoke(reading.book ? 'show_library' : 'leave_app').catch(console.error)
+  // A book still loading counts as open: Back takes it back to the library, not out of the app.
+  void invoke(reading.book || reading.opening ? 'show_library' : 'leave_app').catch(console.error)
 }
 
 function toggleFlow() {
