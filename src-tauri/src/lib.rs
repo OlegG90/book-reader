@@ -21,6 +21,7 @@ mod modules;
 mod naming;
 mod net;
 mod oauth;
+mod onedrive;
 mod opds;
 mod paths;
 #[cfg_attr(not(windows), path = "register_unsupported.rs")]

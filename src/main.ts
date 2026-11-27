@@ -371,7 +371,7 @@ const settingsPage = createSettingsPage($('settings'), settings, changes => void
     void invoke(command).then(refreshFileTypesStatus, console.error)
   },
   connectCloud: provider => {
-    // The rows never send an unavailable cloud; a disabled module refuses.
+    // A disabled module refuses.
     // A phone's answer comes back on the app's scheme: the push event is
     // unreliable there, so a Google connect polls the stash instead; the
     // desktop waits on a loopback address instead.
@@ -634,7 +634,7 @@ function applyCapabilities() {
   settingsPage.setSectionVisible('catalogs', catalogs)
   settingsPage.setOrganizeVisible(!off.has(MODULE.organize))
   settingsPage.setFileTypesVisible(!isAndroid && !off.has(MODULE.fileTypes))
-  const cloudsOn = !off.has(MODULE.dropbox) || !off.has(MODULE.googleDrive)
+  const cloudsOn = !off.has(MODULE.dropbox) || !off.has(MODULE.oneDrive) || !off.has(MODULE.googleDrive)
   // The desktop counts every network as unmetered, so the rule means nothing there.
   settingsPage.setBooksWifiVisible(cloudsOn && isAndroid)
   settingsPage.setUpdatesVisible(!off.has(MODULE.updateCheck))

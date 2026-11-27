@@ -52,11 +52,11 @@ export interface ModuleInfo {
 
 /** The clouds sync can run through; every connected one is used at once. */
 export const CLOUD_PROVIDERS = [
-  { id: 'dropbox', label: 'Dropbox', available: true },
-  { id: 'onedrive', label: 'OneDrive', available: false },
-  { id: 'google', label: 'Google Drive', available: true },
+  { id: 'dropbox', label: 'Dropbox' },
+  { id: 'onedrive', label: 'OneDrive' },
+  { id: 'google', label: 'Google Drive' },
 ] as const
-/** A cloud by its id; unavailable ones are never sent. */
+/** A cloud by its id. */
 export type CloudProviderId = (typeof CLOUD_PROVIDERS)[number]['id']
 
 /** One cloud's connection as the backend reports it. */
@@ -296,9 +296,9 @@ export function createSettingsPage(host: HTMLElement, initial: PanelValues, onCh
         button.textContent = 'Connect'
         button.disabled = true
       } else {
-        hint.textContent = !provider.available ? 'Coming soon — not available yet.' : off ? `Turn on ${provider.label} in Modules to connect.` : 'Not connected'
+        hint.textContent = off ? `Turn on ${provider.label} in Modules to connect.` : 'Not connected'
         button.textContent = 'Connect'
-        button.disabled = !provider.available || off
+        button.disabled = off
         button.onclick = () => {
           waiting.add(provider.id)
           refreshClouds()

@@ -125,7 +125,7 @@ impl Transport for Kosync {
     }
 }
 
-/// Progress and book files through a cloud store (Dropbox, Google Drive):
+/// Progress and book files through a cloud store (Dropbox, OneDrive, Google Drive):
 /// the same for every cloud, see cloud.rs.
 struct CloudTransport<'a>(&'a dyn CloudStore);
 
@@ -183,11 +183,12 @@ impl Transport for CloudTransport<'_> {
 
 static KOSYNC: Kosync = Kosync;
 static DROPBOX: CloudTransport<'static> = CloudTransport(&crate::dropbox::STORE);
+static ONEDRIVE: CloudTransport<'static> = CloudTransport(&crate::onedrive::STORE);
 static GOOGLE: CloudTransport<'static> = CloudTransport(&crate::google::STORE);
 
 /// Every transport, in merge order (first wins timestamp ties).
-fn transports() -> [&'static dyn Transport; 3] {
-    [&KOSYNC, &DROPBOX, &GOOGLE]
+fn transports() -> [&'static dyn Transport; 4] {
+    [&KOSYNC, &DROPBOX, &ONEDRIVE, &GOOGLE]
 }
 
 /// Whether a transport's modules are on.
@@ -1176,7 +1177,7 @@ mod tests {
                 // switch the clouds off here — no keyring, no network, ever.
                 s.settings.insert(
                     "disabledModules".into(),
-                    serde_json::json!([crate::modules::id::DROPBOX, crate::modules::id::GOOGLE_DRIVE]),
+                    serde_json::json!([crate::modules::id::DROPBOX, crate::modules::id::ONEDRIVE, crate::modules::id::GOOGLE_DRIVE]),
                 );
             })
             .unwrap();

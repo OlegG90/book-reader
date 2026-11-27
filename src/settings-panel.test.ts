@@ -332,9 +332,8 @@ describe('settings page', () => {
     ])
     expect(cloudRow(host, 'Dropbox').hint).toBe('Dropbox upload failed (401)')
     expect(cloudRow(host, 'Google Drive').hint).toBe('Reading positions and books sync through it. 3.2 GB of 15 GB used.')
-    // OneDrive waits for its transport.
-    expect(cloudRow(host, 'OneDrive').button.disabled).toBe(true)
-    expect(cloudRow(host, 'OneDrive').hint).toContain('Coming soon')
+    expect(cloudRow(host, 'OneDrive').hint).toBe('Not connected')
+    expect(cloudRow(host, 'OneDrive').button.disabled).toBe(false)
   })
 
   it('hides a cloud turned off in Modules unless it still has a login to forget', () => {

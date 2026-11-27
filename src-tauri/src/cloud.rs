@@ -1,4 +1,4 @@
-//! What the cloud transports (Dropbox, Google Drive) share. Each cloud is a
+//! What the cloud transports (Dropbox, OneDrive, Google Drive) share. Each cloud is a
 //! `CloudStore`: a flat folder of named files behind an access token. On top
 //! of that, written once here: the fingerprint-keyed positions file and its
 //! newest-wins merge, the book manifest and book files, the access token
@@ -127,8 +127,8 @@ fn files_of(store: &dyn CloudStore, access: &str, prefix: &str, legacy: &str) ->
 
 
 /// Every cloud, in merge order.
-pub fn stores() -> [&'static dyn CloudStore; 2] {
-    [&crate::dropbox::STORE, &crate::google::STORE]
+pub fn stores() -> [&'static dyn CloudStore; 3] {
+    [&crate::dropbox::STORE, &crate::onedrive::STORE, &crate::google::STORE]
 }
 
 /// Forgets a cloud's login: the refresh token, the access token, and the
@@ -681,7 +681,7 @@ mod tests {
 
     #[test]
     fn cloud_secrets_are_recognised_by_their_ids() {
-        assert!(is_token_id("dropbox") && is_token_id("google") && is_token_id("google-login"));
+        assert!(is_token_id("dropbox") && is_token_id("onedrive") && is_token_id("google") && is_token_id("google-login"));
         assert!(!is_token_id("1a2b"));
     }
 

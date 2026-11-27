@@ -452,7 +452,7 @@ mod tests {
         let store = Store::load(dir.path().join("breader.json"));
         store
             .update(|s| {
-                s.settings.insert("disabledModules".into(), serde_json::json!([crate::modules::id::DROPBOX, crate::modules::id::GOOGLE_DRIVE]));
+                s.settings.insert("disabledModules".into(), serde_json::json!([crate::modules::id::DROPBOX, crate::modules::id::ONEDRIVE, crate::modules::id::GOOGLE_DRIVE]));
             })
             .unwrap();
         let books = LibraryBooks::default();

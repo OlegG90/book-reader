@@ -49,6 +49,7 @@ pub mod id {
     pub const FILE_TYPES: &str = "capability:file-types";
     pub const UPDATE_CHECK: &str = "capability:update-check";
     pub const DROPBOX: &str = "capability:dropbox";
+    pub const ONEDRIVE: &str = "capability:onedrive";
     pub const GOOGLE_DRIVE: &str = "capability:googledrive";
 }
 
@@ -138,6 +139,15 @@ fn definitions() -> Vec<Def> {
             kind: ModuleKind::Capability,
             label: "Dropbox",
             hint: "Sync reading positions through your Dropbox, without catalogs.",
+            extensions: &[],
+            needs_network: true,
+            optional: true,
+        },
+        Def {
+            id: id::ONEDRIVE,
+            kind: ModuleKind::Capability,
+            label: "OneDrive",
+            hint: "Sync reading positions through your OneDrive, without catalogs.",
             extensions: &[],
             needs_network: true,
             optional: true,
@@ -254,7 +264,7 @@ mod tests {
     #[test]
     fn list_reflects_settings() {
         let all = list(&state_with(Map::new()));
-        assert_eq!(all.len(), 9);
+        assert_eq!(all.len(), 10);
         assert!(all.iter().all(|m| m.enabled));
         // Progress sync alone locks nothing: the intent is no blocker,
         // clouds keep working with catalogs off.
@@ -273,7 +283,7 @@ mod tests {
         // Unknown ids change nothing; corrupt shapes mean nothing is off.
         let state = state_with(disabled(&[id::FB2, "wizardry:fireball"]));
         assert!(is_off(&state, id::FB2));
-        assert_eq!(list(&state).len(), 9);
+        assert_eq!(list(&state).len(), 10);
         let state = state_with(Map::from_iter([("disabledModules".into(), json!("fb2"))]));
         assert!(!is_off(&state, id::FB2));
         let state = state_with(Map::from_iter([("disabledModules".into(), json!([42]))]));
@@ -331,6 +341,7 @@ mod tests {
             (id::FILE_TYPES, "File types"),
             (id::UPDATE_CHECK, "Update check"),
             (id::DROPBOX, "Dropbox"),
+            (id::ONEDRIVE, "OneDrive"),
             (id::GOOGLE_DRIVE, "Google Drive"),
         ] {
             let off = state_with(disabled(&[id]));

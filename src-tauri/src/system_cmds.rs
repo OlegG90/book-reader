@@ -3,6 +3,7 @@
 use crate::cli::Launch;
 use crate::cloud::CloudStore;
 use crate::dropbox;
+use crate::onedrive;
 use crate::google;
 use crate::formats;
 use crate::modules;
@@ -87,6 +88,7 @@ pub(crate) fn cloud_connect(app: AppHandle, store: State<Store>, id: String) -> 
     // Each cloud has its own login; a cloud without one here can't connect.
     let (begin, finish): (fn() -> CmdResult<PendingLogin>, LoginFinish) = match cloud.id() {
         id if id == dropbox::STORE.id() => (dropbox::begin, dropbox::finish),
+        id if id == onedrive::STORE.id() => (onedrive::begin, onedrive::finish),
         id if id == google::STORE.id() => (google::begin, google::finish),
         id => return Err(format!("{id} has no login yet.")),
     };
@@ -238,7 +240,7 @@ mod tests {
     fn clouds_are_found_by_id_and_others_refused() {
         assert_eq!(cloud_by_id("dropbox").unwrap().label(), "Dropbox");
         assert_eq!(cloud_by_id("google").unwrap().label(), "Google Drive");
-        assert!(cloud_by_id("onedrive").is_err(), "not there yet");
+        assert_eq!(cloud_by_id("onedrive").unwrap().label(), "OneDrive");
         assert!(cloud_by_id("../etc").is_err());
     }
 }
