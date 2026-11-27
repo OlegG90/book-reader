@@ -7,7 +7,7 @@
 //! is kept like catalog passwords (the OS credential store, the Android
 //! Keystore).
 
-use crate::cloud::{self, access_with_life, token_json, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
+use crate::cloud::{self, access_with_life, code_post, token_json, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
 use crate::sync_error::SyncError;
 use crate::platform::{Active, Platform};
 use crate::{net, oauth};
@@ -80,7 +80,7 @@ pub fn finish(login: PendingLogin) -> Result<(), String> {
         ("redirect_uri", REDIRECT_URI),
         ("code_verifier", &login.verifier),
     ]);
-    let (_access, refresh) = tokens(&token_post(TOKEN_URL, &form, STORE.label())?, Active::password(TOKEN_ID), STORE.label())?;
+    let (_access, refresh) = tokens(&code_post(TOKEN_URL, &form, STORE.label())?, Active::password(TOKEN_ID), STORE.label())?;
     cloud::keep_login(&STORE, &refresh)
 }
 

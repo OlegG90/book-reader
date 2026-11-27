@@ -5,7 +5,7 @@
 //! config: the refresh token is kept like catalog passwords (the OS
 //! credential store, the Android Keystore).
 
-use crate::cloud::{self, access_with_life, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
+use crate::cloud::{self, access_with_life, code_post, token_post, tokens, CloudStore, ErrorSlot, TokenCache};
 use crate::sync_error::SyncError;
 use crate::platform::{Active, Platform};
 use crate::{net, oauth};
@@ -86,7 +86,7 @@ fn exchange(app_key: &str, code: &str, verifier: &str, stored: Option<String>) -
         .append_pair("code_verifier", verifier)
         .append_pair("redirect_uri", REDIRECT_URI)
         .finish();
-    tokens(&token_post(TOKEN_URL, &body, "Dropbox")?, stored, "Dropbox")
+    tokens(&code_post(TOKEN_URL, &body, "Dropbox")?, stored, "Dropbox")
 }
 
 impl CloudStore for Dropbox {

@@ -459,6 +459,36 @@ pub fn token_post(url: &str, form: &str, service: &str) -> Result<Vec<u8>, SyncE
     }
 }
 
+/// How long a login keeps trading its code while the network is out of
+/// reach. A phone blocks an app's network while the browser is in front, so
+/// the trade goes through once the reader is back in the app; the codes
+/// themselves live about ten minutes. A desktop's network is never blocked
+/// that way, so an unreachable network there fails at once.
+#[cfg(mobile)]
+const CODE_TRADE_WAIT: Duration = Duration::from_secs(300);
+#[cfg(not(mobile))]
+const CODE_TRADE_WAIT: Duration = Duration::ZERO;
+/// How long a login waits between tries of its code trade.
+const CODE_TRADE_PAUSE: Duration = Duration::from_secs(2);
+
+/// Trades a login's code for tokens like `token_post`, trying again while
+/// the network is out of reach (see `CODE_TRADE_WAIT`).
+pub fn code_post(url: &str, form: &str, service: &str) -> Result<Vec<u8>, SyncError> {
+    retry_offline(|| token_post(url, form, service), CODE_TRADE_WAIT, CODE_TRADE_PAUSE)
+}
+
+/// Runs `attempt` until it succeeds, fails for another reason than an
+/// unreachable network, or `wait` has passed.
+fn retry_offline<T>(mut attempt: impl FnMut() -> Result<T, SyncError>, wait: Duration, pause: Duration) -> Result<T, SyncError> {
+    let start = Instant::now();
+    loop {
+        match attempt() {
+            Err(e) if e.kind == Kind::Offline && start.elapsed() < wait => std::thread::sleep(pause),
+            result => return result,
+        }
+    }
+}
+
 /// Parses a token endpoint answer.
 pub fn token_json(body: &[u8]) -> Result<serde_json::Value, String> {
     serde_json::from_slice(body).map_err(|e| format!("login: {e}"))
@@ -667,6 +697,36 @@ mod tests {
         assert!(download_book(&store, "book").is_err());
         assert_eq!(store.tokens.fresh().as_deref(), Some("kept"));
         assert_eq!(store.errors.last().as_deref(), Some("nope"));
+    }
+
+    #[test]
+    fn a_code_trade_waits_out_an_unreachable_network_only() {
+        let offline = || SyncError::offline("no network".to_string());
+        let minute = Duration::from_secs(60);
+        // Back in the app: the network returns and the trade goes through.
+        let mut tries = 0;
+        let traded = retry_offline(
+            || {
+                tries += 1;
+                if tries < 3 { Err(offline()) } else { Ok("tokens") }
+            },
+            minute,
+            Duration::ZERO,
+        );
+        assert_eq!((traded.unwrap(), tries), ("tokens", 3));
+        // A refused code is final.
+        let mut tries = 0;
+        let refused = retry_offline::<()>(
+            || {
+                tries += 1;
+                Err(SyncError::new(Kind::Rejected, "invalid_grant"))
+            },
+            minute,
+            Duration::ZERO,
+        );
+        assert_eq!((refused.unwrap_err().kind, tries), (Kind::Rejected, 1));
+        // The network never comes back: the wait ends.
+        assert_eq!(retry_offline::<()>(|| Err(offline()), Duration::ZERO, Duration::ZERO).unwrap_err().kind, Kind::Offline);
     }
 
     #[test]
