@@ -3,6 +3,8 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { el } from 'reader-core'
 import { confirmDialog, onLongPress, showMenu, type MenuItem } from './book-menu'
 import {
+  SORTS,
+  SORT_LABELS,
   STATUSES,
   STATUS_LABELS,
   filterBooks,
@@ -334,11 +336,54 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
 
   /** Puts the saved sort into the library's controls and draws the grid. */
   function showControls() {
-    $<HTMLSelectElement>('library-sort').value = deps.getSettings().librarySort
     renderLibrary()
   }
 
-  /** Draws the grid for the current search, status and sort, with the counts on the status switch. */
+  /** Where a menu opened from a button in the bar shows: just under it. */
+  function under(button: HTMLElement) {
+    const rect = button.getBoundingClientRect()
+    return { x: rect.left, y: rect.bottom + 4 }
+  }
+
+  /**
+   * The bar's buttons as the settings stand: the status with its count (its
+   * menu counts every status among the books matching the search), the sort,
+   * and the switch between covers and a list.
+   */
+  function showBar(counts: Record<Status, number>) {
+    const settings = deps.getSettings()
+    const choose = (changes: Partial<Settings>) => {
+      deps.changeSettings(changes)
+      renderLibrary()
+    }
+    const status = $('library-status')
+    status.replaceChildren(
+      el('span', { textContent: STATUS_LABELS[settings.libraryStatus] }),
+      el('span', { className: 'count', textContent: String(counts[settings.libraryStatus]) }),
+      icon('chevron'),
+    )
+    status.onclick = () =>
+      showMenu(
+        under(status),
+        STATUSES.map(s => ({ label: STATUS_LABELS[s], detail: String(counts[s]), checked: s === settings.libraryStatus, action: () => choose({ libraryStatus: s }) })),
+      )
+    const sort = $('library-sort')
+    sort.replaceChildren(icon('sort'), el('span', { textContent: SORT_LABELS[settings.librarySort] }))
+    sort.onclick = () =>
+      showMenu(
+        under(sort),
+        SORTS.map(s => ({ label: SORT_LABELS[s], checked: s === settings.librarySort, action: () => choose({ librarySort: s }) })),
+      )
+    const list = settings.libraryLayout === 'list'
+    const layout = $('library-layout')
+    layout.replaceChildren(icon(list ? 'grid' : 'list'))
+    layout.title = list ? 'Show covers' : 'Show as a list'
+    layout.setAttribute('aria-label', layout.title)
+    layout.onclick = () => choose({ libraryLayout: list ? 'covers' : 'list' })
+    for (const id of ['library-books', 'series-books']) $(id).classList.toggle('list', list)
+  }
+
+  /** Draws the grid for the current search, status and sort, with the bar's counts. */
   function renderLibrary() {
     const settings = deps.getSettings()
     const query = $<HTMLInputElement>('library-search').value
@@ -348,25 +393,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     for (const b of matching) counts[statusOf(b)]++
     const chosen = settings.libraryStatus
     const shown = sortBooks(chosen === 'all' ? matching : matching.filter(b => statusOf(b) === chosen), settings.librarySort)
-    // The status switch: each choice with how many of the matching books it holds.
-    $('library-status').replaceChildren(
-      ...STATUSES.map(status =>
-        el(
-          'button',
-          {
-            type: 'button',
-            role: 'radio',
-            ariaChecked: String(status === settings.libraryStatus),
-            onclick: () => {
-              deps.changeSettings({ libraryStatus: status })
-              renderLibrary()
-            },
-          },
-          STATUS_LABELS[status],
-          el('span', { className: 'count', textContent: String(counts[status]) }),
-        ),
-      ),
-    )
+    showBar(counts)
     if (!libraryBooks.length) {
       showLibraryMessage(`The library is empty. Open a book (Ctrl+O) or put EPUB and FB2 files into ${libraryFolder}.`)
     } else {

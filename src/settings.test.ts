@@ -34,7 +34,7 @@ describe('readSettings', () => {
     // A new key needs a default here (and only here): the backend stores
     // settings opaquely, and appearance keys default in reader-core.
     expect(Object.keys(readSettings({})).sort()).toEqual(
-      ['booksWifiOnly', 'disabledModules', 'flow', 'font', 'fontSize', 'historyLength', 'libraryAddMode', 'librarySort', 'libraryStatus', 'lineHeight', 'lineLength', 'offerLibrary', 'savePositions', 'swipePages', 'swipePanels', 'theme', 'uiFont', 'volumeKeys'],
+      ['booksWifiOnly', 'disabledModules', 'flow', 'font', 'fontSize', 'historyLength', 'libraryAddMode', 'libraryLayout', 'librarySort', 'libraryStatus', 'lineHeight', 'lineLength', 'offerLibrary', 'savePositions', 'swipePages', 'swipePanels', 'theme', 'uiFont', 'volumeKeys'],
     )
   })
 

@@ -31,6 +31,10 @@ export const SORTS = ['author', 'title', 'added'] as const
 export type Sort = (typeof SORTS)[number]
 export const SORT_LABELS: Record<Sort, string> = { author: 'Author', title: 'Title', added: 'Recently added' }
 
+/** How Books and a series' books show: cover cards, or one compact line each. */
+export const LAYOUTS = ['covers', 'list'] as const
+export type Layout = (typeof LAYOUTS)[number]
+
 /** Past this share a book counts as finished (the last pages are often notes or ads). */
 export const FINISHED_AT = 0.98
 

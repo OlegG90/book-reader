@@ -20,7 +20,6 @@ import '@fontsource/lora/cyrillic-400.css'
 import '@fontsource/lora/latin-600.css'
 import '@fontsource/lora/cyrillic-600.css'
 import { commandFor, type Command } from './keys'
-import { SORTS, SORT_LABELS, type Sort } from './library'
 import { createCatalogView } from './catalog-view'
 import { setFormats } from './catalog'
 import { createSeriesView } from './series-view'
@@ -594,6 +593,8 @@ function applySettings(changes: Partial<Settings>) {
   if ('volumeKeys' in changes) setReading(!!open, settings.volumeKeys)
   if ('swipePages' in changes) open?.setSwipe(settings.swipePages)
   if ('historyLength' in changes && !open) void library.refreshRecent()
+  // Another window changed how the library shows.
+  if (['libraryStatus', 'librarySort', 'libraryLayout'].some(k => k in changes) && !open) library.render()
   if ('uiFont' in changes) applyTheme()
   applyCapabilities()
 }
@@ -793,11 +794,6 @@ $('library-button').addEventListener('click', () => runCommand('library'))
 $('setup-default').addEventListener('click', () => void library.chooseLibrary(false))
 $('setup-pick').addEventListener('click', () => void library.chooseLibrary(true))
 $('library-search').addEventListener('input', () => library.render())
-$('library-sort').append(...SORTS.map(s => el('option', { value: s, textContent: SORT_LABELS[s] })))
-$<HTMLSelectElement>('library-sort').addEventListener('change', e => {
-  changeSettings({ librarySort: (e.target as HTMLSelectElement).value as Sort })
-  library.render()
-})
 const libraryVisible = () => !reading.book && !$('library').hidden
 /** Alt-tabbing back rescans at most this often. */
 const FOCUS_RESCAN_MS = 15_000

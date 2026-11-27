@@ -9,12 +9,13 @@
  */
 import { oneOf, readAppearance, type Flow } from 'reader-core'
 import { HISTORY_LENGTHS, UI_FONTS, type PanelValues } from './settings-panel'
-import { SORTS, STATUSES, type Sort, type Status } from './library'
+import { LAYOUTS, SORTS, STATUSES, type Layout, type Sort, type Status } from './library'
 
 export interface Settings extends PanelValues {
   flow: Flow
   librarySort: Sort
   libraryStatus: Status
+  libraryLayout: Layout
   /** The last choice in the "add to library" bar, offered first next time. */
   libraryAddMode: 'move' | 'copy'
 }
@@ -30,6 +31,7 @@ export function readSettings(stored: Record<string, unknown>): Settings {
     flow: oneOf(stored.flow, FLOWS, 'paginated'),
     librarySort: oneOf(stored.librarySort, SORTS, 'author'),
     libraryStatus: oneOf(stored.libraryStatus, STATUSES, 'all'),
+    libraryLayout: oneOf(stored.libraryLayout, LAYOUTS, 'covers'),
     libraryAddMode: oneOf(stored.libraryAddMode, ['move', 'copy'] as const, 'move'),
     savePositions: stored.savePositions !== false,
     offerLibrary: stored.offerLibrary !== false,

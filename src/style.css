@@ -1208,9 +1208,8 @@ button:hover {
   box-shadow: 0 0 0 1px var(--accent);
 }
 
-/* Switches: the mode (Aa), the library's status, the drawer's Contents / Bookmarks */
+/* Switches: the mode (Aa), the drawer's Contents / Bookmarks */
 :is(#appearance, #settings) .segmented,
-.status-switch,
 .toc-switch {
   display: flex;
   border: 1px solid var(--line);
@@ -1219,7 +1218,6 @@ button:hover {
 }
 
 :is(#appearance, #settings) .segmented button,
-.status-switch button,
 .toc-switch button {
   flex: 1;
   padding: 5px 4px;
@@ -1228,17 +1226,15 @@ button:hover {
 }
 
 :is(#appearance, #settings) .segmented button + button,
-.status-switch button + button,
 .toc-switch button + button {
   border-left: 1px solid var(--line);
 }
 
-:is(:is(#appearance, #settings) .segmented, .status-switch, .toc-switch) :is([aria-pressed='true'], [aria-checked='true'], [aria-selected='true']) {
+:is(:is(#appearance, #settings) .segmented, .toc-switch) :is([aria-pressed='true'], [aria-checked='true'], [aria-selected='true']) {
   color: var(--accent-text);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-.status-switch button,
 .toc-switch button {
   font-family: var(--font-body);
   font-weight: 400;
@@ -1912,36 +1908,94 @@ body.library-mode #topbar {
   gap: 18px 12px;
 }
 
-/* The library's status switch: each choice with its count */
-.status-switch button {
-  flex: none;
-  padding-inline: 10px;
-  white-space: nowrap;
+/* The library bar's menu buttons: the status with its count, the sort, covers / list */
+.library-tools {
+  display: flex;
+  gap: 8px;
 }
 
-.status-switch .count {
-  margin-left: 6px;
+.library-tools button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-inline: 10px;
+  white-space: nowrap;
+  font-family: var(--font-body);
+  font-weight: 400;
+}
+
+.library-tools .count {
   color: var(--muted);
 }
 
-.status-switch [aria-checked='true'] .count {
-  color: inherit;
+.library-tools svg.icon {
+  width: 16px;
+  height: 16px;
 }
 
-/* Phone: the statuses as a row of chips that scrolls */
-.android .status-switch {
-  order: 1;
+/* Phone: the search on its own line, the buttons under it */
+.android .library-bar input {
   width: 100%;
-  gap: 6px;
-  overflow-x: auto;
-  border: 0;
 }
 
-.android .status-switch button,
-.android .status-switch button + button {
-  flex: none;
-  border: 1px solid var(--line);
-  border-radius: 999px;
+/* A choice in a menu: the chosen one checked, a count at the end */
+.popup-menu [role='menuitemradio'] {
+  position: relative;
+  display: flex;
+  padding-inline-start: 28px;
+}
+
+.popup-menu [aria-checked='true']::before {
+  content: '✓';
+  position: absolute;
+  left: 10px;
+  color: var(--accent-text);
+}
+
+.popup-menu .detail {
+  margin-inline-start: 16px;
+  color: var(--muted);
+}
+
+/* The library as a list: one line a book, no covers */
+.book-grid.list {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+/* The title over the author and the series; the format and progress at the end. */
+.book-grid.list button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto;
+  gap: 2px 12px;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+
+.book-grid.list .cover-box {
+  display: none;
+}
+
+.book-grid.list .title {
+  grid-column: 1 / 3;
+  -webkit-line-clamp: 1;
+}
+
+.book-grid.list .author {
+  grid-row: 2;
+  grid-column: 1;
+}
+
+.book-grid.list .series {
+  grid-row: 2;
+  grid-column: 2;
+}
+
+.book-grid.list .meta {
+  grid-row: 1 / 3;
+  grid-column: 3;
+  align-self: center;
 }
 
 /* The contents drawer: Contents / Bookmarks */
