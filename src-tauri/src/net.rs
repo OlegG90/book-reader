@@ -78,16 +78,21 @@ pub fn put_json(url: &str, login: Option<&Login>, auth: Auth, accept: &str, body
 
 /// POST bytes to `url` with extra headers (a sync store's API).
 pub fn post(url: &str, headers: &[(&str, &str)], body: &[u8]) -> Result<Reply, String> {
-    let mut req = agent().post(url);
-    for (name, value) in headers {
-        req = req.header(*name, *value);
-    }
-    finish(req.send(body), url)
+    send_bytes(agent().post(url), url, headers, body)
 }
 
 /// PATCH bytes to `url` with extra headers (a sync store's API).
 pub fn patch(url: &str, headers: &[(&str, &str)], body: &[u8]) -> Result<Reply, String> {
-    let mut req = agent().patch(url);
+    send_bytes(agent().patch(url), url, headers, body)
+}
+
+/// PUT bytes to `url` with extra headers (a sync store's API).
+pub fn put(url: &str, headers: &[(&str, &str)], body: &[u8]) -> Result<Reply, String> {
+    send_bytes(agent().put(url), url, headers, body)
+}
+
+/// Sends a request with a body and extra headers, and reads the answer.
+fn send_bytes(mut req: ureq::RequestBuilder<ureq::typestate::WithBody>, url: &str, headers: &[(&str, &str)], body: &[u8]) -> Result<Reply, String> {
     for (name, value) in headers {
         req = req.header(*name, *value);
     }

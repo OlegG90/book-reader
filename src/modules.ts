@@ -8,5 +8,6 @@ export const MODULE = {
   fileTypes: 'capability:file-types',
   updateCheck: 'capability:update-check',
   dropbox: 'capability:dropbox',
+  oneDrive: 'capability:onedrive',
   googleDrive: 'capability:googledrive',
 } as const
