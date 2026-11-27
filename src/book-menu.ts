@@ -6,6 +6,10 @@ export interface MenuItem {
   action(): void
   /** Destroys something (Delete…): drawn in the danger colour. */
   danger?: boolean
+  /** One of a set of choices: whether it is the chosen one (a check mark shows). */
+  checked?: boolean
+  /** A short note at the end of the line, such as a count. */
+  detail?: string
 }
 
 /** Closes the open menu, if any. */
@@ -21,16 +25,21 @@ export function showMenu(at: { x: number; y: number }, items: MenuItem[]) {
     'div',
     { className: 'popup-menu', role: 'menu' },
     ...items.map(item =>
-      el('button', {
-        type: 'button',
-        role: 'menuitem',
-        className: item.danger ? 'danger' : '',
-        textContent: item.label,
-        onclick: () => {
-          close()
-          item.action()
+      el(
+        'button',
+        {
+          type: 'button',
+          role: item.checked == null ? 'menuitem' : 'menuitemradio',
+          ariaChecked: item.checked == null ? null : String(item.checked),
+          className: item.danger ? 'danger' : '',
+          onclick: () => {
+            close()
+            item.action()
+          },
         },
-      }),
+        item.label,
+        ...(item.detail ? [el('span', { className: 'detail', textContent: item.detail })] : []),
+      ),
     ),
   )
   document.body.append(menu)

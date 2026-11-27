@@ -40,7 +40,7 @@
       <div id="start-main">
       <!-- Phone: the drawer's button and the page's name (the desktop has the pane) -->
       <header id="phone-header" class="android-only">
-        <button type="button" id="nav-button" class="icon" title="Navigation" aria-label="Navigation" aria-controls="sidebar" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg></button>
+        <button type="button" id="nav-button" title="Navigation" aria-label="Navigation" aria-controls="sidebar" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg></button>
         <h1 id="view-title"></h1>
       </header>
       <div id="error" role="alert" hidden></div>
@@ -54,11 +54,17 @@
         <div id="books-view">
           <div class="library-bar">
             <input id="library-search" type="search" placeholder="Search title, author, series" aria-label="Search the library" />
-            <div id="library-status" class="status-switch" role="radiogroup" aria-label="Show"></div>
-            <select id="library-sort" aria-label="Sort by"></select>
+            <span class="library-tools">
+              <button type="button" id="library-status" aria-haspopup="menu" title="Show"></button>
+              <button type="button" id="library-sort" aria-haspopup="menu" title="Sort by"></button>
+              <button type="button" id="library-layout" class="layout-switch"></button>
+            </span>
             <button id="open-button" title="Open a book file (Ctrl+O)"><span class="desktop-only">Open file…</span><span class="android-only">Add book…</span></button>
           </div>
-          <h2 id="recent-title">Continue reading</h2>
+          <div class="page-head recent-head">
+            <h2 id="recent-title">Continue reading</h2>
+            <button type="button" id="recent-layout" class="layout-switch"></button>
+          </div>
           <ol id="recent" class="book-grid" aria-label="Recent books"></ol>
           <p id="recent-empty" class="muted" hidden>No books read yet. Open one from the library.</p>
           <p id="library-message" class="muted" hidden></p>
@@ -66,7 +72,10 @@
         </div>
         <!-- The library's series: their list, or one series' books in order -->
         <div id="series-view" hidden>
-          <nav id="series-crumbs" class="crumbs" aria-label="Series"></nav>
+          <div class="page-head">
+            <nav id="series-crumbs" class="crumbs" aria-label="Series"></nav>
+            <button type="button" id="series-layout" class="layout-switch"></button>
+          </div>
           <p id="series-empty" class="muted" hidden>No series in the library: books show here when their metadata names one.</p>
           <ul id="series-list" class="book-grid" aria-label="Series"></ul>
           <ul id="series-books" class="book-grid" aria-label="The series' books"></ul>
@@ -112,6 +121,7 @@
       <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
       <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/></symbol>
       <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></symbol>
+      <symbol id="i-sort" viewBox="0 0 24 24"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></symbol>
       <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></symbol>
       <symbol id="i-grid" viewBox="0 0 24 24"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></symbol>
     </svg>

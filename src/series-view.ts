@@ -35,6 +35,7 @@ export function createSeriesView(deps: {
             { type: 'button', onclick: () => go(g.name) },
             deps.cover(g.name, first.hasCover ? first.key : null, g.read / n),
             el('span', { className: 'title', textContent: g.name }),
+            el('span', { className: 'author', textContent: [...new Set(g.books.flatMap(b => b.authors))].join(', ') }),
             el('span', { className: 'meta', textContent: `${n} book${n === 1 ? '' : 's'} · ${g.read} read` }),
           ),
         )

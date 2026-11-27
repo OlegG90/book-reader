@@ -20,7 +20,6 @@ import '@fontsource/lora/cyrillic-400.css'
 import '@fontsource/lora/latin-600.css'
 import '@fontsource/lora/cyrillic-600.css'
 import { commandFor, type Command } from './keys'
-import { SORTS, SORT_LABELS, type Sort } from './library'
 import { createCatalogView } from './catalog-view'
 import { setFormats } from './catalog'
 import { createSeriesView } from './series-view'
@@ -60,7 +59,7 @@ const settingsReady = invoke<Record<string, unknown>>('get_settings')
     applyTheme()
     showSettings()
     applyCapabilities()
-    library.showControls()
+    library.render()
   })
 const library = createLibraryView({
   getSettings: () => settings,
@@ -793,11 +792,6 @@ $('library-button').addEventListener('click', () => runCommand('library'))
 $('setup-default').addEventListener('click', () => void library.chooseLibrary(false))
 $('setup-pick').addEventListener('click', () => void library.chooseLibrary(true))
 $('library-search').addEventListener('input', () => library.render())
-$('library-sort').append(...SORTS.map(s => el('option', { value: s, textContent: SORT_LABELS[s] })))
-$<HTMLSelectElement>('library-sort').addEventListener('change', e => {
-  changeSettings({ librarySort: (e.target as HTMLSelectElement).value as Sort })
-  library.render()
-})
 const libraryVisible = () => !reading.book && !$('library').hidden
 /** Alt-tabbing back rescans at most this often. */
 const FOCUS_RESCAN_MS = 15_000
@@ -961,6 +955,8 @@ appWindow.listen('sync-states-changed', () => library.refreshCloudMarks())
 appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
   const valid = readSettings({ ...settings, ...payload })
   applySettings(Object.fromEntries(Object.keys(payload).map(k => [k, valid[k as keyof Settings]])))
+  // How the library shows: this window's own choices redraw it as they are made.
+  if (['libraryStatus', 'librarySort', 'libraryLayout', 'recentLayout', 'seriesLayout'].some(k => k in payload) && !reading.book) library.render()
 })
 // reading.flush never throws, so a failed save cannot keep the window open.
 appWindow.onCloseRequested(async () => {

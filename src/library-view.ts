@@ -3,6 +3,8 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { el } from 'reader-core'
 import { confirmDialog, onLongPress, showMenu, type MenuItem } from './book-menu'
 import {
+  SORTS,
+  SORT_LABELS,
   STATUSES,
   STATUS_LABELS,
   filterBooks,
@@ -104,7 +106,6 @@ export interface LibraryView {
   refreshCloudMarks(): void
   refreshRecent(): Promise<void>
   render(): void
-  showControls(): void
   chooseLibrary(pick: boolean): Promise<void>
   bookCard(book: LibraryBook): HTMLElement
   coverWithProgress(title: string, coverKey: string | null, fraction: number | null): HTMLElement
@@ -332,13 +333,78 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     $('library-message').hidden = !text
   }
 
-  /** Puts the saved sort into the library's controls and draws the grid. */
-  function showControls() {
-    $<HTMLSelectElement>('library-sort').value = deps.getSettings().librarySort
-    renderLibrary()
+  /** Where a menu opened from a button in the bar shows: just under it. */
+  function under(button: HTMLElement) {
+    const rect = button.getBoundingClientRect()
+    return { x: rect.left, y: rect.bottom + 4 }
   }
 
-  /** Draws the grid for the current search, status and sort, with the counts on the status switch. */
+  /**
+   * The bar's buttons as the settings stand: the status with its count (its
+   * menu counts every status among the books matching the search), the sort,
+   * and the switch between covers and a list.
+   */
+  function showBar(counts: Record<Status, number>) {
+    const settings = deps.getSettings()
+    const choose = (changes: Partial<Settings>) => {
+      deps.changeSettings(changes)
+      renderLibrary()
+    }
+    /** Has `button` open a menu of one setting's choices under it, the current one checked. */
+    const menuOf = <K extends 'libraryStatus' | 'librarySort'>(
+      button: HTMLElement,
+      key: K,
+      values: readonly Settings[K][],
+      labels: Record<Settings[K], string>,
+      detail?: (value: Settings[K]) => string,
+    ) => {
+      button.onclick = () =>
+        showMenu(
+          under(button),
+          values.map(v => ({ label: labels[v], detail: detail?.(v), checked: v === settings[key], action: () => choose({ [key]: v }) })),
+        )
+    }
+    const status = $('library-status')
+    status.replaceChildren(
+      el('span', { textContent: STATUS_LABELS[settings.libraryStatus] }),
+      el('span', { className: 'count', textContent: String(counts[settings.libraryStatus]) }),
+      icon('chevron'),
+    )
+    menuOf(status, 'libraryStatus', STATUSES, STATUS_LABELS, s => String(counts[s]))
+    const sort = $('library-sort')
+    sort.replaceChildren(icon('sort'), el('span', { className: 'label', textContent: SORT_LABELS[settings.librarySort] }))
+    menuOf(sort, 'librarySort', SORTS, SORT_LABELS)
+    showLayouts()
+  }
+
+  /** Each page's covers / list switch, and the lists it shapes. */
+  const LAYOUT_SWITCHES = [
+    { key: 'libraryLayout', button: 'library-layout', lists: ['library-books'] },
+    { key: 'recentLayout', button: 'recent-layout', lists: ['recent'] },
+    { key: 'seriesLayout', button: 'series-layout', lists: ['series-list', 'series-books'] },
+  ] as const
+
+  /**
+   * Shows each page as its own setting says, as cover cards or as a list, and
+   * its switch offering the other. Switching only reshapes the page's lists.
+   */
+  function showLayouts() {
+    const settings = deps.getSettings()
+    for (const { key, button, lists } of LAYOUT_SWITCHES) {
+      const list = settings[key] === 'list'
+      const toggle = $(button)
+      toggle.replaceChildren(icon(list ? 'grid' : 'list'))
+      toggle.title = list ? 'Show covers' : 'Show as a list'
+      toggle.setAttribute('aria-label', toggle.title)
+      toggle.onclick = () => {
+        deps.changeSettings({ [key]: list ? 'covers' : 'list' })
+        showLayouts()
+      }
+      for (const id of lists) $(id).classList.toggle('list', list)
+    }
+  }
+
+  /** Draws the grid for the current search, status and sort, with the bar's counts. */
   function renderLibrary() {
     const settings = deps.getSettings()
     const query = $<HTMLInputElement>('library-search').value
@@ -348,25 +414,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     for (const b of matching) counts[statusOf(b)]++
     const chosen = settings.libraryStatus
     const shown = sortBooks(chosen === 'all' ? matching : matching.filter(b => statusOf(b) === chosen), settings.librarySort)
-    // The status switch: each choice with how many of the matching books it holds.
-    $('library-status').replaceChildren(
-      ...STATUSES.map(status =>
-        el(
-          'button',
-          {
-            type: 'button',
-            role: 'radio',
-            ariaChecked: String(status === settings.libraryStatus),
-            onclick: () => {
-              deps.changeSettings({ libraryStatus: status })
-              renderLibrary()
-            },
-          },
-          STATUS_LABELS[status],
-          el('span', { className: 'count', textContent: String(counts[status]) }),
-        ),
-      ),
-    )
+    showBar(counts)
     if (!libraryBooks.length) {
       showLibraryMessage(`The library is empty. Open a book (Ctrl+O) or put EPUB and FB2 files into ${libraryFolder}.`)
     } else {
@@ -663,7 +711,6 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     refreshCloudMarks: () => void refreshCloudMarks(),
     refreshRecent,
     render: renderLibrary,
-    showControls,
     chooseLibrary,
     bookCard,
     coverWithProgress,
