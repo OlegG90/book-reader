@@ -796,6 +796,8 @@ $('library-search').addEventListener('input', () => library.render())
 const libraryVisible = () => !reading.book && !$('library').hidden
 /** Alt-tabbing back rescans at most this often. */
 const FOCUS_RESCAN_MS = 15_000
+/** How often the phone looks for new books while the library shows. */
+const PHONE_RESCAN_MS = 30_000
 let lastFocusRescan = 0
 // Books may have been added, or read in another window, meanwhile.
 appWindow.onFocusChanged(({ payload: focused }) => {
@@ -832,9 +834,13 @@ setInterval(() => void reading.sync.push(), SYNC_EVERY_MS)
 // Going to the background (minimising, switching apps on the phone) hands the
 // position to the sync engine; coming back has the engine look at what it owes.
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) void reading.sync.push()
-  else void invoke('sync_wake').catch(console.error)
+  if (document.hidden) return void reading.sync.push()
+  void invoke('sync_wake').catch(console.error)
+  // The phone can't watch its library folder: books copied in meanwhile show up now.
+  if (isAndroid && libraryVisible()) void library.refreshScreen()
 })
+// ...and every so often while the library shows (Windows watches the folder instead).
+if (isAndroid) setInterval(() => !document.hidden && libraryVisible() && void library.refreshScreen(true), PHONE_RESCAN_MS)
 $('organize-cancel').addEventListener('click', closePanels)
 // The library window's pane: its items, its groups folding out, its width (desktop).
 for (const item of navItems) {
