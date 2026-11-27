@@ -1508,7 +1508,6 @@ button:hover {
   margin-left: var(--space-4);
 }
 
-/* The books deleted here that the clouds still hold, under their row. */
 /* Removed: one book a line, its actions at the end */
 .removed-books {
   max-width: 760px;
@@ -1846,7 +1845,12 @@ body.library-mode #topbar {
 
 /* ---- Phone library: the pane as a drawer from the left ---------------------------- */
 .android #start {
-  padding: var(--safe-top) 16px calc(24px + var(--safe-bottom));
+  padding: 0 16px calc(24px + var(--safe-bottom));
+}
+
+/* The page scrolls in #start, so the header can stay at its top. */
+.android #start-main {
+  overflow: visible;
 }
 
 .android #sidebar {
@@ -1882,13 +1886,17 @@ body.library-mode #topbar {
   min-height: 44px;
 }
 
-/* The drawer's button and the page's name, scrolling away with the page */
+/* The drawer's button and the page's name, staying at the top as the page scrolls */
 #phone-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 -8px 8px;
-  padding-top: 8px;
+  margin: 0 -16px 8px;
+  padding: calc(4px + var(--safe-top)) 8px 4px;
+  background: var(--bg);
 }
 
 #phone-header button {

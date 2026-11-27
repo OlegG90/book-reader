@@ -337,6 +337,7 @@ function openAppearance() {
   $('appearance').querySelector<HTMLElement>('button[aria-pressed="true"], button')?.focus()
 }
 
+/** Closes every panel over the window: menus, drawers, dialogs and the scrim. */
 function closePanels() {
   closeMoreMenu()
   $('scrim').hidden = true
@@ -425,11 +426,16 @@ const removedView = createRemovedView($('removed-view'), {
       text: 'They leave every cloud, and every other device moves them out of its library (to the Recycle Bin on Windows). Reading positions and bookmarks are kept.',
       confirm: 'Remove',
     }).then(ok => {
-      if (ok) void invoke('sync_remove_from_clouds', { fingerprints }).then(refreshCloudStatus, e => showError(undefined, e))
+      if (ok) void changeRemoved('sync_remove_from_clouds', fingerprints)
     })
   },
-  restore: fingerprints => void invoke('sync_restore_books', { fingerprints }).then(refreshCloudStatus, e => showError(undefined, e)),
+  restore: fingerprints => void changeRemoved('sync_restore_books', fingerprints),
 })
+
+/** Runs a Removed command on its books, then shows the list as it now stands. */
+function changeRemoved(command: 'sync_remove_from_clouds' | 'sync_restore_books', fingerprints: string[]) {
+  return invoke(command, { fingerprints }).then(refreshCloudStatus, e => showError(undefined, e))
+}
 /** Whether a cloud is connected and its module on: books then sync, and Removed shows. */
 const cloudReady = () => connectedClouds.some(id => !settings.disabledModules.includes(cloudModuleId(id)))
 const appearancePanel = createAppearancePanel($('appearance'), settings, changes => void changeSettings(changes), {
@@ -516,6 +522,7 @@ const navOpen = () => $('start').classList.contains('nav-open')
 
 /** Opens the phone's navigation drawer over the library, with the scrim behind it. */
 function openNav() {
+  closePopup()
   closePanels()
   $('scrim').hidden = false
   $('start').classList.add('nav-open')
@@ -834,7 +841,9 @@ for (const item of navItems) {
 for (const head of navHeads) head.addEventListener('click', () => foldNav(head, head.getAttribute('aria-expanded') === 'true'))
 // The phone: the pane is a drawer, opened by its button or a swipe to the right.
 $('nav-button').addEventListener('click', openNav)
-const swipeOn = () => isAndroid && settings.swipePanels && !reading.book && !library.isOrganizeOpen() && !library.isDetailsOpen()
+// An open drawer always closes with a swipe; it opens with one when the setting says so (and there is a library).
+const swipeOn = () =>
+  isAndroid && !reading.book && !library.isOrganizeOpen() && !library.isDetailsOpen() && (navOpen() || (settings.swipePanels && library.isReady()))
 // The drawer and the scrim lie outside the library's content, so the listener is the page's.
 onSwipe(document.body, swipeOn, direction => {
   if (direction === 'prev') openNav()

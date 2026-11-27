@@ -11,7 +11,11 @@ export interface PanelValues extends Appearance {
   offerLibrary: boolean
   /** Android: the volume keys turn pages. */
   volumeKeys: boolean
-  /** Android: a swipe to the right opens the navigation drawer. */
+  /**
+   * Android: a swipe to the right opens the navigation drawer. The key is
+   * older than the drawer (it once moved between panels), and is kept so
+   * stored settings carry over.
+   */
   swipePanels: boolean
   /** A sideways swipe turns pages (taps turn them either way). */
   swipePages: boolean
@@ -234,7 +238,6 @@ const SECTIONS = [
 ] as const
 
 export type SettingsSection = (typeof SECTIONS)[number]['id']
-
 
 /**
  * The settings page: a back button, the sections' names on the left as tabs,
