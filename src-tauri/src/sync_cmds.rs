@@ -700,10 +700,14 @@ pub(crate) fn sync_wake(engine: State<SyncEngine>) {
     engine.wake();
 }
 
-/// Sends the positions still owed, before a window closes: the engine's
-/// worker ends with the app, so the last window can't leave them to it.
+/// Sends the positions still owed, before the last window closes: the engine's
+/// worker ends with the app, so that window can't leave them to it. While
+/// other windows stay open the engine is still running and sends them itself.
 #[tauri::command(async)]
-pub(crate) fn sync_flush(store: State<Store>, books: State<LibraryBooks>) {
+pub(crate) fn sync_flush(window: Window, store: State<Store>, books: State<LibraryBooks>, windows: State<ReaderWindows>) {
+    if windows.others_than(window.label()) {
+        return;
+    }
     engine::run_positions(&store, &books, &transports(), now_ms());
 }
 

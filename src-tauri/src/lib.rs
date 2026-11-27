@@ -155,6 +155,8 @@ pub fn run() {
             #[cfg(desktop)]
             WindowEvent::CloseRequested { .. } => {
                 let _ = windows::remember_geometry(window);
+                // The window goes at once; its page still saves and syncs before it is destroyed.
+                let _ = window.hide();
             }
             #[cfg(desktop)]
             WindowEvent::Moved(_) | WindowEvent::Resized(_) => {

@@ -61,6 +61,11 @@ impl ReaderWindows {
             .map(|(label, _)| label.clone())
     }
 
+    /// Whether a window other than `label` is still open.
+    pub(crate) fn others_than(&self, label: &str) -> bool {
+        self.0.lock().unwrap().keys().any(|other| other != label)
+    }
+
     /// The library window's label: the window without a book.
     pub(crate) fn library_window(&self) -> Option<String> {
         let windows = self.0.lock().unwrap();
@@ -268,7 +273,7 @@ pub(crate) fn remember_geometry(window: &Window) -> tauri::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::theme_script;
+    use super::{theme_script, ReaderWindows};
 
     #[test]
     fn theme_script_uses_known_themes() {
@@ -282,5 +287,14 @@ mod tests {
             assert!(script.contains("prefers-color-scheme"), "{script}");
             assert!(!script.contains("alert"), "{script}");
         }
+    }
+
+    #[test]
+    fn others_than_sees_only_other_windows() {
+        let windows = ReaderWindows::default();
+        windows.insert("reader-1", Default::default());
+        assert!(!windows.others_than("reader-1"));
+        windows.insert("reader-2", Default::default());
+        assert!(windows.others_than("reader-1"));
     }
 }

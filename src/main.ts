@@ -967,7 +967,8 @@ appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
 })
 // reading.flush never throws, so a failed save cannot keep the window open.
 appWindow.onCloseRequested(async () => {
-  // The engine's worker ends with the app: the last position goes now, 3 s at most.
+  // The backend has already hidden the window. The engine's worker ends with the
+  // app, so closing the last window sends the last position now, 3 s at most.
   const sendLast = reading.sync.push().then(() => invoke('sync_flush'))
   const lastPush = Promise.race([sendLast.catch(console.warn), new Promise(done => setTimeout(done, SYNC_ON_CLOSE_MS))])
   await Promise.all([reading.flush(), flushSettings(), lastPush])
