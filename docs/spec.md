@@ -71,7 +71,7 @@ Inherited from Simple Reader unless noted:
 - The screen stays on while a book is open.
 - Orientation follows the system; no orientation lock in the first version.
 - One window: a book opens in place of the library, and the library comes back in its place (the desktop keeps a window per book).
-- Back, one step at a time: closes a footnote or a panel (contents, Aa, the ⋯ menu, settings, Organize), then returns from the book to the library; in the library it goes up a catalog folder, then from the catalogs or the settings to the books; at the books it sends the app to the background, as Android apps do.
+- Back, one step at a time: closes a footnote or a panel (contents, Aa, the ⋯ menu, settings, Organize), then returns from the book to the library (also while the book is still opening: a large one takes a few seconds, and it doesn't show up over the library afterwards); in the library it goes up a catalog folder, then from the catalogs or the settings to the books; at the books it sends the app to the background, as Android apps do.
 
 ## Library
 

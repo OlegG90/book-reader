@@ -56,6 +56,8 @@ export interface ReadingView {
   readonly book: BookView | null
   readonly fingerprint: string
   readonly noSave: boolean
+  /** A book is on its way: the library is gone, but the book isn't shown yet. */
+  readonly opening: boolean
   /** Opens the window's book at its saved position. */
   open(): Promise<void>
   /** Writes an unsaved position, if any. Never throws. */
@@ -76,6 +78,10 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
   let tocView: { element: HTMLElement; setCurrentHref(href: string): void } | null = null
   /** The book is opening: its relocates restore the saved position, they don't move it. */
   let restoring = false
+  /** How many opens have started: one overtaken while it loads (Back, another book) drops its book. */
+  let opens = 0
+  /** A book is loading (a large one takes seconds): no `book` yet, and the library is hidden. */
+  let opening = false
   let bookmarks: Bookmark[] = []
 
   let pendingSave: PendingSave | null = null
@@ -112,18 +118,23 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
 
   /** Opens the window's book at its saved position. */
   async function open() {
+    const turn = ++opens
     await flushSave()
     close()
     let info: BookInfo | null = null
+    let view: BookView
     try {
+      opening = true
       info = await invoke<BookInfo | null>('current_book')
+      if (turn !== opens) return
       if (!info) return await deps.showLibraryScreen()
       fingerprint = info.fingerprint
       noSave = info.noSave
       restoring = true
       const source = await loadBook(info)
       await deps.settingsReady
-      book = await BookView.open(
+      if (turn !== opens) return
+      view = await BookView.open(
         $('stage'),
         source,
         {
@@ -145,12 +156,17 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
         },
       )
     } catch (e) {
+      if (turn !== opens) return
       deps.showError(info?.fileName, e)
       // The library, Ctrl+O and the recent books stay one step away.
       return deps.showLibraryScreen()
     } finally {
-      restoring = false
+      // A later open owns these now.
+      if (turn === opens) restoring = opening = false
     }
+    // Overtaken while it loaded: the later open shows its own book, or the library.
+    if (turn !== opens) return view.destroy()
+    book = view
     book.setSwipe(deps.getSettings().swipePages)
     const title = book.title || info.fileName
     deps.setTitle(title)
@@ -314,6 +330,9 @@ export function createReadingView(deps: ReadingDeps): ReadingView {
     },
     get noSave() {
       return noSave
+    },
+    get opening() {
+      return opening
     },
     open,
     close,
