@@ -156,6 +156,7 @@ pub fn run() {
             WindowEvent::CloseRequested { .. } => {
                 let _ = windows::remember_geometry(window);
                 // The window goes at once; its page still saves and syncs before it is destroyed.
+                window.state::<windows::ReaderWindows>().mark_closing(window.label());
                 let _ = window.hide();
             }
             #[cfg(desktop)]
