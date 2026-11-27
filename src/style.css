@@ -1933,9 +1933,21 @@ body.library-mode #topbar {
   height: 16px;
 }
 
-/* Phone: the search on its own line, the buttons under it */
+/* Phone: the search and Add book on one line, the buttons under it; the sort
+   shows only its icon (its menu names the choice), so they always fit. */
 .android .library-bar input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.android .library-tools {
+  order: 1;
   width: 100%;
+}
+
+.android #library-sort .label {
+  display: none;
 }
 
 /* A choice in a menu: the chosen one checked, a count at the end */
@@ -1953,7 +1965,8 @@ body.library-mode #topbar {
 }
 
 .popup-menu .detail {
-  margin-inline-start: 16px;
+  margin-inline-start: auto;
+  padding-inline-start: 16px;
   color: var(--muted);
 }
 

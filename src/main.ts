@@ -59,7 +59,7 @@ const settingsReady = invoke<Record<string, unknown>>('get_settings')
     applyTheme()
     showSettings()
     applyCapabilities()
-    library.showControls()
+    library.render()
   })
 const library = createLibraryView({
   getSettings: () => settings,
@@ -593,8 +593,6 @@ function applySettings(changes: Partial<Settings>) {
   if ('volumeKeys' in changes) setReading(!!open, settings.volumeKeys)
   if ('swipePages' in changes) open?.setSwipe(settings.swipePages)
   if ('historyLength' in changes && !open) void library.refreshRecent()
-  // Another window changed how the library shows.
-  if (['libraryStatus', 'librarySort', 'libraryLayout'].some(k => k in changes) && !open) library.render()
   if ('uiFont' in changes) applyTheme()
   applyCapabilities()
 }
@@ -957,6 +955,8 @@ appWindow.listen('sync-states-changed', () => library.refreshCloudMarks())
 appWindow.listen<Record<string, unknown>>('settings-changed', ({ payload }) => {
   const valid = readSettings({ ...settings, ...payload })
   applySettings(Object.fromEntries(Object.keys(payload).map(k => [k, valid[k as keyof Settings]])))
+  // How the library shows: this window's own choices redraw it as they are made.
+  if (['libraryStatus', 'librarySort', 'libraryLayout'].some(k => k in payload) && !reading.book) library.render()
 })
 // reading.flush never throws, so a failed save cannot keep the window open.
 appWindow.onCloseRequested(async () => {

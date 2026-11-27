@@ -106,7 +106,6 @@ export interface LibraryView {
   refreshCloudMarks(): void
   refreshRecent(): Promise<void>
   render(): void
-  showControls(): void
   chooseLibrary(pick: boolean): Promise<void>
   bookCard(book: LibraryBook): HTMLElement
   coverWithProgress(title: string, coverKey: string | null, fraction: number | null): HTMLElement
@@ -334,11 +333,6 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     $('library-message').hidden = !text
   }
 
-  /** Puts the saved sort into the library's controls and draws the grid. */
-  function showControls() {
-    renderLibrary()
-  }
-
   /** Where a menu opened from a button in the bar shows: just under it. */
   function under(button: HTMLElement) {
     const rect = button.getBoundingClientRect()
@@ -368,7 +362,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
         STATUSES.map(s => ({ label: STATUS_LABELS[s], detail: String(counts[s]), checked: s === settings.libraryStatus, action: () => choose({ libraryStatus: s }) })),
       )
     const sort = $('library-sort')
-    sort.replaceChildren(icon('sort'), el('span', { textContent: SORT_LABELS[settings.librarySort] }))
+    sort.replaceChildren(icon('sort'), el('span', { className: 'label', textContent: SORT_LABELS[settings.librarySort] }))
     sort.onclick = () =>
       showMenu(
         under(sort),
@@ -690,7 +684,6 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     refreshCloudMarks: () => void refreshCloudMarks(),
     refreshRecent,
     render: renderLibrary,
-    showControls,
     chooseLibrary,
     bookCard,
     coverWithProgress,
