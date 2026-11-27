@@ -22,7 +22,7 @@ import { icon } from './icons'
 const percent = (fraction: number) => `${Math.max(1, Math.round(fraction * 100))}%`
 
 /** What the library window shows: the reading history, the books, the catalogs, or a settings section. */
-export type View = 'recent' | 'library' | 'series' | 'catalogs' | `settings:${SettingsSection}`
+export type View = 'recent' | 'books' | 'series' | 'removed' | 'catalogs' | `settings:${SettingsSection}`
 
 interface RecentBook {
   key: string
@@ -168,7 +168,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
   }
 
   /** Where the library starts, and Esc / Back lead: the history if there is one, else the books. */
-  const homeView = (): View => (hasRecent ? 'recent' : 'library')
+  const homeView = (): View => (hasRecent ? 'recent' : 'books')
 
   /**
    * Esc and Back in the library: up a catalog folder; from the catalogs' start
@@ -179,7 +179,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     const view = deps.getView()
     if (view === 'catalogs' && deps.backInCatalogs()) return true
     if (view === 'series' && deps.backInSeries()) return true
-    if (view === 'recent' || view === 'library') return false
+    if (view === 'recent' || view === 'books') return false
     deps.showView(homeView())
     return true
   }
@@ -193,7 +193,7 @@ export function createLibraryView(deps: LibraryDeps): LibraryView {
     const info = await loadLibraryInfo()
     libraryReady = !!info.folder
     if (!info.folder) {
-      deps.showView(deps.getView() ?? 'library')
+      deps.showView(deps.getView() ?? 'books')
       $('setup-suggested').textContent = info.suggested
       $('setup-default').focus()
       return

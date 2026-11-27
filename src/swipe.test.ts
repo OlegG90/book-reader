@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { neighbour, onSwipe, ownsSideways, swipeDirection } from './swipe'
+import { onSwipe, ownsSideways, swipeDirection } from './swipe'
 
 const at = (x: number, y = 300, time = 0) => ({ x, y, time })
 
@@ -50,15 +50,5 @@ describe('onSwipe', () => {
     text.dispatchEvent(touch('pointerdown', 300, 200))
     text.dispatchEvent(touch('pointerup', 150, 300))
     expect(seen).toEqual(['next'])
-  })
-})
-
-describe('neighbour', () => {
-  it('steps along the order without wrapping', () => {
-    const order = ['recent', 'library', 'series'] as const
-    expect(neighbour(order, 'library', 'next')).toBe('series')
-    expect(neighbour(order, 'library', 'prev')).toBe('recent')
-    expect(neighbour(order, 'series', 'next')).toBeNull()
-    expect(neighbour(order, 'recent', 'prev')).toBeNull()
   })
 })

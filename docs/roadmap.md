@@ -44,5 +44,5 @@ Full-text search in a book fits after stage 4.
 - **Organize and chains of renames:** a book whose template path is occupied by another book that the same run moves away gets ` (2)`; running Organize again fixes it. Ordering the moves would avoid the extra step.
 
 - **Bookmark sync:** KOSync carries only the position; syncing bookmarks needs another mechanism.
-- **Library sync (stage 12):** where the Removed books list lives (the library's status switch or Settings › System); whether a removal coming from another device shows a one-line notice first; above how many books (or MB) the first download asks.
+- **Library sync (stage 12):** whether a removal coming from another device shows a one-line notice first; above how many books (or MB) the first download asks.
 - **Phase "e" details:** which fields, which server, how fragile the CWA web endpoints are.

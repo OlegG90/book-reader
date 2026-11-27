@@ -646,6 +646,30 @@ pub(crate) fn sync_removed_books(store: State<Store>) -> Vec<MissingBook> {
         .collect()
 }
 
+/// Brings books from Removed books back into this library: they are no
+/// longer removed here, and their files come down from the clouds (on Wi-Fi,
+/// if the reader asked for that). The windows hear `sync-books-arrived` as
+/// they land.
+#[tauri::command(async)]
+pub(crate) fn sync_restore_books(store: State<Store>, engine: State<SyncEngine>, fingerprints: Vec<String>) -> CmdResult<()> {
+    restore_books(&store, &fingerprints)?;
+    engine.wake();
+    Ok(())
+}
+
+/// Takes books off Removed books and queues their downloads, in one write so
+/// a reconcile in between can't see one without the other.
+fn restore_books(store: &Store, fingerprints: &[String]) -> CmdResult<()> {
+    store
+        .update(|s| {
+            for fingerprint in fingerprints {
+                s.removed_here.remove(fingerprint);
+                engine::queue(&mut s.outbox, Job::Download { fingerprint: fingerprint.clone() });
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
 /// Queues downloads of cloud books the library lacks; the windows hear
 /// `sync-books-arrived` as they land. Held on metered networks until Wi-Fi is back.
 #[tauri::command(async)]
@@ -1325,6 +1349,22 @@ mod tests {
         // A device whose first scan came after the removal keeps its old copy.
         let (_, moved_out) = super::engine::sort_library(&library, &per_cloud, &latest, 60);
         assert!(moved_out.is_empty());
+    }
+
+    #[test]
+    fn a_restored_book_leaves_removed_books_and_comes_down_again() {
+        let cloud = MemCloud::new(false);
+        let via = CloudTransport(&cloud);
+        let (_dir, store, books, root) = library_with(&[("Book.epub", "bytes")]);
+        let fp = books.snapshot(&store, &library_root(&store).unwrap()).into_iter().next().unwrap().fingerprint;
+        assert!(push_book_to_cloud(&store, &books, &[&via], &fp).unwrap());
+        std::fs::remove_file(root.join("Book.epub")).unwrap();
+        store.update(|s| { s.removed_here.insert(fp.clone()); }).unwrap();
+        super::restore_books(&store, &[fp.clone()]).unwrap();
+        assert!(store.read(|s| !s.removed_here.contains(&fp)), "no longer removed here");
+        super::engine::run_due(&store, &books, &[&via], 0);
+        assert!(store.read(|s| s.outbox.is_empty()));
+        assert!(root.join("Book.epub").exists(), "the file is back in the library");
     }
 
     #[test]

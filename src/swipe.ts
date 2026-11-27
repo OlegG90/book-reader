@@ -11,7 +11,7 @@ export interface TouchPoint {
   time: number
 }
 
-/** Which way a swipe goes: to the next panel (the finger moves left) or the previous one. */
+/** Which way a swipe goes: `next` when the finger moves left, `prev` when it moves right. */
 export type SwipeDirection = 'next' | 'prev'
 
 /**
@@ -55,11 +55,4 @@ export function onSwipe(target: HTMLElement, enabled: () => boolean, swiped: (di
     if (direction) swiped(direction)
   })
   target.addEventListener('pointercancel', () => (start = null))
-}
-
-/** The item after or before `current` in `order`; `null` at either end (no wrap-around). */
-export function neighbour<T>(order: readonly T[], current: T, direction: SwipeDirection): T | null {
-  const i = order.indexOf(current)
-  if (i < 0) return null
-  return order[direction === 'next' ? i + 1 : i - 1] ?? null
 }

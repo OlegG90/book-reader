@@ -39,6 +39,8 @@ High-fidelity for layout, hierarchy and tokens. Covers are typographic placehold
 
 Android Library/Catalogs tabs become a bottom navigation: Library · Catalogs · Add book (44 px+ targets, safe-area padding kept).
 
+Later (issue #122, 11.2026) the library's navigation became one tree on both platforms: **Library** folding out to Continue reading · Books · Series · Removed, then Catalogs, then **Settings** folding out to its sections. On the desktop it is the pane; on the phone the same pane is a drawer from the left (☰ or a swipe to the right), and the bottom navigation is gone.
+
 ## Screens
 **D1 Library (1280×800).** Header row: padding 14/48 px, hairline bottom; brand (Cormorant 22/600), tabs (14 px; active = accent text + 1 px accent underline), search 300 px, "Open file…" (outlined), settings icon button 36 px. Content padding 32/48 px, gaps 28 px. Grid: 6 columns, gap 28×24.
 **D2 Reader + Aa.** Topbar padding 10/16. Text column 640 px centred, 19 px / 1.5, justified. Bottom row grid `260px 1fr 260px`, 13 px tabular figures. Popover 340 px, top 58 px, right 16 px, padding 20, gap 18, radius 7, shadow-lg.
