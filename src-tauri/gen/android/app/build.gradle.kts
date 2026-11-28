@@ -1,17 +1,19 @@
-import java.util.Properties
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("rust")
 }
 
-val tauriProperties = Properties().apply {
-    val propFile = file("tauri.properties")
-    if (propFile.exists()) {
-        propFile.inputStream().use { load(it) }
-    }
-}
+// The app's version, which lives only in src-tauri/Cargo.toml. The Tauri CLI
+// fills tauri.properties only from a version in tauri.conf.json (there is
+// none), so the APK reads Cargo.toml itself, and every update gets a higher
+// version code: major * 1000000 + minor * 1000 + patch, as Tauri makes it.
+val appVersion: String = Regex("""(?m)^version\s*=\s*"([^"]+)"""")
+    .find(rootProject.file("../../Cargo.toml").readText())
+    ?.groupValues?.get(1)
+    ?: error("No version in src-tauri/Cargo.toml")
+val appVersionCode: Int = appVersion.substringBefore('-').split('.').map { it.toInt() }
+    .let { (major, minor, patch) -> major * 1000000 + minor * 1000 + patch }
 
 android {
     compileSdk = 36
@@ -23,8 +25,8 @@ android {
         applicationId = "com.olegg90.bookreader"
         minSdk = 30
         targetSdk = 36
-        versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
-        versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+        versionCode = appVersionCode
+        versionName = appVersion
     }
     // The release key (the same for every version, so updates install over the
     // previous one) comes from CI: ANDROID_KEYSTORE_FILE, alias "book-reader",
